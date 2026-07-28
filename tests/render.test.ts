@@ -44,6 +44,13 @@ describe("cleanupDom", () => {
     expect(el.textContent).toContain("☑");
     expect(el.textContent).toContain("☐");
   });
+  it("unwraps rendered image embeds (preserves img)", () => {
+    const el = div('<span class="internal-embed image-embed is-loaded" src="pic.png"><img src="app://pic.png" alt="pic"></span>');
+    cleanupDom(el);
+    expect(el.querySelector("span.internal-embed")).toBeNull();
+    expect(el.querySelector("img")).not.toBeNull();
+    expect(el.textContent).not.toContain("[embedded content omitted");
+  });
   it("replaces unrendered embeds with an omission marker", () => {
     const el = div('<span class="internal-embed" src="drawing.excalidraw">x</span>');
     cleanupDom(el);
@@ -89,11 +96,25 @@ describe("rewriteImages", () => {
     expect(imgs[0].getAttribute("src")).toBe("../images/img_001.png");
     expect(imgs[1].getAttribute("src")).toBe("https://x.com/y.jpg");
   });
+  it("tolerates malformed image URIs with literal percent", () => {
+    const base = "/Users/pan/vault";
+    const el = div(
+      `<img src="app://abc123${base}/100%off.png">`
+    );
+    const found = rewriteImages(el, base);
+    // Malformed URI is skipped: src unchanged, not in found list.
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe(`app://abc123${base}/100%off.png`);
+  });
 });
 
 describe("serializeBody", () => {
-  it("emits self-closed XHTML", () => {
+  it("emits self-closed XHTML with single xmlns", () => {
     const el = div("<p>a<br>b</p>");
-    expect(serializeBody(el)).toContain("<br/>");
+    const output = serializeBody(el);
+    expect(output).toContain("<br/>");
+    // Count xmlns occurrences: should be exactly one.
+    const xhtmlNsCount = output.split('xmlns="http://www.w3.org/1999/xhtml"').length - 1;
+    expect(xhtmlNsCount).toBe(1);
   });
 });

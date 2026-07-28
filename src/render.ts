@@ -20,11 +20,22 @@ export function cleanupDom(root: HTMLElement): void {
     input.replaceWith(document.createTextNode(glyph));
   });
   root.querySelectorAll("span.internal-embed, div.internal-embed").forEach((embed) => {
-    const name = embed.getAttribute("src") ?? "unknown";
-    const p = document.createElement("p");
-    p.className = "omitted";
-    p.textContent = `[embedded content omitted: ${name}]`;
-    embed.replaceWith(p);
+    // Check if this embed has rendered content (img, video, or markdown-embed-content).
+    const hasRenderedContent = embed.querySelector("img, video, .markdown-embed-content") !== null;
+    if (hasRenderedContent) {
+      // Unwrap: replace the embed container with its child nodes.
+      Array.from(embed.childNodes).forEach((child) => {
+        embed.parentNode?.insertBefore(child, embed);
+      });
+      embed.remove();
+    } else {
+      // No rendered content: replace with omission marker.
+      const name = embed.getAttribute("src") ?? "unknown";
+      const p = document.createElement("p");
+      p.className = "omitted";
+      p.textContent = `[embedded content omitted: ${name}]`;
+      embed.replaceWith(p);
+    }
   });
 }
 
@@ -65,7 +76,13 @@ export function rewriteImages(
     const src = img.getAttribute("src") ?? "";
     if (!src.startsWith("app://")) return; // remote or already-rewritten images pass through
     const noQuery = src.split("?")[0];
-    const decoded = decodeURIComponent(noQuery);
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(noQuery);
+    } catch {
+      // Malformed URI (e.g., literal % in filename): skip this image.
+      return;
+    }
     const at = decoded.indexOf(basePath);
     if (at === -1) return;
     const vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
@@ -81,6 +98,8 @@ export function rewriteImages(
 
 export function serializeBody(root: HTMLElement): string {
   const s = new XMLSerializer();
-  return Array.from(root.childNodes).map((n) => s.serializeToString(n)).join("\n")
-    .replace(/ \/>/g, "/>");  // normalize <br /> to <br/>
+  // Serialize the root element once (including xmlns) to avoid redundant xmlns on every child.
+  const serialized = s.serializeToString(root);
+  // Normalize <br /> to <br/>.
+  return serialized.replace(/ \/>/g, "/>");
 }
