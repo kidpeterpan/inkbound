@@ -3,7 +3,7 @@ import {
 } from "obsidian";
 import { promises as fs } from "fs";
 import { homedir } from "os";
-import { EpubBuilder, chapterHref } from "./epub";
+import { EpubBuilder, chapterHref, escapeXml } from "./epub";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
@@ -131,11 +131,13 @@ export default class EpubExportPlugin extends Plugin {
 
       const hrefByPath = new Map(job.files.map((f, i) => [f.path, chapterHref(i)]));
       const builder = new EpubBuilder(job.meta);
-      // Running total of images found (not just successfully-added ones) so
-      // each chapter's rewriteImages call starts numbering where the
-      // previous chapter left off — collisions must be measured against
-      // everything rewriteImages already burned into HTML hrefs, including
-      // any that later turn out to be missing from the vault (see below).
+      // Running total of images rewriteImages has STAMPED into chapter HTML
+      // so far — not the count that later loaded as assets. The <img> hrefs
+      // are burned into r.xhtmlBody the moment renderUnitToChapter returns,
+      // before any vault read is attempted, so the next chapter's startIndex
+      // must be measured against what was stamped, not what loaded — else a
+      // missing/failed image would let a later chapter reissue an href
+      // that's already sitting in an earlier chapter's HTML.
       let imageCount = 0;
 
       for (const file of job.files) {
@@ -143,28 +145,39 @@ export default class EpubExportPlugin extends Plugin {
           const md = await this.app.vault.cachedRead(file);
           const r = await renderUnitToChapter(this.app, this, md, file.path, hrefByPath, basePath, imageCount);
           warnings.push(...r.warnings);
+          // Bump immediately, before the asset loop below: these numbers are
+          // already burned into r.xhtmlBody regardless of what happens next.
+          imageCount += r.images.length;
           for (const img of r.images) {
-            const af = this.app.vault.getAbstractFileByPath(img.vaultPath);
-            if (af instanceof TFile) {
+            try {
+              const af = this.app.vault.getAbstractFileByPath(img.vaultPath);
+              if (!(af instanceof TFile)) throw new Error("not found in vault");
               const bytes = new Uint8Array(await this.app.vault.readBinary(af));
               const ext = img.newHref.split(".").pop()!;
               const mediaType = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
                 : ext === "svg" ? "image/svg+xml" : ext === "gif" ? "image/gif"
                 : ext === "webp" ? "image/webp" : "image/png";
               builder.addAsset(img.newHref.replace(/^\.\.\//, ""), bytes, mediaType);
-            } else {
+            } catch {
+              // Missing image: export continues (spec's error table) — this
+              // one image's href stays dangling in the chapter HTML, but the
+              // chapter itself is still added below.
               warnings.push(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
             }
           }
-          // Advance by everything rewriteImages numbered this chapter, found
-          // or not — a per-successful-image increment would under-count
-          // whenever a chapter has a missing image, letting the next
-          // chapter's numbering collide with an href already burned into
-          // this chapter's HTML.
-          imageCount += r.images.length;
           builder.addChapter(this.titleFor(file), r.xhtmlBody);
         } catch (e) {
           warnings.push(`chapter skipped: ${file.path} — ${String(e)}`);
+          // Placeholder keeps builder's chapter count == job.files.length, so
+          // hrefByPath (position-derived from job.files) stays in sync with
+          // EpubBuilder's own internal numbering (which only advances on
+          // addChapter). Without this, a skipped chapter shifts every later
+          // chapter's real href back by one, silently retargeting any link
+          // that pointed at or past the failed chapter.
+          builder.addChapter(
+            this.titleFor(file),
+            `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`
+          );
         }
       }
 
