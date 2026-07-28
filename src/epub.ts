@@ -130,5 +130,12 @@ ${ch.body}
 
 function cryptoRandomUuid(): string {
   const g = globalThis as { crypto?: { randomUUID?: () => string } };
-  return g.crypto?.randomUUID ? g.crypto.randomUUID() : `${Date.now()}-epub-export`;
+  if (g.crypto?.randomUUID) return g.crypto.randomUUID();
+
+  // RFC-4122 v4 UUID fallback: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
