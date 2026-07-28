@@ -97,9 +97,17 @@ export function rewriteImages(
 }
 
 export function serializeBody(root: HTMLElement): string {
+  // Guard: empty root returns empty string.
+  if (root.childNodes.length === 0) return "";
+
   const s = new XMLSerializer();
-  // Serialize the root element once (including xmlns) to avoid redundant xmlns on every child.
-  const serialized = s.serializeToString(root);
+  // Serialize the root element once (includes xmlns handling).
+  const whole = s.serializeToString(root);
+
+  // Strip root's opening and closing tags positionally (not regex).
+  // First ">" ends root's start tag, last "</" starts root's close tag.
+  const inner = whole.slice(whole.indexOf(">") + 1, whole.lastIndexOf("</"));
+
   // Normalize <br /> to <br/>.
-  return serialized.replace(/ \/>/g, "/>");
+  return inner.replace(/ \/>/g, "/>");
 }

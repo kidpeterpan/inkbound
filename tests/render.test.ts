@@ -109,12 +109,16 @@ describe("rewriteImages", () => {
 });
 
 describe("serializeBody", () => {
-  it("emits self-closed XHTML with single xmlns", () => {
+  it("returns bare children fragment (no wrapper, no xmlns)", () => {
     const el = div("<p>a<br>b</p>");
-    const output = serializeBody(el);
-    expect(output).toContain("<br/>");
-    // Count xmlns occurrences: should be exactly one.
-    const xhtmlNsCount = output.split('xmlns="http://www.w3.org/1999/xhtml"').length - 1;
-    expect(xhtmlNsCount).toBe(1);
+    expect(serializeBody(el)).toBe("<p>a<br/>b</p>");
+  });
+  it("serializes multiple children", () => {
+    const el = div("<h1>t</h1><p>x</p>");
+    expect(serializeBody(el)).toBe("<h1>t</h1><p>x</p>");
+  });
+  it("returns empty string for empty root", () => {
+    const el = div("");
+    expect(serializeBody(el)).toBe("");
   });
 });
