@@ -114,8 +114,13 @@ export default class EpubExportPlugin extends Plugin {
           const isPng = (res.headers["content-type"] ?? "").includes("png");
           meta.coverBytes = new Uint8Array(res.arrayBuffer);
           meta.coverExt = isPng ? "png" : "jpg";
+        } else {
+          console.warn("[epub-export] cover download failed", fm.coverUrl, res.status);
         }
-      } catch { /* cover failure degrades to coverless export (spec) */ }
+      } catch (e) {
+        // cover failure degrades to coverless export (spec)
+        console.warn("[epub-export] cover download failed", fm.coverUrl, e);
+      }
     }
     await this.runExport({ meta, files });
   }
@@ -124,8 +129,9 @@ export default class EpubExportPlugin extends Plugin {
 
   async runExport(job: Job) {
     const warnings: string[] = [];
+    let notice: Notice | null = null;
     try {
-      const notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
+      notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
       const adapter = this.app.vault.adapter;
       const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
 
@@ -185,11 +191,11 @@ export default class EpubExportPlugin extends Plugin {
       const outPath = resolveOutputPath(this.settings.outputFolder, slugify(job.meta.title), homedir());
       await fs.mkdir(outPath.slice(0, outPath.lastIndexOf("/")), { recursive: true });
       await fs.writeFile(outPath, bytes); // save ALWAYS precedes push (spec)
-      notice.hide();
 
       let pushMsg = "";
       if (this.settings.pushAfterExport && this.settings.booxUrl) {
         try {
+          notice.setMessage("Pushing to Boox…");
           await new BooxDropClient(this.settings.booxUrl, obsidianHttp)
             .push(outPath.split("/").pop()!, bytes);
           pushMsg = " and pushed to Boox ✓";
@@ -203,6 +209,8 @@ export default class EpubExportPlugin extends Plugin {
     } catch (e) {
       console.error("[epub-export] export failed", e);
       new Notice(`EPUB export failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      notice?.hide();
     }
   }
 

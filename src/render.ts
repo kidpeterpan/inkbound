@@ -19,6 +19,15 @@ export function cleanupDom(root: HTMLElement): void {
     const glyph = (input as HTMLInputElement).checked ? "☑ " : "☐ ";
     input.replaceWith(document.createTextNode(glyph));
   });
+  root.querySelectorAll("a.tag").forEach((a) => {
+    // Obsidian renders inline #tags as <a class="tag" href="#tagname" ...>
+    // with no data-href, so rewriteLinks's internal-link/data-href check
+    // never sees them — they'd otherwise pass through as dead fragment
+    // links in the EPUB (epubcheck RSC-012; dead taps on e-ink readers).
+    const span = document.createElement("span");
+    span.textContent = a.textContent ?? "";
+    a.replaceWith(span);
+  });
   root.querySelectorAll("span.internal-embed, div.internal-embed").forEach((embed) => {
     // Check if this embed has rendered content (img, video, or markdown-embed-content).
     const hasRenderedContent = embed.querySelector("img, video, .markdown-embed-content") !== null;

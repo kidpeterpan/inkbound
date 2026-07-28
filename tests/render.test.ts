@@ -57,6 +57,12 @@ describe("cleanupDom", () => {
     expect(el.querySelector("span.internal-embed")).toBeNull();
     expect(el.textContent).toContain("[embedded content omitted: drawing.excalidraw]");
   });
+  it("degrades tag anchors to plain text (no dead #fragment links)", () => {
+    const el = div('<p>text <a class="tag" href="#book" target="_blank" rel="noopener">#book</a></p>');
+    cleanupDom(el);
+    expect(el.querySelector("a")).toBeNull();
+    expect(el.textContent).toContain("#book");
+  });
 });
 
 describe("rewriteLinks", () => {
