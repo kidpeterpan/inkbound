@@ -106,6 +106,12 @@ describe("rewriteImages", () => {
     expect(found).toEqual([]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe(`app://abc123${base}/100%off.png`);
   });
+  it("offsets numbering with startIndex to avoid collisions across chapters", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="app://abc123${base}/pic.png">`);
+    const found = rewriteImages(el, base, 2);
+    expect(found[0].newHref).toBe("../images/img_003.png");
+  });
 });
 
 describe("serializeBody", () => {

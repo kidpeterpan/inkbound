@@ -69,7 +69,8 @@ export function rewriteLinks(
 
 export function rewriteImages(
   root: HTMLElement,
-  basePath: string
+  basePath: string,
+  startIndex = 0
 ): { vaultPath: string; newHref: string }[] {
   const found: { vaultPath: string; newHref: string }[] = [];
   root.querySelectorAll("img").forEach((img) => {
@@ -88,7 +89,9 @@ export function rewriteImages(
     const vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
     const extMatch = /\.(\w+)$/.exec(vaultPath);
     const ext = extMatch ? extMatch[1].toLowerCase() : "png";
-    const newHref = `../images/img_${String(found.length + 1).padStart(3, "0")}.${ext}`;
+    // startIndex offsets numbering so images from different chapters in the
+    // same export never collide (each call only sees one chapter's <img>s).
+    const newHref = `../images/img_${String(startIndex + found.length + 1).padStart(3, "0")}.${ext}`;
     found.push({ vaultPath, newHref });
     img.setAttribute("src", newHref);
     if (!img.getAttribute("alt")) img.setAttribute("alt", "");
