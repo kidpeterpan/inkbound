@@ -1,0 +1,9 @@
+{
+  "id": "epub-export",
+  "name": "EPUB Export",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Export notes, book folders, or linked-note bundles as EPUB and push them to a Boox device via BooxDrop.",
+  "author": "Pan",
+  "isDesktopOnly": true
+}
