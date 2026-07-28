@@ -39,5 +39,6 @@ describe("bfsLinked", () => {
   });
   it("depth 0 or missing start yields just the start", () => {
     expect(bfsLinked(links, "z.md", 3)).toEqual(["z.md"]);
+    expect(bfsLinked(links, "a.md", 0)).toEqual(["a.md"]);
   });
 });

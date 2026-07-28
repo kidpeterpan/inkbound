@@ -4,7 +4,7 @@ export function orderChapters(basenames: string[]): string[] {
   const numbered = basenames.filter((b) => NN.test(b));
   const rest = basenames.filter((b) => !NN.test(b));
   numbered.sort((a, b) => parseInt(NN.exec(a)![1], 10) - parseInt(NN.exec(b)![1], 10));
-  rest.sort((a, b) => a.localeCompare(b));
+  rest.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   return [...numbered, ...rest];
 }
 
@@ -35,7 +35,7 @@ export function bfsLinked(
         next.push(target);
       }
     }
-    next.sort((a, b) => a.localeCompare(b));
+    next.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     out.push(...next);
     frontier = next;
   }
