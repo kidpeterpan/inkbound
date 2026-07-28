@@ -7,7 +7,7 @@
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "deploy": "npm run build && bash scripts/deploy.sh",
-    "epubcheck": "tsx scripts/build-sample.ts && (command -v epubcheck >/dev/null && epubcheck sample.epub || echo 'epubcheck not installed — brew install epubcheck to validate')"
+    "epubcheck": "tsx scripts/build-sample.ts && if command -v epubcheck >/dev/null; then epubcheck sample.epub; else echo 'epubcheck not installed — brew install epubcheck to validate'; fi"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
