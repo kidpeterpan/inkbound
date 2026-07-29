@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
-import { TFile, TFolder, NOTICES, setRequestUrlImpl, resetRequestUrlImpl } from "./fixtures/obsidian-stub";
+import { TFile, TFolder, Menu, NOTICES, setRequestUrlImpl, resetRequestUrlImpl } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
+import type { EpubExportSettings } from "../src/settings";
 
 // ── fixture ─────────────────────────────────────────────────────────────
 //
@@ -23,21 +24,38 @@ import { createVaultStub } from "./fixtures/vault-stub";
 let outDir: string;
 let vaultDirs: string[];
 let warnings: string[];
+let errors: string[];
 let originalWarn: typeof console.warn;
+let originalError: typeof console.error;
 
 beforeEach(async () => {
   outDir = await fs.mkdtemp(join(tmpdir(), "epub-export-out-"));
   vaultDirs = [];
   NOTICES.length = 0;
   warnings = [];
+  errors = [];
   originalWarn = console.warn;
+  originalError = console.error;
   console.warn = (...args: unknown[]) => {
     warnings.push(args.map(String).join(" "));
   };
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map(String).join(" "));
+  };
+  // Structural network safety net (not per-test discipline): every test
+  // starts with a fake that THROWS on any request. A test that needs network
+  // behavior (cover download, BooxDrop push) must install its own
+  // `setRequestUrlImpl` — a test that forgets to do so gets a loud failure
+  // instead of `resetRequestUrlImpl()`'s default silently falling through to
+  // the REAL `fetch` and hitting an actual LAN/internet address.
+  setRequestUrlImpl(async () => {
+    throw new Error("unexpected network access in test");
+  });
 });
 
 afterEach(async () => {
   console.warn = originalWarn;
+  console.error = originalError;
   resetRequestUrlImpl();
   await fs.rm(outDir, { recursive: true, force: true });
   await Promise.all(vaultDirs.map((d) => fs.rm(d, { recursive: true, force: true })));
@@ -76,7 +94,11 @@ function tfolder(root: string, path: string): never {
   return new TFolder(root, path) as never;
 }
 
-function makePlugin(app: unknown, settings: Partial<Record<string, unknown>> = {}) {
+// Typed as `Partial<EpubExportSettings>` (not `Partial<Record<string, unknown>>`)
+// so a misspelled override key (e.g. `linkDepht`) fails `tsc --noEmit` instead
+// of silently being dropped — matters once tests start flipping
+// `pushAfterExport`/`booxUrl` for the push-degradation cases.
+function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): EpubExportPlugin {
   const plugin = new EpubExportPlugin(app as never, {} as never);
   plugin.settings = {
     outputFolder: outDir,
@@ -86,8 +108,14 @@ function makePlugin(app: unknown, settings: Partial<Record<string, unknown>> = {
     booxUrl: "",
     pushAfterExport: false,
     ...settings,
-  } as never;
+  };
   return plugin;
+}
+
+/** Lists `outDir` for "nothing was written" assertions (readEpub throws ENOENT
+ * on a missing file, which is the wrong failure mode for those cases). */
+async function outDirEntries(): Promise<string[]> {
+  return fs.readdir(outDir);
 }
 
 async function readEpub(name: string) {
@@ -139,6 +167,10 @@ describe("exportSingle", () => {
     expect(epub.spineCount(epub.opf)).toBe(1);
     expect(successNotices().some((n) => n.includes("clean_code.epub"))).toBe(true);
     expect(warnings).toHaveLength(0);
+    // Finding B: metadata alone doesn't prove the note's actual body made it
+    // into the EPUB — an implementation emitting perfect metadata over an
+    // empty chapter would still pass every assertion above.
+    expect(await epub.chapter(1)).toContain("Writing clean code matters.");
   });
 
   it("case 2: falls back to fallbackAuthor/settings language/basename when frontmatter is absent", async () => {
@@ -158,8 +190,25 @@ describe("exportSingle", () => {
 
 describe("exportFolder", () => {
   it("case 3: places the tagged index first, then chapters in numeric-prefix order", async () => {
+    // Deliberate fixture choices, each closing a specific falsifiability gap
+    // a reviewer found in the original version of this test:
+    //  - The index note is named "index_note.md", NOT "book" (the folder's
+    //    name) — it's tagged [book, main] but NOT named after the folder, so
+    //    only pickIndexNote's TAG branch can produce it as the index. If the
+    //    tag check were deleted, the name-fallback branch would find nothing
+    //    (no note is named "book") and this test would fail instead of
+    //    silently passing.
+    //  - Prefixes are UNPADDED ("2_b", "10_c", not "02_b"/"10_c") so lexical
+    //    and numeric ordering disagree: lexically "10_c" < "2_b", so a
+    //    regression that dropped orderChapters' numeric parsing (or replaced
+    //    it with the identity function over TFolder.children's already
+    //    fs.readdirSync().sort()-ed input) would produce the wrong order.
+    //  - The plugin's `language` setting is set to "en" (not the default
+    //    "th"), so `language: thai` in book.md's frontmatter resolving to
+    //    "th" is discriminating — with the default already "th", a broken
+    //    frontmatter-language resolver would still show "th" by coincidence.
     const { app, root } = await buildVault({
-      "book/book.md": [
+      "book/index_note.md": [
         "---",
         "tags: [book, main]",
         "author: Jane Doe",
@@ -168,24 +217,42 @@ describe("exportFolder", () => {
         "",
         "# Book Index",
         "",
+        "This is the index chapter body, distinct from every other chapter.",
+        "",
       ].join("\n"),
-      "book/02_b.md": "# Chapter B\n\nSecond chapter.\n",
-      "book/01_a.md": "# Chapter A\n\nFirst chapter.\n",
-      "book/10_c.md": "# Chapter C\n\nTenth chapter.\n",
+      "book/2_b.md": "# Chapter B\n\nSecond chapter body text B-marker.\n",
+      "book/1_a.md": "# Chapter A\n\nFirst chapter body text A-marker.\n",
+      "book/10_c.md": "# Chapter C\n\nTenth chapter body text C-marker.\n",
     });
-    const plugin = makePlugin(app);
+    const plugin = makePlugin(app, { language: "en" });
 
     await plugin.exportFolder(tfolder(root, "book"));
 
-    const epub = await readEpub("book.epub");
+    // Title/output filename come from the index note's own basename
+    // (resolveTitle has no aliases to prefer here), not the folder's name.
+    const epub = await readEpub("index_note.epub");
     expect(epub.spineCount(epub.opf)).toBe(4);
     expect(epub.opf).toContain("<dc:language>th</dc:language>");
     expect(epub.opf).toContain("<dc:creator>Jane Doe</dc:creator>");
 
-    const order = ["book", "01_a", "02_b", "10_c"];
-    const positions = order.map((name) => epub.nav.indexOf(`>${name}<`));
-    expect(positions.every((p) => p !== -1)).toBe(true);
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    // Finding A fix: bind each title to its own href instead of probing the
+    // nav text for a bare "<name<" substring — meta.title is also "book"-ish
+    // text that shows up in <title>/<h1>, which let the old assertion match
+    // the document head rather than the index chapter's actual <li>. Binding
+    // title-to-href also directly encodes ordering, since hrefs are assigned
+    // in job.files iteration order.
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">index_note</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">1_a</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">2_b</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">10_c</a>');
+
+    // Finding B fix: prove each chapter's actual body text (not just its
+    // title) landed in the right slot — an empty-body implementation with
+    // perfect metadata/nav would fail these.
+    expect(await epub.chapter(1)).toContain("This is the index chapter body");
+    expect(await epub.chapter(2)).toContain("First chapter body text A-marker.");
+    expect(await epub.chapter(3)).toContain("Second chapter body text B-marker.");
+    expect(await epub.chapter(4)).toContain("Tenth chapter body text C-marker.");
   });
 
   it("case 4: falls back to the folder name and settings author when no index note is found", async () => {
