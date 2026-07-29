@@ -3,6 +3,27 @@
 An Obsidian plugin that exports notes as EPUB 3 books and, optionally, pushes
 them straight to an e-ink reader over the local network.
 
+## Installation
+
+**From a GitHub release (recommended):**
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the
+   [latest release](https://github.com/kidpeterpan/obsidian-plugin-epub-export/releases/latest).
+2. Copy all three files into
+   `<vault>/.obsidian/plugins/epub-export/` (create the folder if it doesn't
+   exist).
+3. In Obsidian, go to **Settings → Community plugins** and enable **EPUB
+   Export**.
+
+> [!WARNING]
+> If Obsidian was already running when the plugin folder was added, the new
+> plugin will not appear in the Community plugins list until you click the
+> **refresh** icon at the top of that list (or restart Obsidian).
+
+**From the community plugin store:** this plugin is **not yet listed** in
+Obsidian's community plugin browser — install it manually via the steps
+above.
+
 ## What it does
 
 Three export scopes, each reachable from the command palette or a right-click
@@ -170,7 +191,6 @@ this writing:
 
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path).
-- Mermaid diagram blocks.
 - `$$` display-math blocks.
 - Note transclusion (`![[note]]` embeds).
 - The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
@@ -205,6 +225,12 @@ repeatedly, before a manual device test.
 
 ## BooxDrop
 
+BooxDrop push is an **optional** feature for owners of Onyx Boox e-ink
+devices — it uploads the finished EPUB to the device over BooxDrop's
+unofficial local API. It is disabled by default (the **Push after export**
+setting) and nothing else in this plugin depends on it; every export scope
+works fully with it left off.
+
 The BooxDrop upload endpoint is unofficial and firmware-versioned. What was
 verified, when, how to re-probe it after a firmware update, and the client's
 handling of application-level failures (a 2xx HTTP status with
@@ -227,3 +253,7 @@ handling of application-level failures (a 2xx HTTP status with
 
 `types.ts` holds shared interfaces only (no runtime code) and is excluded
 from the coverage report for that reason.
+
+## License
+
+[MIT](./LICENSE) © 2026 kidpeterpan

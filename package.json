@@ -1,7 +1,14 @@
 {
   "name": "obsidian-epub-export",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "description": "Export notes, book folders, or linked-note bundles as EPUB and push them to a Boox device via BooxDrop.",
+  "author": "kidpeterpan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kidpeterpan/obsidian-plugin-epub-export.git"
+  },
   "scripts": {
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",

@@ -1,0 +1,57 @@
+name: Release
+
+# Obsidian's plugin installer resolves a release by matching the git tag
+# exactly against manifest.json's "version" field, with NO "v" prefix (e.g.
+# tag "1.0.0", not "v1.0.0"). A "v"-prefixed tag would never match and the
+# plugin would never be picked up by Obsidian's update mechanism, so the tag
+# pattern here is deliberately a bare numeric glob.
+on:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail fast, before spending CI time on the gate below, if whoever
+      # pushed the tag mistyped it relative to manifest.json.
+      - name: Verify tag matches manifest.json version
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          manifest_version=$(jq -r .version manifest.json)
+          if [ "$TAG_VERSION" != "$manifest_version" ]; then
+            echo "::error::tag '$TAG_VERSION' does not match manifest.json version '$manifest_version'"
+            exit 1
+          fi
+          echo "tag matches manifest.json version: $manifest_version"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Full gate — a release must never ship a build that fails it.
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npx tsc --noEmit
+      - run: npm run test:coverage
+      - run: npm run build
+      - run: npm run version:check
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          files: |
+            main.js
+            manifest.json
+            styles.css
