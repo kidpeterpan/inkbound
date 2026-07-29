@@ -71,8 +71,8 @@ Found under **Settings → Community plugins → EPUB Export**:
 | Default link depth | `1` | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider). |
 | Language (`dc:language`) | `"th"` | Fallback language used when a note has no usable `language` frontmatter field. |
 | Fallback author | `""` (empty → `"Unknown"`) | Used as `dc:creator` when a note/index has no usable `author` frontmatter field. |
-| Device URL | `""` | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing; has a **Test connection** button next to it. |
-| Push after export | `false` | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. |
+| Device URL | `""` | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing. |
+| Push after export | `false` | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL. |
 
 ## Frontmatter fields
 
@@ -117,7 +117,7 @@ note for folder exports — see "What it does" above). Recognised fields:
 | Command | What it does |
 |---|---|
 | `npm run build` | Production build (`esbuild.config.mjs production`) → `main.js`. |
-| `npm run dev` | Development build in watch mode. |
+| `npm run dev` | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped). |
 | `npm test` | Runs the vitest suite once. |
 | `npm run test:coverage` | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below. |
 | `npm run deploy` | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development"). |
