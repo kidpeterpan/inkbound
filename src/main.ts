@@ -15,6 +15,7 @@ import {
   resolveOutputPath, summarizeWarnings,
 } from "./settings";
 import type { ExportMeta } from "./types";
+import { resolveMeta, MetaDefaults } from "./metadata";
 
 interface Job {
   meta: ExportMeta;
@@ -71,16 +72,47 @@ export default class EpubExportPlugin extends Plugin {
     return deriveChapterTitle(f.basename, aliases, h1);
   }
 
-  private baseMeta(title: string, author?: string): ExportMeta {
+  private metaDefaults(): MetaDefaults {
     return {
-      title,
-      author: author || this.settings.fallbackAuthor || "Unknown",
+      fallbackAuthor: this.settings.fallbackAuthor,
       language: this.settings.language || "th",
     };
   }
 
+  // Resolves EPUB metadata from a note's own frontmatter, then downloads the
+  // cover if one is declared. A cover failure degrades to a coverless export
+  // (spec: never fail an export over artwork).
+  private async metaFromNote(file: TFile | null, fallbackBasename: string): Promise<ExportMeta> {
+    const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
+    const resolved = resolveMeta(
+      fm as Record<string, unknown> | undefined,
+      file ? file.basename : fallbackBasename,
+      this.metaDefaults()
+    );
+    const meta: ExportMeta = {
+      title: resolved.title,
+      author: resolved.author,
+      language: resolved.language,
+    };
+    if (resolved.coverUrl) {
+      try {
+        const res = await requestUrl({ url: resolved.coverUrl, throw: false });
+        if (res.status === 200) {
+          const isPng = (res.headers["content-type"] ?? "").includes("png");
+          meta.coverBytes = new Uint8Array(res.arrayBuffer);
+          meta.coverExt = isPng ? "png" : "jpg";
+        } else {
+          console.warn("[epub-export] cover download failed", resolved.coverUrl, `status ${res.status}`);
+        }
+      } catch (e) {
+        console.warn("[epub-export] cover download failed", resolved.coverUrl, e);
+      }
+    }
+    return meta;
+  }
+
   async exportSingle(file: TFile) {
-    await this.runExport({ meta: this.baseMeta(this.titleFor(file)), files: [file] });
+    await this.runExport({ meta: await this.metaFromNote(file, file.basename), files: [file] });
   }
 
   async exportLinked(file: TFile) {
@@ -88,7 +120,7 @@ export default class EpubExportPlugin extends Plugin {
     const files = paths
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
-    await this.runExport({ meta: this.baseMeta(this.titleFor(file)), files });
+    await this.runExport({ meta: await this.metaFromNote(file, file.basename), files });
   }
 
   async exportFolder(folder: TFolder) {
@@ -106,23 +138,7 @@ export default class EpubExportPlugin extends Plugin {
     const files = chapterNames.map((n) => mdFiles.find((f) => f.basename === n)!);
     if (index) files.unshift(index);
 
-    const fm = index ? this.app.metadataCache.getFileCache(index)?.frontmatter : undefined;
-    const meta = this.baseMeta(index ? this.titleFor(index) : folder.name, fm?.author);
-    if (typeof fm?.coverUrl === "string" && fm.coverUrl.startsWith("http")) {
-      try {
-        const res = await requestUrl({ url: fm.coverUrl, throw: false });
-        if (res.status === 200) {
-          const isPng = (res.headers["content-type"] ?? "").includes("png");
-          meta.coverBytes = new Uint8Array(res.arrayBuffer);
-          meta.coverExt = isPng ? "png" : "jpg";
-        } else {
-          console.warn("[epub-export] cover download failed", fm.coverUrl, res.status);
-        }
-      } catch (e) {
-        // cover failure degrades to coverless export (spec)
-        console.warn("[epub-export] cover download failed", fm.coverUrl, e);
-      }
-    }
+    const meta = await this.metaFromNote(index, folder.name);
     await this.runExport({ meta, files });
   }
 
