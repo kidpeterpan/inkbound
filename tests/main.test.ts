@@ -4,7 +4,14 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
-import { TFile, TFolder, Menu, NOTICES, setRequestUrlImpl, resetRequestUrlImpl } from "./fixtures/obsidian-stub";
+import {
+  TFile,
+  TFolder,
+  Menu,
+  NOTICES,
+  setRequestUrlImpl,
+  resetRequestUrlImpl,
+} from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
 import type { EpubExportSettings } from "../src/settings";
 
@@ -142,9 +149,12 @@ function successNotices(): string[] {
 /** Typed accessor for the stub Plugin's `commands` introspection field (see
  * tests/fixtures/obsidian-stub.ts) — `EpubExportPlugin` is typed through the
  * REAL "obsidian" .d.ts under tsc, which has no `commands` property. */
-function commandsOf(plugin: EpubExportPlugin): Record<string, { id: string; name: string; callback?: () => unknown }> {
-  return (plugin as unknown as { commands: Record<string, { id: string; name: string; callback?: () => unknown }> })
-    .commands;
+function commandsOf(
+  plugin: EpubExportPlugin
+): Record<string, { id: string; name: string; callback?: () => unknown }> {
+  return (
+    plugin as unknown as { commands: Record<string, { id: string; name: string; callback?: () => unknown }> }
+  ).commands;
 }
 
 /**
@@ -163,7 +173,10 @@ function commandsOf(plugin: EpubExportPlugin): Record<string, { id: string; name
  * unconditionally) unless a caller has already installed one (e.g. via
  * `captureFileMenu`, which must run BEFORE this).
  */
-async function makeOnloadedPlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): Promise<EpubExportPlugin> {
+async function makeOnloadedPlugin(
+  app: unknown,
+  settings: Partial<EpubExportSettings> = {}
+): Promise<EpubExportPlugin> {
   const workspace = (app as { workspace: Record<string, unknown> }).workspace;
   if (typeof workspace.on !== "function") {
     workspace.on = () => ({});
@@ -190,7 +203,10 @@ async function makeOnloadedPlugin(app: unknown, settings: Partial<EpubExportSett
  */
 function captureFileMenu(app: unknown): (menu: unknown, file: unknown) => void {
   let handler: ((menu: unknown, file: unknown) => void) | undefined;
-  (app as { workspace: Record<string, unknown> }).workspace.on = (event: string, cb: (...a: unknown[]) => void) => {
+  (app as { workspace: Record<string, unknown> }).workspace.on = (
+    event: string,
+    cb: (...a: unknown[]) => void
+  ) => {
     if (event === "file-menu") handler = cb as (menu: unknown, file: unknown) => void;
     return {};
   };
@@ -406,7 +422,9 @@ describe("exportLinked", () => {
 describe("cover art", () => {
   it("case 6: embeds a downloaded cover with the extension matching its content-type", async () => {
     const { app, root } = await buildVault({
-      "cover_note.md": ['---', 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body text.", ""].join("\n"),
+      "cover_note.md": ["---", 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body text.", ""].join(
+        "\n"
+      ),
     });
     const file = tfile(root, "cover_note.md");
 
@@ -532,7 +550,10 @@ describe("onload: command and menu registration", () => {
 
     const menu = new Menu();
     fireFileMenu(menu as never, tfile(root, "note.md"));
-    expect(menu.items.map((i) => i.title)).toEqual(["Export note to EPUB", "Export note + linked notes to EPUB"]);
+    expect(menu.items.map((i) => i.title)).toEqual([
+      "Export note to EPUB",
+      "Export note + linked notes to EPUB",
+    ]);
 
     const noteItem = menu.items[0];
     await invokeAndWait(plugin, "exportSingle", () => noteItem.onClickFn?.(new MouseEvent("click")));
@@ -726,7 +747,9 @@ describe("failure paths", () => {
 
   it("F6: a non-200 cover response degrades to a coverless, still-successful export", async () => {
     const { app, root } = await buildVault({
-      "cover_fail.md": ['---', 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+      "cover_fail.md": ["---", 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join(
+        "\n"
+      ),
     });
     setRequestUrlImpl(async () => ({
       status: 404,
@@ -747,7 +770,9 @@ describe("failure paths", () => {
 
   it("F7: a cover request that throws degrades the same way as a non-200 response", async () => {
     const { app, root } = await buildVault({
-      "cover_throw.md": ['---', 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+      "cover_throw.md": ["---", 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join(
+        "\n"
+      ),
     });
     setRequestUrlImpl(async () => {
       throw new Error("network down");
@@ -767,7 +792,9 @@ describe("failure paths", () => {
     // `?? ""` fallback for real (a server that omits the header entirely),
     // rather than every cover test so far which always sets one.
     const { app, root } = await buildVault({
-      "cover_no_header.md": ['---', 'coverUrl: "https://example.com/cover"', "---", "", "Body.", ""].join("\n"),
+      "cover_no_header.md": ["---", 'coverUrl: "https://example.com/cover"', "---", "", "Body.", ""].join(
+        "\n"
+      ),
     });
     setRequestUrlImpl(async () => ({
       status: 200,
@@ -789,7 +816,13 @@ describe("failure paths", () => {
     const seenUrls: string[] = [];
     setRequestUrlImpl(async (req) => {
       seenUrls.push(typeof req === "string" ? req : req.url);
-      return { status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: '{"successful":true}', json: null };
+      return {
+        status: 200,
+        headers: {},
+        arrayBuffer: new ArrayBuffer(0),
+        text: '{"successful":true}',
+        json: null,
+      };
     });
     const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox:8085" });
 

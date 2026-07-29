@@ -1,6 +1,4 @@
-import {
-  FileSystemAdapter, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl,
-} from "obsidian";
+import { FileSystemAdapter, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
 import { promises as fs } from "fs";
 import { homedir } from "os";
 import { EpubBuilder, chapterHref, escapeXml } from "./epub";
@@ -11,8 +9,11 @@ import { mediaTypeForExt } from "./media-types";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 import {
-  DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab,
-  resolveOutputPath, summarizeWarnings,
+  DEFAULT_SETTINGS,
+  EpubExportSettings,
+  EpubExportSettingTab,
+  resolveOutputPath,
+  summarizeWarnings,
 } from "./settings";
 import type { ExportMeta } from "./types";
 import { resolveMeta, MetaDefaults } from "./metadata";
@@ -30,37 +31,58 @@ export default class EpubExportPlugin extends Plugin {
     this.addSettingTab(new EpubExportSettingTab(this.app, this));
 
     this.addCommand({
-      id: "export-note", name: "Export note to EPUB",
+      id: "export-note",
+      name: "Export note to EPUB",
       callback: () => this.withActiveFile((f) => this.exportSingle(f)),
     });
     this.addCommand({
-      id: "export-folder", name: "Export folder as EPUB (active note's folder)",
-      callback: () => this.withActiveFile((f) => f.parent instanceof TFolder
-        ? this.exportFolder(f.parent)
-        : new Notice("Active note has no parent folder.")),
+      id: "export-folder",
+      name: "Export folder as EPUB (active note's folder)",
+      callback: () =>
+        this.withActiveFile((f) =>
+          f.parent instanceof TFolder
+            ? this.exportFolder(f.parent)
+            : new Notice("Active note has no parent folder.")
+        ),
     });
     this.addCommand({
-      id: "export-linked", name: "Export note + linked notes to EPUB",
+      id: "export-linked",
+      name: "Export note + linked notes to EPUB",
       callback: () => this.withActiveFile((f) => this.exportLinked(f)),
     });
 
-    this.registerEvent(this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
-      if (file instanceof TFile && file.extension === "md") {
-        menu.addItem((i) => i.setTitle("Export note to EPUB").setIcon("book")
-          .onClick(() => this.exportSingle(file)));
-        menu.addItem((i) => i.setTitle("Export note + linked notes to EPUB").setIcon("book")
-          .onClick(() => this.exportLinked(file)));
-      }
-      if (file instanceof TFolder) {
-        menu.addItem((i) => i.setTitle("Export folder as EPUB").setIcon("book")
-          .onClick(() => this.exportFolder(file)));
-      }
-    }));
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
+        if (file instanceof TFile && file.extension === "md") {
+          menu.addItem((i) =>
+            i
+              .setTitle("Export note to EPUB")
+              .setIcon("book")
+              .onClick(() => this.exportSingle(file))
+          );
+          menu.addItem((i) =>
+            i
+              .setTitle("Export note + linked notes to EPUB")
+              .setIcon("book")
+              .onClick(() => this.exportLinked(file))
+          );
+        }
+        if (file instanceof TFolder) {
+          menu.addItem((i) =>
+            i
+              .setTitle("Export folder as EPUB")
+              .setIcon("book")
+              .onClick(() => this.exportFolder(file))
+          );
+        }
+      })
+    );
   }
 
   private withActiveFile(fn: (f: TFile) => void) {
     const f = this.app.workspace.getActiveFile();
-    if (f) fn(f); else new Notice("No active note.");
+    if (f) fn(f);
+    else new Notice("No active note.");
   }
 
   // ── scope builders ──────────────────────────────────────────────
@@ -125,7 +147,10 @@ export default class EpubExportPlugin extends Plugin {
 
   async exportFolder(folder: TFolder) {
     const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
-    if (mdFiles.length === 0) { new Notice("Folder has no markdown notes."); return; }
+    if (mdFiles.length === 0) {
+      new Notice("Folder has no markdown notes.");
+      return;
+    }
 
     const candidates = mdFiles.map((f) => ({
       basename: f.basename,
@@ -166,7 +191,15 @@ export default class EpubExportPlugin extends Plugin {
       for (const file of job.files) {
         try {
           const md = await this.app.vault.cachedRead(file);
-          const r = await renderUnitToChapter(this.app, this, md, file.path, hrefByPath, basePath, imageCount);
+          const r = await renderUnitToChapter(
+            this.app,
+            this,
+            md,
+            file.path,
+            hrefByPath,
+            basePath,
+            imageCount
+          );
           warnings.push(...r.warnings);
           // Bump immediately, before the asset loop below: these numbers are
           // already burned into r.xhtmlBody regardless of what happens next.
@@ -225,8 +258,10 @@ export default class EpubExportPlugin extends Plugin {
       if (this.settings.pushAfterExport && this.settings.booxUrl) {
         try {
           notice.setMessage("Pushing to Boox…");
-          await new BooxDropClient(this.settings.booxUrl, obsidianHttp)
-            .push(outPath.split("/").pop()!, bytes);
+          await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(
+            outPath.split("/").pop()!,
+            bytes
+          );
           pushMsg = " and pushed to Boox ✓";
         } catch (e) {
           pushMsg = ` — saved locally, push failed: ${e instanceof Error ? e.message : String(e)}`;

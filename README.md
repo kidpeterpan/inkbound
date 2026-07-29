@@ -65,14 +65,14 @@ Export**.
 
 Found under **Settings → Community plugins → EPUB Export**:
 
-| Setting | Default | Purpose |
-|---|---|---|
-| Output folder | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten. |
-| Default link depth | `1` | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider). |
-| Language (`dc:language`) | `"th"` | Fallback language used when a note has no usable `language` frontmatter field. |
-| Fallback author | `""` (empty → `"Unknown"`) | Used as `dc:creator` when a note/index has no usable `author` frontmatter field. |
-| Device URL | `""` | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing. |
-| Push after export | `false` | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL. |
+| Setting                  | Default                      | Purpose                                                                                                                                                                               |
+| ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Output folder            | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                |
+| Default link depth       | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                   |
+| Language (`dc:language`) | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                        |
+| Fallback author          | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                      |
+| Device URL               | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                    |
+| Push after export        | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL. |
 
 ## Frontmatter fields
 
@@ -83,7 +83,7 @@ note for folder exports — see "What it does" above). Recognised fields:
 - **`aliases`** — the book title (`dc:title`). The first non-empty string, or
   first non-empty string element if `aliases` is a list, is used; otherwise
   the note's filename (without extension) is used. This is deliberately the
-  *book* title only — per-chapter titles come from a separate mechanism
+  _book_ title only — per-chapter titles come from a separate mechanism
   (heading/filename-based) and are unaffected by `aliases`.
 - **`author`** — `dc:creator`. A non-empty string is used as-is; a list of
   strings is joined with `", "`; anything else (including an empty value)
@@ -94,16 +94,17 @@ note for folder exports — see "What it does" above). Recognised fields:
   (case-insensitive) match against this fixed table is used:
 
   | Frontmatter value | `dc:language` |
-  |---|---|
-  | `thai` | `th` |
-  | `english` | `en` |
-  | `japanese` | `ja` |
-  | `chinese` | `zh` |
-  | `korean` | `ko` |
+  | ----------------- | ------------- |
+  | `thai`            | `th`          |
+  | `english`         | `en`          |
+  | `japanese`        | `ja`          |
+  | `chinese`         | `zh`          |
+  | `korean`          | `ko`          |
 
   Anything else — an unrecognised name, a non-string value, or a missing
   field — falls back to the **Language** setting. Unknown names deliberately
   fall back rather than guess at a code.
+
 - **`coverUrl`** — the book's cover image. Must be a string starting with
   `http://` or `https://`; anything else (including a vault-relative path) is
   treated as no cover. A cover that fails to download degrades the export to
@@ -114,17 +115,21 @@ note for folder exports — see "What it does" above). Recognised fields:
 
 ## Development commands
 
-| Command | What it does |
-|---|---|
-| `npm run build` | Production build (`esbuild.config.mjs production`) → `main.js`. |
-| `npm run dev` | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped). |
-| `npm test` | Runs the vitest suite once. |
-| `npm run test:coverage` | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below. |
-| `npm run deploy` | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development"). |
-| `npm run epubcheck` | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec. |
-| `npm run local-export` | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below. |
-| `npm run version:check` | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`. |
-| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once. |
+| Command                            | What it does                                                                                                                                        |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                     |
+| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                          |
+| `npm test`                         | Runs the vitest suite once.                                                                                                                         |
+| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.     |
+| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development").                            |
+| `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec. |
+| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                     |
+| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                         |
+| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                          |
+| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project.                                                                                                 |
+| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                       |
+| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                 |
+| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                         |
 
 ## Testing and its limits
 
@@ -139,7 +144,7 @@ Obsidian-facing modules (`main.ts`, `settings.ts`, `render-adapter.ts`,
 (`esbuild.config.mjs`) keeps `obsidian` external and untouched, so what ships
 to Obsidian is not affected by the stub.
 
-This means coverage measures how much of *our own logic* the test suite
+This means coverage measures how much of _our own logic_ the test suite
 exercises against that stub's behaviour. **It does not prove the plugin
 behaves correctly inside real Obsidian** — the stub's `MarkdownRenderer`, for
 instance, is `marked` plus post-processing, which is not what Obsidian itself
@@ -180,7 +185,7 @@ have been checked by hand.
 ## The CLI harness
 
 `npm run local-export -- <note|folder|linked> <vault-relative-path>` (via
-`scripts/local-export.ts`) runs the *real* `src/main.ts` orchestrator —
+`scripts/local-export.ts`) runs the _real_ `src/main.ts` orchestrator —
 `exportSingle`/`exportFolder`/`exportLinked`, unmodified — against a real
 vault on disk, with no Obsidian installation involved. It bundles `main.ts`
 with esbuild and redirects its `require("obsidian")` at runtime to the same

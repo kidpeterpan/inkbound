@@ -98,7 +98,8 @@ function installObsidianRequireShim(stubNamespace: Record<string, unknown>): voi
   (Module as unknown as { _cache: Record<string, unknown> })._cache[virtualPath] = fakeModule;
 
   type ResolveFilename = (request: string, parent: unknown, isMain: boolean, options: unknown) => string;
-  const originalResolveFilename = (Module as unknown as { _resolveFilename: ResolveFilename })._resolveFilename;
+  const originalResolveFilename = (Module as unknown as { _resolveFilename: ResolveFilename })
+    ._resolveFilename;
   (Module as unknown as { _resolveFilename: ResolveFilename })._resolveFilename = function (
     this: unknown,
     request: string,
@@ -235,7 +236,10 @@ async function main(): Promise<void> {
     unknown
   >;
   const { createVaultStub } = (await import(path.join(REPO_ROOT, "tests/fixtures/vault-stub.ts"))) as {
-    createVaultStub: (vaultRoot: string, scanRoot: string) => {
+    createVaultStub: (
+      vaultRoot: string,
+      scanRoot: string
+    ) => {
       app: unknown;
       setActiveFile: (f: unknown) => void;
     };
@@ -247,7 +251,10 @@ async function main(): Promise<void> {
 
   const require = Module.createRequire(import.meta.url);
   const mod = require(BUNDLE_PATH) as { default?: unknown };
-  const PluginClass = (mod.default ?? mod) as new (app: unknown, manifest: unknown) => {
+  const PluginClass = (mod.default ?? mod) as new (
+    app: unknown,
+    manifest: unknown
+  ) => {
     settings: unknown;
     exportSingle(f: unknown): Promise<void>;
     exportFolder(f: unknown): Promise<void>;
@@ -259,9 +266,9 @@ async function main(): Promise<void> {
 
   const { app, setActiveFile } = createVaultStub(VAULT_ROOT, scanRoot);
 
-  const targetNode = (app as { vault: { getAbstractFileByPath(p: string): unknown } }).vault.getAbstractFileByPath(
-    normalizedTarget
-  );
+  const targetNode = (
+    app as { vault: { getAbstractFileByPath(p: string): unknown } }
+  ).vault.getAbstractFileByPath(normalizedTarget);
   if (!targetNode) {
     console.error(`Not found in vault: "${normalizedTarget}" (resolved under ${VAULT_ROOT})`);
     process.exit(1);
@@ -315,7 +322,10 @@ async function main(): Promise<void> {
   if (warnLines.length === 0) console.log("  (none)");
   for (const w of warnLines) console.log(`  [warn] ${w}`);
 
-  const savedNotice = (NOTICES as string[]).slice().reverse().find((n) => n.startsWith("EPUB saved to "));
+  const savedNotice = (NOTICES as string[])
+    .slice()
+    .reverse()
+    .find((n) => n.startsWith("EPUB saved to "));
   if (!savedNotice) {
     console.log("\n--- FAILED: no 'EPUB saved to' notice found ---");
     process.exitCode = 1;
@@ -353,7 +363,9 @@ async function main(): Promise<void> {
   const totalImg = chapterStats.reduce((a, c) => a + c.totalImg, 0);
   const totalRewritten = chapterStats.reduce((a, c) => a + c.rewritten, 0);
   const totalOther = chapterStats.reduce((a, c) => a + c.other, 0);
-  console.log(`\n--- Totals: <img> total=${totalImg} rewritten=${totalRewritten} other/dangling=${totalOther} ---`);
+  console.log(
+    `\n--- Totals: <img> total=${totalImg} rewritten=${totalRewritten} other/dangling=${totalOther} ---`
+  );
 
   const dangling = await checkDanglingImages(outPath);
   console.log(

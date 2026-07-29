@@ -8,7 +8,8 @@ const write = (p: string, o: unknown) => writeFileSync(p, JSON.stringify(o, null
 const mode = process.argv[2];
 
 if (mode === "check") {
-  const pkg = read(pkgPath), manifest = read(manifestPath);
+  const pkg = read(pkgPath),
+    manifest = read(manifestPath);
   if (pkg.version !== manifest.version) {
     console.error(`version mismatch: package.json ${pkg.version} != manifest.json ${manifest.version}`);
     process.exit(1);
@@ -20,7 +21,8 @@ if (mode === "check") {
     console.error("usage: npm run version:bump -- <major.minor.patch>");
     process.exit(1);
   }
-  const pkg = read(pkgPath), manifest = read(manifestPath);
+  const pkg = read(pkgPath),
+    manifest = read(manifestPath);
   pkg.version = next;
   manifest.version = next;
   write(pkgPath, pkg);

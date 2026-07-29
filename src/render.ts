@@ -1,6 +1,10 @@
 const CHROME_SELECTORS = [
-  ".edit-block-button", ".copy-code-button", ".collapse-indicator",
-  ".markdown-preview-pusher", ".mod-frontmatter", ".frontmatter",
+  ".edit-block-button",
+  ".copy-code-button",
+  ".collapse-indicator",
+  ".markdown-preview-pusher",
+  ".mod-frontmatter",
+  ".frontmatter",
   ".metadata-container",
 ];
 

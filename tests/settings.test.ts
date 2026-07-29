@@ -3,8 +3,11 @@ import { resolveOutputPath, summarizeWarnings, DEFAULT_SETTINGS } from "../src/s
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
 import {
-  NOTICES, SETTINGS, type ChainableControl,
-  setRequestUrlImpl, resetRequestUrlImpl,
+  NOTICES,
+  SETTINGS,
+  type ChainableControl,
+  setRequestUrlImpl,
+  resetRequestUrlImpl,
 } from "./fixtures/obsidian-stub";
 
 describe("resolveOutputPath", () => {
@@ -34,8 +37,12 @@ describe("summarizeWarnings", () => {
 describe("DEFAULT_SETTINGS", () => {
   it("matches the spec defaults", () => {
     expect(DEFAULT_SETTINGS).toEqual({
-      outputFolder: "", linkDepth: 1, language: "th",
-      fallbackAuthor: "", booxUrl: "", pushAfterExport: false,
+      outputFolder: "",
+      linkDepth: 1,
+      language: "th",
+      fallbackAuthor: "",
+      booxUrl: "",
+      pushAfterExport: false,
     });
   });
 });
@@ -151,7 +158,11 @@ describe("EpubExportSettingTab", () => {
 
   it("case 8: test connection reachable shows a reachable notice", async () => {
     setRequestUrlImpl(async () => ({
-      status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: "", json: null,
+      status: 200,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
     }));
     makeTab({ booxUrl: "http://192.168.1.42:8085" });
     await controlFor("Test connection").onClickFn?.(new MouseEvent("click"));

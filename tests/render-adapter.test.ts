@@ -37,9 +37,13 @@ function newComponent(): never {
 describe("renderUnitToChapter", () => {
   it("strips frontmatter and dataview, returning a bare XHTML fragment", async () => {
     const r = await renderUnitToChapter(
-      appWith(null), newComponent(),
+      appWith(null),
+      newComponent(),
       "---\ntags: [x]\n---\n# Hi\n\n```dataview\nLIST\n```\n",
-      "note.md", new Map(), "/vault", 0
+      "note.md",
+      new Map(),
+      "/vault",
+      0
     );
     expect(r.xhtmlBody).toContain("Hi");
     expect(r.xhtmlBody).not.toContain("tags:");
@@ -49,8 +53,13 @@ describe("renderUnitToChapter", () => {
 
   it("threads startImageIndex into image numbering", async () => {
     const r = await renderUnitToChapter(
-      appWith(null), newComponent(),
-      "![cap](fig.png)", "note.md", new Map(), "/vault", 4
+      appWith(null),
+      newComponent(),
+      "![cap](fig.png)",
+      "note.md",
+      new Map(),
+      "/vault",
+      4
     );
     expect(r.images).toEqual([{ vaultPath: "fig.png", newHref: "../images/img_005.png" }]);
     expect(r.xhtmlBody).toContain("../images/img_005.png");
@@ -73,8 +82,13 @@ describe("renderUnitToChapter", () => {
     const dest = new TFile("/vault", "book/02_two.md");
     const hrefByPath = new Map([["book/02_two.md", "text/chapter_002.xhtml"]]);
     const r = await renderUnitToChapter(
-      appWith(dest), newComponent(),
-      "[[Chapter Two]]", "note.md", hrefByPath, "/vault", 0
+      appWith(dest),
+      newComponent(),
+      "[[Chapter Two]]",
+      "note.md",
+      hrefByPath,
+      "/vault",
+      0
     );
     expect(r.xhtmlBody).toContain('href="chapter_002.xhtml"');
     expect(r.xhtmlBody).not.toContain("data-href");
@@ -83,8 +97,13 @@ describe("renderUnitToChapter", () => {
   it("degrades a wikilink resolving outside the export set to plain text", async () => {
     const dest = new TFile("/vault", "book/99_other.md");
     const r = await renderUnitToChapter(
-      appWith(dest), newComponent(),
-      "[[Elsewhere]]", "note.md", new Map(), "/vault", 0
+      appWith(dest),
+      newComponent(),
+      "[[Elsewhere]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
     );
     expect(r.xhtmlBody).not.toContain("<a ");
     expect(r.xhtmlBody).toContain("Elsewhere");
@@ -95,8 +114,13 @@ describe("renderUnitToChapter", () => {
     // resolve() closure directly (as opposed to the previous case, which
     // hits a real TFile that just isn't in hrefByPath).
     const r = await renderUnitToChapter(
-      appWith(null), newComponent(),
-      "[[Nowhere]]", "note.md", new Map(), "/vault", 0
+      appWith(null),
+      newComponent(),
+      "[[Nowhere]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
     );
     expect(r.xhtmlBody).not.toContain("<a ");
     expect(r.xhtmlBody).toContain("Nowhere");

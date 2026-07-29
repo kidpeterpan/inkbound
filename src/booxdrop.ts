@@ -35,7 +35,10 @@ export function buildMultipart(boundary: string, filename: string, data: Uint8Ar
 export class BooxDropClient {
   private base: string;
 
-  constructor(baseUrl: string, private http: HttpFn) {
+  constructor(
+    baseUrl: string,
+    private http: HttpFn
+  ) {
     this.base = baseUrl.replace(/\/+$/, "");
   }
 

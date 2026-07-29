@@ -25,7 +25,8 @@ describe("BooxDropClient", () => {
   });
 
   it("push POSTs multipart bytes to the upload path", async () => {
-    const calls: { url: string; method?: string; headers?: Record<string, string>; body?: ArrayBuffer }[] = [];
+    const calls: { url: string; method?: string; headers?: Record<string, string>; body?: ArrayBuffer }[] =
+      [];
     const client = new BooxDropClient("http://boox:8085/", async (req) => {
       calls.push(req);
       return { status: 200 };

@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  normalizeLanguage, resolveAuthor, resolveTitle, resolveCoverUrl, resolveMeta,
+  normalizeLanguage,
+  resolveAuthor,
+  resolveTitle,
+  resolveCoverUrl,
+  resolveMeta,
 } from "../src/metadata";
 
 describe("normalizeLanguage", () => {
@@ -109,11 +113,7 @@ describe("resolveMeta", () => {
     // e.g. the vault's clean_code.md has `aliases:` followed by nothing, which
     // Obsidian/YAML parses as `null`, not an empty string or missing key.
     expect(
-      resolveMeta(
-        { aliases: null, author: null, language: null, coverUrl: null },
-        "clean_code",
-        defaults
-      )
+      resolveMeta({ aliases: null, author: null, language: null, coverUrl: null }, "clean_code", defaults)
     ).toEqual({
       title: "clean_code",
       author: "Pan",
@@ -123,9 +123,7 @@ describe("resolveMeta", () => {
   });
 
   it("falls back on nested-array aliases and author instead of throwing", () => {
-    expect(
-      resolveMeta({ aliases: [["x"]], author: [["A"]] }, "clean_code", defaults)
-    ).toEqual({
+    expect(resolveMeta({ aliases: [["x"]], author: [["A"]] }, "clean_code", defaults)).toEqual({
       title: "clean_code",
       author: "Pan",
       language: "th",
@@ -169,7 +167,11 @@ describe("resolveMeta", () => {
   });
 
   it("handles the Thai book shape", () => {
-    const m = resolveMeta({ language: "thai", author: "Aditya Y. Bhargava" }, "grokking_algorithms", defaults);
+    const m = resolveMeta(
+      { language: "thai", author: "Aditya Y. Bhargava" },
+      "grokking_algorithms",
+      defaults
+    );
     expect(m.language).toBe("th");
     expect(m.author).toBe("Aditya Y. Bhargava");
     expect(m.title).toBe("grokking_algorithms");

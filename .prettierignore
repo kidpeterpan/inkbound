@@ -1,0 +1,5 @@
+main.js
+coverage
+local-out
+node_modules
+*.epub

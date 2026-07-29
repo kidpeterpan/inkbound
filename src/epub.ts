@@ -15,8 +15,17 @@ export function chapterHref(index: number): string {
   return `text/chapter_${String(index + 1).padStart(3, "0")}.xhtml`;
 }
 
-interface Chapter { id: string; href: string; title: string; body: string; }
-interface Asset { href: string; bytes: Uint8Array; mediaType: string; }
+interface Chapter {
+  id: string;
+  href: string;
+  title: string;
+  body: string;
+}
+interface Asset {
+  href: string;
+  bytes: Uint8Array;
+  mediaType: string;
+}
 
 export class EpubBuilder {
   private chapters: Chapter[] = [];
@@ -63,13 +72,16 @@ export class EpubBuilder {
   private opf(): string {
     const m = this.meta;
     const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const coverItem = m.coverBytes && m.coverExt
-      ? `<item id="cover-image" href="images/cover.${m.coverExt}" media-type="image/${m.coverExt === "jpg" ? "jpeg" : "png"}" properties="cover-image"/>`
-      : "";
+    const coverItem =
+      m.coverBytes && m.coverExt
+        ? `<item id="cover-image" href="images/cover.${m.coverExt}" media-type="image/${m.coverExt === "jpg" ? "jpeg" : "png"}" properties="cover-image"/>`
+        : "";
     const coverMeta = coverItem ? `<meta name="cover" content="cover-image"/>` : "";
     const items = this.chapters
       .map((c) => `<item id="${c.id}" href="${c.href}" media-type="application/xhtml+xml"/>`)
-      .concat(this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`))
+      .concat(
+        this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`)
+      )
       .join("\n    ");
     const spine = this.chapters.map((c) => `<itemref idref="${c.id}"/>`).join("\n    ");
     return `<?xml version="1.0" encoding="utf-8"?>

@@ -4,14 +4,13 @@ import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 
 export type { EpubExportSettings } from "./settings-core";
-export {
-  DEFAULT_SETTINGS,
-  resolveOutputPath,
-  summarizeWarnings,
-} from "./settings-core";
+export { DEFAULT_SETTINGS, resolveOutputPath, summarizeWarnings } from "./settings-core";
 
 export class EpubExportSettingTab extends PluginSettingTab {
-  constructor(app: App, private plugin: EpubExportPlugin) {
+  constructor(
+    app: App,
+    private plugin: EpubExportPlugin
+  ) {
     super(app, plugin);
   }
 
@@ -24,41 +23,79 @@ export class EpubExportSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Output folder")
       .setDesc("Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.")
-      .addText((t) => t.setValue(s.outputFolder).onChange((v) => { s.outputFolder = v; save(); }));
+      .addText((t) =>
+        t.setValue(s.outputFolder).onChange((v) => {
+          s.outputFolder = v;
+          save();
+        })
+      );
 
     new Setting(containerEl)
       .setName("Default link depth")
       .setDesc("How far 'note + linked notes' follows wikilinks (1–3).")
-      .addSlider((sl) => sl.setLimits(1, 3, 1).setValue(s.linkDepth).setDynamicTooltip()
-        .onChange((v) => { s.linkDepth = v; save(); }));
+      .addSlider((sl) =>
+        sl
+          .setLimits(1, 3, 1)
+          .setValue(s.linkDepth)
+          .setDynamicTooltip()
+          .onChange((v) => {
+            s.linkDepth = v;
+            save();
+          })
+      );
 
-    new Setting(containerEl)
-      .setName("Language (dc:language)")
-      .addText((t) => t.setValue(s.language).onChange((v) => { s.language = v || "th"; save(); }));
+    new Setting(containerEl).setName("Language (dc:language)").addText((t) =>
+      t.setValue(s.language).onChange((v) => {
+        s.language = v || "th";
+        save();
+      })
+    );
 
     new Setting(containerEl)
       .setName("Fallback author")
       .setDesc("Used when a note/folder has no author frontmatter.")
-      .addText((t) => t.setValue(s.fallbackAuthor).onChange((v) => { s.fallbackAuthor = v; save(); }));
+      .addText((t) =>
+        t.setValue(s.fallbackAuthor).onChange((v) => {
+          s.fallbackAuthor = v;
+          save();
+        })
+      );
 
     containerEl.createEl("h3", { text: "BooxDrop" });
 
     new Setting(containerEl)
       .setName("Device URL")
       .setDesc("Shown on the Boox in the BooxDrop app, e.g. http://192.168.1.42:8085")
-      .addText((t) => t.setPlaceholder("http://192.168.1.42:8085")
-        .setValue(s.booxUrl).onChange((v) => { s.booxUrl = v.trim(); save(); }));
+      .addText((t) =>
+        t
+          .setPlaceholder("http://192.168.1.42:8085")
+          .setValue(s.booxUrl)
+          .onChange((v) => {
+            s.booxUrl = v.trim();
+            save();
+          })
+      );
 
-    new Setting(containerEl)
-      .setName("Push after export")
-      .addToggle((tg) => tg.setValue(s.pushAfterExport).onChange((v) => { s.pushAfterExport = v; save(); }));
+    new Setting(containerEl).setName("Push after export").addToggle((tg) =>
+      tg.setValue(s.pushAfterExport).onChange((v) => {
+        s.pushAfterExport = v;
+        save();
+      })
+    );
 
-    new Setting(containerEl)
-      .setName("Test connection")
-      .addButton((b) => b.setButtonText("Test").onClick(async () => {
-        if (!s.booxUrl) { new Notice("Set the device URL first."); return; }
+    new Setting(containerEl).setName("Test connection").addButton((b) =>
+      b.setButtonText("Test").onClick(async () => {
+        if (!s.booxUrl) {
+          new Notice("Set the device URL first.");
+          return;
+        }
         const ok = await new BooxDropClient(s.booxUrl, obsidianHttp).testConnection();
-        new Notice(ok ? "BooxDrop reachable ✓" : "BooxDrop NOT reachable — check Wi-Fi, IP, and that BooxDrop is open on the device.");
-      }));
+        new Notice(
+          ok
+            ? "BooxDrop reachable ✓"
+            : "BooxDrop NOT reachable — check Wi-Fi, IP, and that BooxDrop is open on the device."
+        );
+      })
+    );
   }
 }

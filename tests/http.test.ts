@@ -35,8 +35,11 @@ describe("obsidianHttp", () => {
 
   it("returns the response text so booxdrop can inspect the envelope", async () => {
     setRequestUrlImpl(async () => ({
-      status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0),
-      text: '{"successful":true}', json: null,
+      status: 200,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: '{"successful":true}',
+      json: null,
     }));
     expect((await obsidianHttp({ url: "http://d/" })).text).toBe('{"successful":true}');
   });
@@ -45,7 +48,9 @@ describe("obsidianHttp", () => {
     setRequestUrlImpl(async () => {
       const res = { status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), json: null };
       Object.defineProperty(res, "text", {
-        get() { throw new Error("binary body"); },
+        get() {
+          throw new Error("binary body");
+        },
       });
       return res as never;
     });

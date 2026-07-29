@@ -7,9 +7,9 @@ export interface ExportMeta {
 }
 
 export interface ExportUnit {
-  path: string;      // vault-relative path of the source note
-  title: string;     // chapter title
-  markdown: string;  // raw note body
+  path: string; // vault-relative path of the source note
+  title: string; // chapter title
+  markdown: string; // raw note body
 }
 
 export interface ExportJob {

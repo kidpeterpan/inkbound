@@ -48,7 +48,9 @@ export function normalizeLanguage(raw: unknown, fallback: string): string {
 
 export function resolveAuthor(raw: unknown, fallback: string): string {
   if (Array.isArray(raw)) {
-    const names = raw.filter((n): n is string => typeof n === "string" && n.trim() !== "").map((n) => n.trim());
+    const names = raw
+      .filter((n): n is string => typeof n === "string" && n.trim() !== "")
+      .map((n) => n.trim());
     if (names.length > 0) return names.join(", ");
   } else {
     const single = firstNonEmptyString(raw);

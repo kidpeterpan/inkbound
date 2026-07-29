@@ -3,8 +3,13 @@ import { orderChapters, pickIndexNote, bfsLinked } from "../src/collect";
 
 describe("orderChapters", () => {
   it("sorts NN_ prefixes numerically, then others alphabetically", () => {
-    expect(orderChapters(["10_ten", "02_two", "appendix", "01_one", "afterword"]))
-      .toEqual(["01_one", "02_two", "10_ten", "afterword", "appendix"]);
+    expect(orderChapters(["10_ten", "02_two", "appendix", "01_one", "afterword"])).toEqual([
+      "01_one",
+      "02_two",
+      "10_ten",
+      "afterword",
+      "appendix",
+    ]);
   });
 });
 
@@ -17,7 +22,10 @@ describe("pickIndexNote", () => {
     expect(pickIndexNote(c, "other_name")).toBe("my_book");
   });
   it("falls back to basename === folder name", () => {
-    const c = [{ basename: "lgwt", tags: [] }, { basename: "01_intro", tags: [] }];
+    const c = [
+      { basename: "lgwt", tags: [] },
+      { basename: "01_intro", tags: [] },
+    ];
     expect(pickIndexNote(c, "lgwt")).toBe("lgwt");
   });
   it("returns null when nothing matches", () => {

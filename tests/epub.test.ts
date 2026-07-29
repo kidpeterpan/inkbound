@@ -28,8 +28,10 @@ describe("EpubBuilder container", () => {
   it("OPF lists metadata, all items, and spine in order", async () => {
     const zip = await JSZip.loadAsync(await buildSample());
     const opf = await zip.file("OEBPS/package.opf")!.async("string");
-    expect(opf).toContain("<dc:identifier id=\"uid\">urn:uuid:");
-    expect(opf).toMatch(/<dc:identifier id="uid">urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}<\/dc:identifier>/);
+    expect(opf).toContain('<dc:identifier id="uid">urn:uuid:');
+    expect(opf).toMatch(
+      /<dc:identifier id="uid">urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}<\/dc:identifier>/
+    );
     expect(opf).toContain("<dc:title>ทดสอบ &amp; Book</dc:title>");
     expect(opf).toContain("<dc:creator>Pan</dc:creator>");
     expect(opf).toContain("<dc:language>th</dc:language>");

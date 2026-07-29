@@ -13,8 +13,12 @@
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile } from "obsidian";
 import {
-  stripFrontmatter, stripDynamicBlocks, cleanupDom,
-  rewriteLinks, rewriteImages, serializeBody,
+  stripFrontmatter,
+  stripDynamicBlocks,
+  cleanupDom,
+  rewriteLinks,
+  rewriteImages,
+  serializeBody,
 } from "./render";
 
 export interface ChapterRender {

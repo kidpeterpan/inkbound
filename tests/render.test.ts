@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
-  stripFrontmatter, stripDynamicBlocks, cleanupDom,
-  rewriteLinks, rewriteImages, serializeBody,
+  stripFrontmatter,
+  stripDynamicBlocks,
+  cleanupDom,
+  rewriteLinks,
+  rewriteImages,
+  serializeBody,
 } from "../src/render";
 
 function div(html: string): HTMLElement {
@@ -31,21 +35,27 @@ describe("stripDynamicBlocks", () => {
 
 describe("cleanupDom", () => {
   it("strips Obsidian UI chrome", () => {
-    const el = div('<div class="edit-block-button">e</div><button class="copy-code-button">c</button><p>keep</p>');
+    const el = div(
+      '<div class="edit-block-button">e</div><button class="copy-code-button">c</button><p>keep</p>'
+    );
     cleanupDom(el);
     expect(el.querySelector(".edit-block-button")).toBeNull();
     expect(el.querySelector(".copy-code-button")).toBeNull();
     expect(el.querySelector("p")?.textContent).toBe("keep");
   });
   it("converts checkboxes to glyphs", () => {
-    const el = div('<ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> todo</li></ul>');
+    const el = div(
+      '<ul><li><input type="checkbox" checked> done</li><li><input type="checkbox"> todo</li></ul>'
+    );
     cleanupDom(el);
     expect(el.querySelectorAll("input").length).toBe(0);
     expect(el.textContent).toContain("☑");
     expect(el.textContent).toContain("☐");
   });
   it("unwraps rendered image embeds (preserves img)", () => {
-    const el = div('<span class="internal-embed image-embed is-loaded" src="pic.png"><img src="app://pic.png" alt="pic"></span>');
+    const el = div(
+      '<span class="internal-embed image-embed is-loaded" src="pic.png"><img src="app://pic.png" alt="pic"></span>'
+    );
     cleanupDom(el);
     expect(el.querySelector("span.internal-embed")).toBeNull();
     expect(el.querySelector("img")).not.toBeNull();
@@ -95,18 +105,14 @@ describe("rewriteImages", () => {
       `<img src="app://abc123${base}/05.%20assets/pic%20one.png?1699"><img src="https://x.com/y.jpg">`
     );
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "05. assets/pic one.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "05. assets/pic one.png", newHref: "../images/img_001.png" }]);
     const imgs = el.querySelectorAll("img");
     expect(imgs[0].getAttribute("src")).toBe("../images/img_001.png");
     expect(imgs[1].getAttribute("src")).toBe("https://x.com/y.jpg");
   });
   it("tolerates malformed image URIs with literal percent", () => {
     const base = "/Users/pan/vault";
-    const el = div(
-      `<img src="app://abc123${base}/100%off.png">`
-    );
+    const el = div(`<img src="app://abc123${base}/100%off.png">`);
     const found = rewriteImages(el, base);
     // Malformed URI is skipped: src unchanged, not in found list.
     expect(found).toEqual([]);
@@ -123,9 +129,7 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="fig03-1_nested_boxes.png">`);
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "fig03-1_nested_boxes.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "fig03-1_nested_boxes.png", newHref: "../images/img_001.png" }]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
     expect(el.querySelector("img")?.getAttribute("alt")).toBe("");
   });
@@ -134,18 +138,16 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="assets/pic.png">`);
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "assets/pic.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "assets/pic.png", newHref: "../images/img_001.png" }]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
   });
 
   it("leaves remote and self-contained srcs completely untouched", () => {
     const base = "/Users/pan/vault";
     const el = div(
-      '<img src="https://x.com/y.jpg">'
-      + '<img src="data:image/png;base64,AAAA">'
-      + '<img src="//cdn.example.com/z.png">'
+      '<img src="https://x.com/y.jpg">' +
+        '<img src="data:image/png;base64,AAAA">' +
+        '<img src="//cdn.example.com/z.png">'
     );
     const found = rewriteImages(el, base);
     expect(found).toEqual([]);
@@ -219,9 +221,7 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div('<img src="../images/fig.png">');
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "../images/fig.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "../images/fig.png", newHref: "../images/img_001.png" }]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
   });
 
@@ -231,9 +231,7 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div('<img src=""><img src="pic.png">');
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "pic.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "pic.png", newHref: "../images/img_001.png" }]);
     const imgs = el.querySelectorAll("img");
     expect(imgs[0].getAttribute("src")).toBe("");
     expect(imgs[1].getAttribute("src")).toBe("../images/img_001.png");
@@ -252,9 +250,7 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div('<img src="app://abc123/some/other/place/fig.png">');
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "fig.png", newHref: "../images/img_001.png" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "fig.png", newHref: "../images/img_001.png" }]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
   });
 
@@ -264,17 +260,15 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="app://abc123${base}/fig.jpg#anchor">`);
     const found = rewriteImages(el, base);
-    expect(found).toEqual([
-      { vaultPath: "fig.jpg", newHref: "../images/img_001.jpg" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "fig.jpg", newHref: "../images/img_001.jpg" }]);
   });
 
   it("numbers sequentially across app://, relative and remote srcs in one document, skipping remote", () => {
     const base = "/Users/pan/vault";
     const el = div(
-      `<img src="app://abc123${base}/first.png">`
-      + '<img src="https://x.com/skip.jpg">'
-      + '<img src="second.png">'
+      `<img src="app://abc123${base}/first.png">` +
+        '<img src="https://x.com/skip.jpg">' +
+        '<img src="second.png">'
     );
     const found = rewriteImages(el, base);
     expect(found).toEqual([
@@ -291,9 +285,7 @@ describe("rewriteImages", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="photo.jpg">`);
     const found = rewriteImages(el, base, 5);
-    expect(found).toEqual([
-      { vaultPath: "photo.jpg", newHref: "../images/img_006.jpg" },
-    ]);
+    expect(found).toEqual([{ vaultPath: "photo.jpg", newHref: "../images/img_006.jpg" }]);
   });
 });
 
