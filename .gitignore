@@ -4,3 +4,4 @@ main.js
 .superpowers/
 local-out/
 .local-export-bundle.cjs
+coverage/

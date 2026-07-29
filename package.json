@@ -6,6 +6,7 @@
     "build": "node esbuild.config.mjs production",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "deploy": "npm run build && bash scripts/deploy.sh",
     "epubcheck": "tsx scripts/build-sample.ts && if command -v epubcheck >/dev/null; then epubcheck sample.epub; else echo 'epubcheck not installed — brew install epubcheck to validate'; fi",
     "local-export": "tsx scripts/local-export.ts"
@@ -13,6 +14,7 @@
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
     "@types/node": "^20.14.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "^0.21.5",
     "jsdom": "^24.1.0",
     "marked": "^18.0.7",

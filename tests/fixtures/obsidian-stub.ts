@@ -125,7 +125,7 @@ export interface RequestUrlParamLike {
 // an offline run silently exercises the cover-FAILURE path (fetch() throws)
 // instead of the success path, and the operator can't tell from the harness
 // output which one actually ran.
-export async function requestUrl(request: RequestUrlParamLike | string): Promise<{
+async function realRequestUrl(request: RequestUrlParamLike | string): Promise<{
   status: number;
   headers: Record<string, string>;
   arrayBuffer: ArrayBuffer;
@@ -169,6 +169,30 @@ export async function requestUrl(request: RequestUrlParamLike | string): Promise
     // not JSON: leave undefined
   }
   return { status, headers, arrayBuffer, text, json };
+}
+
+export type RequestUrlImpl = (request: RequestUrlParamLike | string) => Promise<{
+  status: number;
+  headers: Record<string, string>;
+  arrayBuffer: ArrayBuffer;
+  text: string;
+  json: unknown;
+}>;
+
+let requestUrlImpl: RequestUrlImpl | null = null;
+
+/** Install a deterministic requestUrl for tests. */
+export function setRequestUrlImpl(impl: RequestUrlImpl): void {
+  requestUrlImpl = impl;
+}
+
+/** Restore the default real-network implementation (used by the CLI harness). */
+export function resetRequestUrlImpl(): void {
+  requestUrlImpl = null;
+}
+
+export async function requestUrl(request: RequestUrlParamLike | string) {
+  return (requestUrlImpl ?? realRequestUrl)(request);
 }
 
 // ── Component / Plugin ────────────────────────────────────────────────────
