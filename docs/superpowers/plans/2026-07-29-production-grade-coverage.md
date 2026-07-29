@@ -15,7 +15,7 @@
 - Repo: `~/ProjectG/obsidian-epub-export` (quote all paths — they contain `@`). Work on `main`. Baseline commit `5299e36`.
 - `esbuild.config.mjs` MUST keep `external: ["obsidian", "electron"]`. The obsidian alias is a **vitest-only** `resolve.alias`. Never add an esbuild alias — it creates a second class identity and breaks `instanceof` plus the shared `NOTICES` array.
 - `src/types.ts` is excluded from coverage (interfaces only, emits no JS). No other file gets excluded without a comment in `vitest.config.ts` justifying it.
-- Coverage thresholds: `perFile: true`, 85 for statements, lines, functions, branches. Enabled in Task 10, not before.
+- Coverage thresholds: `perFile: true`, 85 for statements, lines, functions, branches. Enabled in Task 9, not before.
 - Never lower a threshold to make a build green. A file that genuinely cannot reach 85% gets an explicit per-file override with a written reason.
 - Tests must not hit the network and must never write inside `~/Documents/pan_vault`. `main.ts` tests use `fs.mkdtemp` and clean up in `afterEach`.
 - Do NOT change `deriveChapterTitle` in `src/naming.ts` or `src/epub-css.ts` — both are reserved for the user (Task 11 of the previous plan).

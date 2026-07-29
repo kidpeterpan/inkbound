@@ -393,6 +393,37 @@ describe("exportFolder", () => {
     expect(epub.names).not.toContain("OEBPS/images/cover.png");
     expect(epub.opf).not.toContain("cover-image");
   });
+
+  it("a scalar `tags` frontmatter string is not substring-matched into index-note election (Fix 3)", async () => {
+    // Regression test: exportFolder used to pass `(fm?.tags ?? []) as string[]`
+    // straight through with no runtime check. A scalar `tags: "notebook
+    // mainframe"` string would reach pickIndexNote, whose `.includes("book")`
+    // / `.includes("main")` checks (src/collect.ts) are Array.prototype.includes
+    // for genuine arrays but silently fall through to
+    // String.prototype.includes — SUBSTRING matching — for a scalar string.
+    // "notebook mainframe" contains both "book" and "main", so without the
+    // `Array.isArray` guard this note would be wrongly elected as the index.
+    const { app, root } = await buildVault({
+      "scalarbook/scalar_tags_note.md": [
+        "---",
+        'tags: "notebook mainframe"',
+        "---",
+        "",
+        "Not the real index — must NOT be elected via substring-matched scalar tags.",
+      ].join("\n"),
+      "scalarbook/other.md": "Second note, no tags at all.\n",
+    });
+    const plugin = makePlugin(app, { fallbackAuthor: "Pan" });
+
+    await plugin.exportFolder(tfolder(root, "scalarbook"));
+
+    // No note is named "scalarbook" and no note carries genuine list-shaped
+    // [book, main] tags, so pickIndexNote finds no index and this falls back
+    // to the folder name / settings author — exactly like case 4's "misc".
+    const epub = await readEpub("scalarbook.epub");
+    expect(epub.opf).toContain("<dc:title>scalarbook</dc:title>");
+    expect(epub.opf).toContain("<dc:creator>Pan</dc:creator>");
+  });
 });
 
 describe("exportLinked", () => {
@@ -615,6 +646,26 @@ describe("withActiveFile", () => {
     await pending;
 
     expect(await outDirEntries()).toContain("solo.epub");
+  });
+
+  it("shows a distinct wrong-type Notice and never calls the export for a non-markdown active file (Fix 4)", async () => {
+    // Regression test: unlike the file-menu handler (which gates on
+    // `extension === "md"`), withActiveFile previously only checked that a
+    // file was active at all, so a palette command run with a .png (or
+    // .canvas/.pdf) active file would run `cachedRead` on it and produce a
+    // garbage chapter.
+    const { app, root } = await buildVault({ "picture.png": new Uint8Array([1, 2, 3]) });
+    const plugin = makePlugin(app);
+    const activeFile = tfile(root, "picture.png");
+    (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+
+    (plugin as unknown as { withActiveFile: (fn: (f: unknown) => void) => void }).withActiveFile(() => {
+      throw new Error("fn must not be called for a non-markdown active file");
+    });
+
+    expect(NOTICES).toContain("Active file is not a markdown note.");
+    expect(NOTICES).not.toContain("No active note.");
+    expect(await outDirEntries()).toEqual([]);
   });
 });
 

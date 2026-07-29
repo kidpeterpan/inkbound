@@ -14,6 +14,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["./tests/setup/no-network.ts"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.ts"],

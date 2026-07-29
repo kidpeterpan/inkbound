@@ -3,3 +3,4 @@ coverage
 local-out
 node_modules
 *.epub
+package-lock.json

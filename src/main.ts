@@ -81,8 +81,15 @@ export default class EpubExportPlugin extends Plugin {
 
   private withActiveFile(fn: (f: TFile) => void) {
     const f = this.app.workspace.getActiveFile();
-    if (f) fn(f);
-    else new Notice("No active note.");
+    if (!f) {
+      new Notice("No active note.");
+      return;
+    }
+    if (f.extension !== "md") {
+      new Notice("Active file is not a markdown note.");
+      return;
+    }
+    fn(f);
   }
 
   // ── scope builders ──────────────────────────────────────────────
@@ -152,10 +159,19 @@ export default class EpubExportPlugin extends Plugin {
       return;
     }
 
-    const candidates = mdFiles.map((f) => ({
-      basename: f.basename,
-      tags: (this.app.metadataCache.getFileCache(f)?.frontmatter?.tags ?? []) as string[],
-    }));
+    const candidates = mdFiles.map((f) => {
+      const tags = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
+      return {
+        basename: f.basename,
+        // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
+        // rather than a list. pickIndexNote's `.includes(...)` checks are
+        // Array.prototype.includes for list-shaped tags, but a string scalar
+        // would silently fall through to String.prototype.includes, which is
+        // substring matching and can misfire (e.g. "notebook mainframe"
+        // contains both "book" and "main"). Only genuine arrays count.
+        tags: Array.isArray(tags) ? (tags as string[]) : [],
+      };
+    });
     const indexName = pickIndexNote(candidates, folder.name);
     const index = mdFiles.find((f) => f.basename === indexName) ?? null;
 
