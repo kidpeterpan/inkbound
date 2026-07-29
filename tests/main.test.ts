@@ -137,6 +137,108 @@ function successNotices(): string[] {
   return NOTICES.filter((n) => n.startsWith("EPUB saved to"));
 }
 
+// ── Task 6 fixture additions ──────────────────────────────────────────────
+
+/** Typed accessor for the stub Plugin's `commands` introspection field (see
+ * tests/fixtures/obsidian-stub.ts) — `EpubExportPlugin` is typed through the
+ * REAL "obsidian" .d.ts under tsc, which has no `commands` property. */
+function commandsOf(plugin: EpubExportPlugin): Record<string, { id: string; name: string; callback?: () => unknown }> {
+  return (plugin as unknown as { commands: Record<string, { id: string; name: string; callback?: () => unknown }> })
+    .commands;
+}
+
+/**
+ * Builds a plugin the way real Obsidian does at startup — seed `loadData()`
+ * via `saveData()`, then call the real `onload()` — instead of the
+ * `makePlugin()` shortcut of assigning `.settings` directly. `onload()`
+ * itself calls `loadSettings()` (`Object.assign({}, DEFAULT_SETTINGS, await
+ * this.loadData())`), which would otherwise silently STOMP any settings
+ * `makePlugin()` had assigned, resetting `outputFolder` to `""` and sending
+ * a real write to the machine's actual home directory. Seeding through
+ * `saveData()` first makes `loadSettings()` merge to exactly what's asked
+ * for, `outputFolder: outDir` included.
+ *
+ * Also ensures `app.workspace.on` exists (createVaultStub's workspace has no
+ * event-emitter methods — onload() registers a "file-menu" listener on it
+ * unconditionally) unless a caller has already installed one (e.g. via
+ * `captureFileMenu`, which must run BEFORE this).
+ */
+async function makeOnloadedPlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): Promise<EpubExportPlugin> {
+  const workspace = (app as { workspace: Record<string, unknown> }).workspace;
+  if (typeof workspace.on !== "function") {
+    workspace.on = () => ({});
+  }
+  const plugin = new EpubExportPlugin(app as never, {} as never);
+  await plugin.saveData({
+    outputFolder: outDir,
+    linkDepth: 1,
+    language: "th",
+    fallbackAuthor: "",
+    booxUrl: "",
+    pushAfterExport: false,
+    ...settings,
+  });
+  await plugin.onload();
+  return plugin;
+}
+
+/**
+ * Installs a `workspace.on` that records the "file-menu" handler main.ts's
+ * `onload()` registers, and returns a function to fire it later (once
+ * `onload()` has actually run) with a fresh `Menu` and a target file/folder.
+ * Must be called BEFORE `makeOnloadedPlugin`.
+ */
+function captureFileMenu(app: unknown): (menu: unknown, file: unknown) => void {
+  let handler: ((menu: unknown, file: unknown) => void) | undefined;
+  (app as { workspace: Record<string, unknown> }).workspace.on = (event: string, cb: (...a: unknown[]) => void) => {
+    if (event === "file-menu") handler = cb as (menu: unknown, file: unknown) => void;
+    return {};
+  };
+  return (menu, file) => {
+    if (!handler) throw new Error("file-menu handler was never registered — call this after onload()");
+    handler(menu, file);
+  };
+}
+
+/**
+ * `main.ts`'s command callbacks and menu-item onClick handlers are
+ * deliberately fire-and-forget (`callback: () => this.withActiveFile(...)`
+ * returns `void`, mirroring real Obsidian) — there's nothing for a caller to
+ * `await`. To assert on the export's actual result, this temporarily
+ * replaces `plugin[method]` so it can capture the promise the real
+ * implementation returns, fires the (otherwise-unawaitable) trigger, awaits
+ * the capture, then restores the original method.
+ */
+async function invokeAndWait(
+  plugin: EpubExportPlugin,
+  method: "exportSingle" | "exportFolder" | "exportLinked",
+  trigger: () => void
+): Promise<void> {
+  const target = plugin as unknown as Record<string, (...a: unknown[]) => Promise<void>>;
+  const original = target[method].bind(plugin);
+  let captured: Promise<void> | undefined;
+  target[method] = (...args: unknown[]) => {
+    captured = original(...args);
+    return captured;
+  };
+  trigger();
+  await captured;
+  target[method] = original;
+}
+
+/**
+ * Monkeypatches one async method of a vault-stub object (`app.vault`) so it
+ * rejects for a single file path, passing every other call through to the
+ * real (disk-backed) implementation unchanged. Used to simulate I/O failures
+ * (a rejecting `cachedRead`/`readBinary`) the real fixture never produces on
+ * its own — a file that genuinely exists on disk never fails to read.
+ */
+function failFor(obj: unknown, method: string, path: string, error: Error): void {
+  const target = obj as Record<string, (f: { path: string }) => unknown>;
+  const original = target[method].bind(target);
+  target[method] = (f: { path: string }) => (f.path === path ? Promise.reject(error) : original(f));
+}
+
 // ── happy paths ─────────────────────────────────────────────────────────
 
 describe("exportSingle", () => {
@@ -177,7 +279,11 @@ describe("exportSingle", () => {
     const { app, root } = await buildVault({
       "untitled_note.md": "Just a plain note with no frontmatter.\n",
     });
-    const plugin = makePlugin(app, { fallbackAuthor: "Pan", language: "th" });
+    // language: "" (not "th") exercises metaDefaults()'s own
+    // `this.settings.language || "th"` fallback for real, rather than
+    // coincidentally landing on "th" because that's also the literal value
+    // passed in.
+    const plugin = makePlugin(app, { fallbackAuthor: "Pan", language: "" });
 
     await plugin.exportSingle(tfile(root, "untitled_note.md"));
 
@@ -368,5 +474,347 @@ describe("overwrite", () => {
     expect((await readEpub("again.epub")).opf).toContain("<dc:title>again</dc:title>");
 
     expect(successNotices()).toHaveLength(2);
+  });
+});
+
+// ── Task 6: onload / command & menu wiring, withActiveFile, settings I/O ──
+//
+// Covers src/main.ts lines 29-64 and 247-251 — outside the twelve failure
+// cases the Task 6 brief enumerates, but needed for main.ts to clear the
+// project's 85%-per-file coverage bar, since nothing before this reached
+// onload() at all.
+
+describe("onload: command and menu registration", () => {
+  it("registers the three export commands under their exact ids", async () => {
+    const { app } = await buildVault({ "note.md": "Body.\n" });
+    const plugin = await makeOnloadedPlugin(app);
+    expect(Object.keys(commandsOf(plugin)).sort()).toEqual(["export-folder", "export-linked", "export-note"]);
+  });
+
+  it("each command's callback runs the corresponding export against the active file", async () => {
+    const { app, root } = await buildVault({ "sub/note.md": "# Note\n\nBody text.\n" });
+    const plugin = await makeOnloadedPlugin(app);
+    const activeFile = tfile(root, "sub/note.md");
+    (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+    const commands = commandsOf(plugin);
+
+    await invokeAndWait(plugin, "exportSingle", () => commands["export-note"].callback?.());
+    expect(await outDirEntries()).toContain("note.epub");
+
+    // f.parent instanceof TFolder: TAbstractFile.parent (obsidian-stub.ts) is
+    // only null for the vault root itself, never for a file, so the
+    // ternary's "Active note has no parent folder." branch is unreachable
+    // via any real file in this fixture (and arguably in real Obsidian too).
+    await invokeAndWait(plugin, "exportFolder", () => commands["export-folder"].callback?.());
+    expect(await outDirEntries()).toContain("sub.epub");
+
+    await invokeAndWait(plugin, "exportLinked", () => commands["export-linked"].callback?.());
+    expect(successNotices().length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a markdown file's context menu offers working note-export and linked-export items", async () => {
+    const { app, root } = await buildVault({ "note.md": "# Note\n\nBody text.\n" });
+    const fireFileMenu = captureFileMenu(app);
+    const plugin = await makeOnloadedPlugin(app);
+
+    const menu = new Menu();
+    fireFileMenu(menu as never, tfile(root, "note.md"));
+    expect(menu.items.map((i) => i.title)).toEqual(["Export note to EPUB", "Export note + linked notes to EPUB"]);
+
+    const noteItem = menu.items[0];
+    await invokeAndWait(plugin, "exportSingle", () => noteItem.onClickFn?.(new MouseEvent("click")));
+    expect(await outDirEntries()).toContain("note.epub");
+  });
+
+  it("a folder's context menu offers a working folder-export item", async () => {
+    const { app, root } = await buildVault({ "sub/note.md": "Body.\n" });
+    const fireFileMenu = captureFileMenu(app);
+    const plugin = await makeOnloadedPlugin(app);
+
+    const menu = new Menu();
+    fireFileMenu(menu as never, tfolder(root, "sub"));
+    expect(menu.items.map((i) => i.title)).toEqual(["Export folder as EPUB"]);
+
+    await invokeAndWait(plugin, "exportFolder", () => menu.items[0].onClickFn?.(new MouseEvent("click")));
+    expect(await outDirEntries()).toContain("sub.epub");
+  });
+});
+
+describe("withActiveFile", () => {
+  it("shows 'No active note.' and never calls the export when there is no active file", async () => {
+    const { app } = await buildVault({});
+    const plugin = makePlugin(app);
+
+    (plugin as unknown as { withActiveFile: (fn: (f: unknown) => void) => void }).withActiveFile(() => {
+      throw new Error("fn must not be called when there is no active file");
+    });
+
+    expect(NOTICES).toContain("No active note.");
+  });
+
+  it("invokes the callback with the active file and runs a real export", async () => {
+    const { app, root } = await buildVault({ "solo.md": "# Solo\n\nActive file body.\n" });
+    const plugin = makePlugin(app);
+    const activeFile = tfile(root, "solo.md");
+    (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+
+    let pending: Promise<void> | undefined;
+    (plugin as unknown as { withActiveFile: (fn: (f: unknown) => void) => void }).withActiveFile((f) => {
+      expect(f).toBe(activeFile);
+      pending = plugin.exportSingle(f as never);
+    });
+    await pending;
+
+    expect(await outDirEntries()).toContain("solo.epub");
+  });
+});
+
+describe("settings persistence", () => {
+  it("loadSettings merges saved data over the defaults; saveSettings persists the result", async () => {
+    const plugin = new EpubExportPlugin({} as never, {} as never);
+
+    await plugin.saveData({ language: "en", fallbackAuthor: "Pan" });
+    await plugin.loadSettings();
+    expect(plugin.settings).toEqual({
+      outputFolder: "",
+      linkDepth: 1,
+      language: "en",
+      fallbackAuthor: "Pan",
+      booxUrl: "",
+      pushAfterExport: false,
+    });
+
+    plugin.settings.outputFolder = outDir;
+    plugin.settings.pushAfterExport = true;
+    await plugin.saveSettings();
+
+    expect(await plugin.loadData()).toEqual({
+      outputFolder: outDir,
+      linkDepth: 1,
+      language: "en",
+      fallbackAuthor: "Pan",
+      booxUrl: "",
+      pushAfterExport: true,
+    });
+  });
+});
+
+// ── Task 6: failure paths (brief items F1-F12) ────────────────────────────
+//
+// Each asserts the promised DEGRADATION (a specific warning/Notice/on-disk
+// effect), not just "nothing threw" — an implementation that silently
+// swallowed the failure with no warning would fail these.
+
+describe("failure paths", () => {
+  it("F1: a chapter read failure produces a placeholder chapter without disturbing numbering", async () => {
+    const { app, root } = await buildVault({
+      "three/1_first.md": "# First\n\nFirst body text.\n",
+      "three/2_second.md": "# Second\n\nSecond body text.\n",
+      "three/3_third.md": "# Third\n\nThird body text, unique-marker-C.\n",
+    });
+    failFor(app.vault, "cachedRead", "three/2_second.md", new Error("disk read failed"));
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "three"));
+
+    const epub = await readEpub("three.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    expect(await epub.chapter(2)).toContain("chapter failed to render");
+    expect(await epub.chapter(3)).toContain("unique-marker-C");
+    expect(warnings.some((w) => w.includes("chapter skipped"))).toBe(true);
+    expect(successNotices().some((n) => n.includes("Exported with 1 warning"))).toBe(true);
+  });
+
+  it("F2: a cross-chapter link still resolves to the correct chapter after an earlier chapter is skipped", async () => {
+    const { app, root } = await buildVault({
+      "three/1_first.md": "# First\n\nSee [[3_third]] for the ending.\n",
+      "three/2_second.md": "# Second\n\nSecond body text.\n",
+      "three/3_third.md": "# Third\n\nThird body text.\n",
+    });
+    failFor(app.vault, "cachedRead", "three/2_second.md", new Error("disk read failed"));
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "three"));
+
+    const chapter1 = await (await readEpub("three.epub")).chapter(1);
+    expect(chapter1).toContain('href="chapter_003.xhtml"');
+  });
+
+  it("F3: a missing image produces a warning and the export still succeeds", async () => {
+    const { app, root } = await buildVault({
+      "with_missing.md": "# Note\n\n![](gone.png)\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_missing.md"));
+
+    const epub = await readEpub("with_missing.epub");
+    expect(epub.spineCount(epub.opf)).toBe(1);
+    expect(warnings.some((w) => /missing image: gone\.png/.test(w))).toBe(true);
+    expect(epub.names.some((n) => n.startsWith("OEBPS/images/"))).toBe(false);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  it("F4: an unsupported image extension is skipped with a warning, not embedded", async () => {
+    const { app, root } = await buildVault({
+      "with_bmp.md": "# Note\n\n![](pic.bmp)\n",
+      "pic.bmp": new Uint8Array([1, 2, 3, 4]),
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_bmp.md"));
+
+    const epub = await readEpub("with_bmp.epub");
+    expect(warnings.some((w) => /unsupported image type: pic\.bmp/.test(w))).toBe(true);
+    expect(epub.names.some((n) => n.startsWith("OEBPS/images/"))).toBe(false);
+  });
+
+  it("F5: a readBinary failure still exports the chapter body, just without that image", async () => {
+    const { app, root } = await buildVault({
+      "with_photo.md": "# Note\n\nBody text survives. ![](photo.png)\n",
+      "photo.png": new Uint8Array([137, 80, 78, 71]),
+    });
+    failFor(app.vault, "readBinary", "photo.png", new Error("simulated read failure"));
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_photo.md"));
+
+    const epub = await readEpub("with_photo.epub");
+    const chapter1 = await epub.chapter(1);
+    expect(chapter1).not.toContain("chapter failed to render");
+    expect(chapter1).toContain("Body text survives.");
+    expect(warnings.some((w) => /missing image: photo\.png/.test(w))).toBe(true);
+  });
+
+  it("F6: a non-200 cover response degrades to a coverless, still-successful export", async () => {
+    const { app, root } = await buildVault({
+      "cover_fail.md": ['---', 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(async () => ({
+      status: 404,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    }));
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "cover_fail.md"));
+
+    const epub = await readEpub("cover_fail.epub");
+    expect(epub.names.some((n) => n.startsWith("OEBPS/images/cover."))).toBe(false);
+    expect(warnings.some((w) => w.includes("cover download failed"))).toBe(true);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  it("F7: a cover request that throws degrades the same way as a non-200 response", async () => {
+    const { app, root } = await buildVault({
+      "cover_throw.md": ['---', 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(async () => {
+      throw new Error("network down");
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "cover_throw.md"));
+
+    const epub = await readEpub("cover_throw.epub");
+    expect(epub.names.some((n) => n.startsWith("OEBPS/images/cover."))).toBe(false);
+    expect(warnings.some((w) => w.includes("cover download failed"))).toBe(true);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  it("a cover response with no content-type header at all still embeds, defaulting to jpg", async () => {
+    // Exercises `(res.headers["content-type"] ?? "").includes("png")`'s own
+    // `?? ""` fallback for real (a server that omits the header entirely),
+    // rather than every cover test so far which always sets one.
+    const { app, root } = await buildVault({
+      "cover_no_header.md": ['---', 'coverUrl: "https://example.com/cover"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(async () => ({
+      status: 200,
+      headers: {},
+      arrayBuffer: new Uint8Array([1, 2, 3, 4]).buffer,
+      text: "",
+      json: null,
+    }));
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "cover_no_header.md"));
+
+    const epub = await readEpub("cover_no_header.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.jpg");
+  });
+
+  it("F8: a successful push notifies and posts to the real upload endpoint", async () => {
+    const { app, root } = await buildVault({ "push_ok.md": "Body.\n" });
+    const seenUrls: string[] = [];
+    setRequestUrlImpl(async (req) => {
+      seenUrls.push(typeof req === "string" ? req : req.url);
+      return { status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: '{"successful":true}', json: null };
+    });
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox:8085" });
+
+    await plugin.exportSingle(tfile(root, "push_ok.md"));
+
+    expect(successNotices().some((n) => n.includes("pushed to Boox"))).toBe(true);
+    expect(seenUrls.some((u) => u.endsWith("/api/library/upload"))).toBe(true);
+  });
+
+  it("F9: a failed push leaves the local epub in place and reports the failure", async () => {
+    const { app, root } = await buildVault({ "push_fail.md": "Body.\n" });
+    setRequestUrlImpl(async () => ({
+      status: 500,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    }));
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox:8085" });
+
+    await plugin.exportSingle(tfile(root, "push_fail.md"));
+
+    expect(await outDirEntries()).toContain("push_fail.epub");
+    expect(successNotices().some((n) => /saved locally, push failed/.test(n))).toBe(true);
+  });
+
+  it("F10: push disabled means the upload endpoint is never contacted", async () => {
+    // Note filename deliberately avoids the word "push" — it ends up in the
+    // success Notice's own text ("EPUB saved to .../<slug>.epub"), which
+    // would otherwise give the "no push" assertion below a false positive.
+    const { app, root } = await buildVault({ "toggle_off.md": "Body.\n" });
+    // No setRequestUrlImpl override here: beforeEach's default THROWS on any
+    // request, so a regression that attempted a push anyway would surface as
+    // a "push failed: unexpected network access in test" suffix below.
+    const plugin = makePlugin(app, { pushAfterExport: false, booxUrl: "http://boox:8085" });
+
+    await plugin.exportSingle(tfile(root, "toggle_off.md"));
+
+    const notices = successNotices();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).not.toContain("pushed to Boox");
+    expect(notices[0]).not.toContain("push failed");
+  });
+
+  it("F11: an empty folder shows a notice and writes nothing", async () => {
+    const { app, root } = await buildVault({ "empty/.keep": "" });
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "empty"));
+
+    expect(NOTICES.some((n) => /no markdown notes/i.test(n))).toBe(true);
+    expect(await outDirEntries()).toHaveLength(0);
+  });
+
+  it("F12: a fatal export error (unwritable outputFolder) shows a failure notice and logs it", async () => {
+    const { app, root } = await buildVault({ "solo.md": "# Solo\n\nBody.\n" });
+    const blockerFile = join(outDir, "blocker");
+    await fs.writeFile(blockerFile, "not a directory\n");
+    const plugin = makePlugin(app, { outputFolder: join(blockerFile, "nested") });
+
+    await plugin.exportSingle(tfile(root, "solo.md"));
+
+    expect(NOTICES.some((n) => n.startsWith("EPUB export failed"))).toBe(true);
+    expect(errors.some((e) => e.includes("export failed"))).toBe(true);
   });
 });

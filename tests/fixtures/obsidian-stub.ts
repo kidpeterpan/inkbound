@@ -280,11 +280,26 @@ export class App {
   metadataCache!: unknown;
 }
 
+export interface StubCommand {
+  id: string;
+  name: string;
+  callback?: () => unknown;
+  [k: string]: unknown;
+}
+
 export class Plugin extends Component {
   app: App;
   manifest: unknown;
   settings?: unknown;
   private _data: unknown = {};
+
+  // Test-introspection state only, same rationale as ChainableControl/SETTINGS
+  // above: real Obsidian's Plugin.addCommand registers into the app-wide
+  // command palette, which this harness has no equivalent of. Recording what
+  // was passed — keyed by the command's own `id` — lets tests invoke
+  // `plugin.commands["export-note"].callback()` directly instead of needing a
+  // fake palette.
+  commands: Record<string, StubCommand> = {};
 
   constructor(app: App, manifest: unknown) {
     super();
@@ -292,8 +307,9 @@ export class Plugin extends Component {
     this.manifest = manifest;
   }
 
-  addCommand(cmd: unknown): unknown {
-    return cmd; // no-op: nothing registers a command palette in the harness
+  addCommand(cmd: StubCommand): StubCommand {
+    this.commands[cmd.id] = cmd;
+    return cmd;
   }
   addRibbonIcon(): HTMLElement {
     return document.createElement("div");
@@ -437,25 +453,44 @@ export class Setting {
 }
 
 // ── Menu ───────────────────────────────────────────────────────────────
+//
+// MenuItem/Menu also get the ChainableControl/SETTINGS treatment: real
+// Obsidian's MenuItem exposes no getters for its title/onClick, so these
+// extra public fields are additive test-introspection only — every method
+// still matches the real API's name/params/`this`-return exactly.
 
 export class MenuItem {
-  setTitle(_t: string): this {
+  title = "";
+  icon: string | null = null;
+  checked: boolean | null = null;
+  onClickFn?: (evt: MouseEvent | KeyboardEvent) => unknown;
+
+  setTitle(t: string): this {
+    this.title = t;
     return this;
   }
-  setIcon(_i: string | null): this {
+  setIcon(i: string | null): this {
+    this.icon = i;
     return this;
   }
-  setChecked(_c: boolean | null): this {
+  setChecked(c: boolean | null): this {
+    this.checked = c;
     return this;
   }
-  onClick(_fn: (evt: MouseEvent | KeyboardEvent) => unknown): this {
+  onClick(fn: (evt: MouseEvent | KeyboardEvent) => unknown): this {
+    this.onClickFn = fn;
     return this;
   }
 }
 
 export class Menu extends Component {
+  /** Every item added via addItem(), in order — see the comment above MenuItem. */
+  items: MenuItem[] = [];
+
   addItem(cb: (item: MenuItem) => unknown): this {
-    cb(new MenuItem());
+    const item = new MenuItem();
+    this.items.push(item);
+    cb(item);
     return this;
   }
   addSeparator(): this {
