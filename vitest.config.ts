@@ -20,6 +20,13 @@ export default defineConfig({
       // Interfaces only — emits no JS, so v8 reports 0/0 and would fail any threshold.
       exclude: ["src/types.ts"],
       reporter: ["text", "html", "lcov"],
+      thresholds: {
+        perFile: true,
+        statements: 85,
+        lines: 85,
+        functions: 85,
+        branches: 85,
+      },
     },
   },
 });
