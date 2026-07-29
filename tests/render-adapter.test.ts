@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
-import { renderUnitToChapter } from "../src/render-adapter";
+import { renderUnitToChapter, setSvgRasterizer } from "../src/render-adapter";
 
 // Deviation from the brief's illustrative `appWith`: the real
 // MarkdownRenderer.render() (see tests/fixtures/obsidian-stub.ts) reads
@@ -35,6 +35,13 @@ function newComponent(): never {
 }
 
 describe("renderUnitToChapter", () => {
+  afterEach(() => {
+    // Module state discipline — same reason as setRequestUrlImpl in
+    // tests/fixtures/obsidian-stub.ts: a fake left installed would leak into
+    // an unrelated later test.
+    setSvgRasterizer(null);
+  });
+
   it("strips frontmatter and dataview, returning a bare XHTML fragment", async () => {
     const r = await renderUnitToChapter(
       appWith(null),
@@ -124,5 +131,44 @@ describe("renderUnitToChapter", () => {
     );
     expect(r.xhtmlBody).not.toContain("<a ");
     expect(r.xhtmlBody).toContain("Nowhere");
+  });
+
+  it("rasterizes a mermaid diagram to a PNG <img>, composing numbering with a regular image in the same doc", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1, 2, 3, 4]), width: 200, height: 100 }));
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "![cap](pic.png)\n\n```mermaid\ngraph TD; A-->B;\n```\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).not.toContain("<svg");
+    expect(r.xhtmlBody).toContain('src="../images/img_002.png"');
+    expect(r.xhtmlBody).toContain('alt="diagram"');
+    expect(r.xhtmlBody).toContain('width="200"');
+    expect(r.xhtmlBody).toMatch(/<p><img[^>]*\/><\/p>/);
+    expect(r.images).toEqual([
+      { vaultPath: "pic.png", newHref: "../images/img_001.png" },
+      { newHref: "../images/img_002.png", bytes: new Uint8Array([1, 2, 3, 4]), mediaType: "image/png" },
+    ]);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("keeps the inline SVG fallback and emits exactly one warning when the rasterizer returns null, even with two mermaid diagrams", async () => {
+    setSvgRasterizer(async () => null);
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "```mermaid\ngraph TD; A-->B;\n```\n\n```mermaid\ngraph TD; C-->D;\n```\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect((r.xhtmlBody.match(/<svg/g) ?? []).length).toBe(2);
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings.filter((w) => w.includes("mermaid rasterization unavailable"))).toHaveLength(1);
   });
 });

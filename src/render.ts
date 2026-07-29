@@ -344,3 +344,154 @@ export function serializeBody(root: HTMLElement): string {
   // Normalize <br /> to <br/>.
   return inner.replace(/ \/>/g, "/>");
 }
+
+// ── Mermaid rasterization (Round 3) ───────────────────────────────────────
+//
+// The prior rounds (normalizeMermaidSvg above) made mermaid SVGs spec-valid
+// (epubcheck: 0 errors). That's not enough for every device: at least one
+// e-ink reader (Onyx Boox / Neo Reader 3) doesn't render inline SVG inside
+// EPUB XHTML at all, while plain raster <img> assets are proven to work on
+// it. The fix is to rasterize each normalized mermaid SVG to a PNG at export
+// time and embed it as a normal image, falling back to the (still
+// spec-valid) inline SVG when rasterization isn't possible.
+//
+// This lives HERE rather than in src/render-adapter.ts (where an earlier
+// draft of this feature placed it) for the same reason rewriteImages leaves
+// vault-path resolution to its caller: render-adapter.ts imports real
+// VALUES from "obsidian" (App, Component, MarkdownRenderer, TFile), and
+// "obsidian" ships type declarations only, no runtime JS. Anything that
+// imports render-adapter.ts outside vitest's "obsidian" alias crashes with
+// "Cannot find module 'obsidian'" (verified directly: a plain `tsx` run of a
+// one-line script importing renderUnitToChapter throws exactly that).
+// scripts/verify-real-mermaid.ts needs to exercise the DEFAULT rasterizer's
+// fallback behavior (no canvas under jsdom) without going through Obsidian,
+// so the rasterizer plumbing stays in this obsidian-free module.
+// render-adapter.ts re-exports `setSvgRasterizer`/`SvgRasterizer` and wires
+// `rasterizeMermaidDiagrams` into `renderUnitToChapter`.
+
+export type SvgRasterizer = (
+  svg: SVGSVGElement
+) => Promise<{ bytes: Uint8Array; width: number; height: number } | null>;
+
+const RASTER_SCALE = 2;
+const MAX_CANVAS_DIM = 4096;
+
+// Real (Electron-renderer) rasterizer: serialize -> Blob URL -> Image ->
+// canvas -> PNG bytes. Returns null on ANY failure instead of throwing —
+// callers treat null as "keep the inline SVG fallback", not an export error.
+async function defaultRasterizeSvg(
+  svg: SVGSVGElement
+): Promise<{ bytes: Uint8Array; width: number; height: number } | null> {
+  const cssWidth = parseFloat(svg.getAttribute("width") ?? "") || 0;
+  const cssHeight = parseFloat(svg.getAttribute("height") ?? "") || 0;
+  if (cssWidth <= 0 || cssHeight <= 0) return null;
+
+  let scale = RASTER_SCALE;
+  if (cssWidth * scale > MAX_CANVAS_DIM || cssHeight * scale > MAX_CANVAS_DIM) {
+    scale = Math.min(MAX_CANVAS_DIM / cssWidth, MAX_CANVAS_DIM / cssHeight);
+  }
+  const canvasWidth = Math.max(1, Math.round(cssWidth * scale));
+  const canvasHeight = Math.max(1, Math.round(cssHeight * scale));
+
+  let blobUrl: string | null = null;
+  try {
+    const serialized = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([serialized], { type: "image/svg+xml" });
+    blobUrl = URL.createObjectURL(blob);
+
+    const img = new Image();
+    const loaded = await new Promise<boolean>((resolve) => {
+      img.onload = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = blobUrl!;
+    });
+    if (!loaded) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null; // jsdom (no "canvas" package installed): no 2d context
+
+    // Fill white first: e-ink readers, and PNG would otherwise be transparent.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+
+    const dataUrl = canvas.toDataURL("image/png");
+    const comma = dataUrl.indexOf(",");
+    if (comma === -1) return null;
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    return { bytes, width: cssWidth, height: cssHeight };
+  } catch {
+    return null;
+  } finally {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+  }
+}
+
+let svgRasterizer: SvgRasterizer = defaultRasterizeSvg;
+
+/** Install a deterministic rasterizer for tests. `null` restores the default (real) one. */
+export function setSvgRasterizer(fn: SvgRasterizer | null): void {
+  svgRasterizer = fn ?? defaultRasterizeSvg;
+}
+
+export interface RasterizedMermaidImage {
+  newHref: string;
+  bytes: Uint8Array;
+  mediaType: string;
+}
+
+// Finds every mermaid diagram in `root` (div.mermaid > svg — the shape a
+// real Obsidian export produces, see tests/fixtures/mermaid-real.xhtml —
+// plus a defensive svg.mermaid-with-no-wrapper-div variant) and rasterizes
+// each one via the currently-installed rasterizer. A diagram that rasterizes
+// successfully has its whole div.mermaid replaced with a <p><img></p>
+// (numbered starting at startIndex+1, continuing rewriteImages's numbering
+// so the two compose); one that doesn't is left exactly as-is (the
+// spec-valid inline-SVG fallback), and a single warning is emitted per
+// chapter no matter how many diagrams in it fell back.
+export async function rasterizeMermaidDiagrams(
+  root: HTMLElement,
+  startIndex: number
+): Promise<{ images: RasterizedMermaidImage[]; warnings: string[] }> {
+  const images: RasterizedMermaidImage[] = [];
+  const warnings: string[] = [];
+  let warned = false;
+
+  const hosts: Element[] = [];
+  root.querySelectorAll("div.mermaid").forEach((div) => hosts.push(div));
+  root.querySelectorAll("svg.mermaid").forEach((svg) => {
+    if (!svg.closest("div.mermaid")) hosts.push(svg);
+  });
+
+  for (const host of hosts) {
+    const svg = (
+      host.tagName.toLowerCase() === "svg" ? host : host.querySelector("svg")
+    ) as SVGSVGElement | null;
+    if (!svg) continue;
+
+    const result = await svgRasterizer(svg);
+    if (result) {
+      const index = startIndex + images.length + 1;
+      const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;
+      const img = document.createElement("img");
+      img.setAttribute("src", newHref);
+      img.setAttribute("alt", "diagram");
+      img.setAttribute("width", String(result.width));
+      const p = document.createElement("p");
+      p.appendChild(img);
+      host.replaceWith(p);
+      images.push({ newHref, bytes: result.bytes, mediaType: "image/png" });
+    } else if (!warned) {
+      warnings.push("mermaid rasterization unavailable — kept inline SVG (may not render on e-ink)");
+      warned = true;
+    }
+  }
+
+  return { images, warnings };
+}

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
+import { setSvgRasterizer } from "../src/render-adapter";
 import {
   TFile,
   TFolder,
@@ -64,6 +65,7 @@ afterEach(async () => {
   console.warn = originalWarn;
   console.error = originalError;
   resetRequestUrlImpl();
+  setSvgRasterizer(null); // module state discipline, same reason as resetRequestUrlImpl above
   await fs.rm(outDir, { recursive: true, force: true });
   await Promise.all(vaultDirs.map((d) => fs.rm(d, { recursive: true, force: true })));
 });
@@ -957,5 +959,48 @@ describe("failure paths", () => {
 
     expect(NOTICES.some((n) => n.startsWith("EPUB export failed"))).toBe(true);
     expect(errors.some((e) => e.includes("export failed"))).toBe(true);
+  });
+});
+
+describe("mermaid rasterization (Round 3)", () => {
+  it("case 13: an injected rasterizer turns a mermaid diagram into a PNG asset — no inline svg, no svg property left", async () => {
+    const fakeBytes = new Uint8Array([9, 9, 9, 9]);
+    setSvgRasterizer(async () => ({ bytes: fakeBytes, width: 200, height: 100 }));
+    const { app, root } = await buildVault({
+      "with_diagram.md": "# Diagram\n\n```mermaid\ngraph TD; A-->B;\n```\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_diagram.md"));
+
+    const epub = await readEpub("with_diagram.epub");
+    const chapter1 = await epub.chapter(1);
+    expect(epub.names).toContain("OEBPS/images/img_001.png");
+    expect(chapter1).toContain("../images/img_001.png");
+    expect(chapter1).not.toContain("<svg");
+    expect(epub.opf).toContain('href="images/img_001.png" media-type="image/png"');
+    expect(epub.opf).not.toContain('properties="svg"');
+    const assetBytes = await epub.zip.file("OEBPS/images/img_001.png")!.async("uint8array");
+    expect(Array.from(assetBytes)).toEqual(Array.from(fakeBytes));
+    expect(warnings.filter((w) => w.includes("mermaid rasterization"))).toHaveLength(0);
+  });
+
+  it("case 14: with no rasterizer injected, jsdom has no canvas so the real default falls back to inline svg (properties=svg, warning surfaced)", async () => {
+    const { app, root } = await buildVault({
+      "with_diagram.md": "# Diagram\n\n```mermaid\ngraph TD; A-->B;\n```\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_diagram.md"));
+
+    const epub = await readEpub("with_diagram.epub");
+    const chapter1 = await epub.chapter(1);
+    expect(chapter1).toContain("<svg");
+    expect(epub.opf).toMatch(
+      /id="ch_001" href="text\/chapter_001\.xhtml" media-type="application\/xhtml\+xml" properties="svg"/
+    );
+    const notices = successNotices();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("Exported with 1 warning");
   });
 });

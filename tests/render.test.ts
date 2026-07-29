@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -8,6 +8,8 @@ import {
   normalizeMermaidSvg,
   rewriteLinks,
   rewriteImages,
+  rasterizeMermaidDiagrams,
+  setSvgRasterizer,
   serializeBody,
 } from "../src/render";
 
@@ -300,6 +302,14 @@ describe("rewriteImages", () => {
     expect(found).toEqual([]);
     expect(el.querySelector("img")?.getAttribute("src")).toBe(`app://abc123${base}/100%off.png`);
   });
+  it("tolerates a malformed relative (non-app://) image URI with a literal percent", () => {
+    const el = div(`<img src="100%off.png">`);
+    const found = rewriteImages(el, "/vault");
+    // Malformed URI is skipped: src unchanged, not in found list.
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("100%off.png");
+  });
+
   it("offsets numbering with startIndex to avoid collisions across chapters", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="app://abc123${base}/pic.png">`);
@@ -483,5 +493,163 @@ describe("serializeBody", () => {
   it("returns empty string for empty root", () => {
     const el = div("");
     expect(serializeBody(el)).toBe("");
+  });
+});
+
+describe("rasterizeMermaidDiagrams", () => {
+  afterEach(() => {
+    setSvgRasterizer(null); // module state discipline, same reason as setRequestUrlImpl elsewhere
+  });
+
+  it("falls back (with a warning) when the svg has no usable width/height", async () => {
+    const root = div('<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg"></svg></div>');
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      "mermaid rasterization unavailable — kept inline SVG (may not render on e-ink)",
+    ]);
+    expect(root.querySelector("svg")).not.toBeNull();
+  });
+
+  it("computes a reduced scale for an oversized svg instead of exceeding the canvas dimension cap", async () => {
+    // 3000 * the normal 2x scale would be 6000, over the 4096 cap — exercises
+    // the downscale branch. Still falls back overall: jsdom has neither
+    // URL.createObjectURL nor a real canvas 2d context, so this can't reach a
+    // real Electron canvas — only the scale arithmetic itself is under test.
+    const root = div(
+      '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="3000" height="3000"></svg></div>'
+    );
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toHaveLength(1);
+  });
+
+  it("does not double-process a wrapped svg.mermaid, and still picks up a bare (unwrapped) one", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1]), width: 10, height: 10 }));
+    const root = div(
+      '<div class="mermaid"><svg class="mermaid" xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg></div>' +
+        '<svg class="mermaid" xmlns="http://www.w3.org/2000/svg" width="20" height="20"></svg>'
+    );
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    // Two hosts, not three: the wrapped svg.mermaid must be attributed to its
+    // div.mermaid exactly once, not counted again via the bare-svg query.
+    expect(r.images).toHaveLength(2);
+  });
+
+  it("skips a div.mermaid with no svg inside it at all", async () => {
+    const root = div('<div class="mermaid">not rendered yet</div>');
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  describe("default (real) rasterizer, browser APIs mocked", () => {
+    // render.ts's default rasterizer drives real browser APIs (Image, canvas,
+    // Blob, URL.createObjectURL) that jsdom either doesn't implement at all
+    // (URL.createObjectURL) or implements as a stub that always returns null
+    // (canvas 2d context) — see the module comment in src/render.ts. These
+    // tests stub just enough of that surface to walk the rest of the
+    // function's branches deterministically; they do NOT prove the real
+    // Electron/Chromium canvas pipeline draws correctly (that needs a real
+    // browser — see the round-3 report's "unprovable outside Electron" note).
+    const originalImage = globalThis.Image;
+    const originalCreateObjectURL = URL.createObjectURL;
+    const originalRevokeObjectURL = URL.revokeObjectURL;
+    const originalGetContext = HTMLCanvasElement.prototype.getContext;
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+
+    afterEach(() => {
+      globalThis.Image = originalImage;
+      URL.createObjectURL = originalCreateObjectURL;
+      URL.revokeObjectURL = originalRevokeObjectURL;
+      HTMLCanvasElement.prototype.getContext = originalGetContext;
+      HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
+    });
+
+    function stubObjectUrl(): void {
+      URL.createObjectURL = (() => "blob:fake") as typeof URL.createObjectURL;
+      URL.revokeObjectURL = (() => {}) as typeof URL.revokeObjectURL;
+    }
+
+    function stubImage(outcome: "load" | "error"): void {
+      class FakeImage {
+        onload: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        set src(_v: string) {
+          queueMicrotask(() => (outcome === "load" ? this.onload?.() : this.onerror?.()));
+        }
+      }
+      globalThis.Image = FakeImage as unknown as typeof Image;
+    }
+
+    it("rasterizes end-to-end when Image load + canvas + toDataURL all succeed", async () => {
+      stubObjectUrl();
+      stubImage("load");
+      HTMLCanvasElement.prototype.getContext = (() => ({
+        fillStyle: "",
+        fillRect() {},
+        drawImage() {},
+      })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.toDataURL = (() =>
+        "data:image/png;base64,AAECAw==") as unknown as typeof HTMLCanvasElement.prototype.toDataURL;
+
+      const root = div(
+        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="10" height="10"/></svg></div>'
+      );
+      const r = await rasterizeMermaidDiagrams(root, 2);
+      expect(r.warnings).toHaveLength(0);
+      expect(r.images).toEqual([
+        { newHref: "../images/img_003.png", bytes: new Uint8Array([0, 1, 2, 3]), mediaType: "image/png" },
+      ]);
+      expect(root.querySelector("div.mermaid")).toBeNull();
+      const img = root.querySelector("p > img")!;
+      expect(img.getAttribute("src")).toBe("../images/img_003.png");
+      expect(img.getAttribute("alt")).toBe("diagram");
+      expect(img.getAttribute("width")).toBe("120");
+    });
+
+    it("falls back when the Image element fails to load", async () => {
+      stubObjectUrl();
+      stubImage("error");
+      const root = div(
+        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg></div>'
+      );
+      const r = await rasterizeMermaidDiagrams(root, 0);
+      expect(r.images).toHaveLength(0);
+      expect(r.warnings).toHaveLength(1);
+      expect(root.querySelector("svg")).not.toBeNull();
+    });
+
+    it("falls back when the canvas has no 2d context (real jsdom behavior, left un-mocked here)", async () => {
+      stubObjectUrl();
+      stubImage("load");
+      // getContext deliberately left as jsdom's real implementation, which
+      // returns null (no "canvas" npm package installed).
+      const root = div(
+        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg></div>'
+      );
+      const r = await rasterizeMermaidDiagrams(root, 0);
+      expect(r.images).toHaveLength(0);
+      expect(r.warnings).toHaveLength(1);
+    });
+
+    it("falls back when toDataURL returns a string with no comma (malformed data URL guard)", async () => {
+      stubObjectUrl();
+      stubImage("load");
+      HTMLCanvasElement.prototype.getContext = (() => ({
+        fillStyle: "",
+        fillRect() {},
+        drawImage() {},
+      })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+      HTMLCanvasElement.prototype.toDataURL = (() =>
+        "not-a-data-url") as unknown as typeof HTMLCanvasElement.prototype.toDataURL;
+
+      const root = div(
+        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg></div>'
+      );
+      const r = await rasterizeMermaidDiagrams(root, 0);
+      expect(r.images).toHaveLength(0);
+      expect(r.warnings).toHaveLength(1);
+    });
   });
 });

@@ -18,12 +18,21 @@ import {
   cleanupDom,
   rewriteLinks,
   rewriteImages,
+  rasterizeMermaidDiagrams,
   serializeBody,
 } from "./render";
 
+// Re-exported so callers/tests can inject a deterministic rasterizer via the
+// same module path they already import renderUnitToChapter from. The real
+// implementation lives in render.ts — see the "Mermaid rasterization" block
+// there for why (importing THIS module pulls in "obsidian", which has no
+// runtime JS outside Obsidian/vitest).
+export { setSvgRasterizer } from "./render";
+export type { SvgRasterizer } from "./render";
+
 export interface ChapterRender {
   xhtmlBody: string;
-  images: { vaultPath: string; newHref: string }[];
+  images: { newHref: string; vaultPath?: string; bytes?: Uint8Array; mediaType?: string }[];
   warnings: string[];
 }
 
@@ -49,7 +58,13 @@ export async function renderUnitToChapter(
     };
     warnings.push(...rewriteLinks(el, hrefByPath, resolve));
     const images = rewriteImages(el, basePath, startImageIndex);
-    return { xhtmlBody: serializeBody(el), images, warnings };
+    // Composes with rewriteImages's numbering: mermaid PNGs continue where
+    // the regular images left off, so run this AFTER rewriteImages and offset
+    // by how many it already stamped.
+    const mermaid = await rasterizeMermaidDiagrams(el, startImageIndex + images.length);
+    warnings.push(...mermaid.warnings);
+    const xhtmlBody = serializeBody(el);
+    return { xhtmlBody, images: [...images, ...mermaid.images], warnings };
   } finally {
     el.remove();
   }

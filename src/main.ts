@@ -221,14 +221,21 @@ export default class EpubExportPlugin extends Plugin {
           // already burned into r.xhtmlBody regardless of what happens next.
           imageCount += r.images.length;
           for (const img of r.images) {
+            if (img.bytes) {
+              // Rasterized mermaid diagram: bytes were produced directly by
+              // renderUnitToChapter, not read from a vault file — skip vault
+              // resolution entirely.
+              builder.addAsset(img.newHref.replace(/^\.\.\//, ""), img.bytes, img.mediaType!);
+              continue;
+            }
             try {
-              let af = this.app.vault.getAbstractFileByPath(img.vaultPath);
+              let af = this.app.vault.getAbstractFileByPath(img.vaultPath!);
               if (!(af instanceof TFile)) {
                 // Not a vault-rooted path (or app://-derived path didn't match
                 // as-is) — fall back to Obsidian's own link resolver, which
                 // handles paths relative to the source note and bare
                 // filenames (same resolver render-adapter.ts uses for links).
-                af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath, file.path);
+                af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath!, file.path);
               }
               if (!(af instanceof TFile)) throw new Error("not found in vault");
               const ext = img.newHref.split(".").pop()!;

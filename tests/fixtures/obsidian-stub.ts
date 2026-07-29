@@ -594,6 +594,8 @@ function preprocessMarkdown(md: string, app: RenderApp, sourcePath: string, base
   const lines = md.split(/\r?\n/);
   const output: string[] = [];
   let inFence = false;
+  let inMermaidFence = false;
+  let mermaidIndex = 0;
   let calloutLines: string[] | null = null;
   let calloutType = "";
   let calloutTitle = "";
@@ -613,6 +615,33 @@ function preprocessMarkdown(md: string, app: RenderApp, sourcePath: string, base
   };
 
   for (const rawLine of lines) {
+    // Mermaid fence open: real Obsidian never leaves a ```mermaid fence as a
+    // <pre><code> block — its mermaid plugin replaces the whole fence with
+    // <div class="mermaid"><svg>...</svg></div> (this is exactly what a real
+    // device export contained). Emulate that shape here — see the shared
+    // fixture's documented policy at the top of this file — rather than
+    // falling through to marked's default fenced-code-block handling.
+    if (!inFence && /^\s*```\s*mermaid\s*$/i.test(rawLine)) {
+      flushCallout();
+      inFence = true;
+      inMermaidFence = true;
+      continue; // fence marker itself is never emitted
+    }
+    if (inMermaidFence) {
+      if (/^\s*```\s*$/.test(rawLine)) {
+        inFence = false;
+        inMermaidFence = false;
+        mermaidIndex += 1;
+        output.push(
+          "",
+          `<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100" id="mstub${mermaidIndex}"><rect width="10" height="10"/></svg></div>`,
+          ""
+        );
+      }
+      // Mermaid source lines are discarded either way — real mermaid
+      // replaces them, it never keeps the fence's raw text in the output.
+      continue;
+    }
     if (/^\s*```/.test(rawLine)) {
       flushCallout();
       inFence = !inFence;
