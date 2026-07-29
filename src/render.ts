@@ -109,6 +109,35 @@ function normalizeForeignObjects(svg: SVGElement): void {
   });
 }
 
+// Escapes a string for safe interpolation into a RegExp source.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Rewrites one mermaid <style> element's textContent so its selectors (and
+// any url(#OLD) references) target the freshly-prefixed ids instead of the
+// pre-prefix ones, and so its font-family declaration survives outside
+// Obsidian. Mermaid scopes its entire stylesheet under the svg's own id
+// (e.g. "#abc123{...} #abc123 .error-icon{...}"); once prefixIds renames the
+// svg's id to "m2_abc123" but leaves the style text saying "#abc123", none of
+// the rules match anything anymore and every shape falls back to SVG's
+// default black fill. The lookahead boundary check (next char not
+// [A-Za-z0-9_-]) prevents an id that's a textual prefix of another id (e.g.
+// "abc123" vs "abc123-marker") from corrupting the longer one; it also
+// happens to cover "url(#OLD)" for free, since "#OLD" there is followed by
+// ")" (not an id-continuation char) as well as "#OLD{" and "#OLD " selectors.
+function rewriteStyleIds(styleText: string, idMap: Map<string, string>): string {
+  let result = styleText;
+  for (const [oldId, newId] of idMap) {
+    const pattern = new RegExp(`#${escapeRegExp(oldId)}(?![A-Za-z0-9_-])`, "g");
+    result = result.replace(pattern, `#${newId}`);
+  }
+  // The mermaid-supplied font-family variable only exists inside Obsidian's
+  // own CSS; in an EPUB reader the declaration collapses to nothing, so give
+  // it a fallback.
+  return result.replace(/var\(--font-mermaid\)/g, "var(--font-mermaid, sans-serif)");
+}
+
 // Prefixes every id in one mermaid <svg> (and the svg's own id) with a
 // stable per-diagram prefix, rewriting every url(#OLD)/href="#OLD" reference
 // in lockstep so nothing breaks. Mermaid emits the same element ids (e.g.
@@ -151,6 +180,11 @@ function prefixIds(svg: SVGElement, prefix: string): void {
       if (newValue !== value) el.setAttribute(name, newValue);
     }
   }
+
+  svg.querySelectorAll("style").forEach((style) => {
+    const rewritten = rewriteStyleIds(style.textContent ?? "", idMap);
+    if (rewritten !== style.textContent) style.textContent = rewritten;
+  });
 }
 
 // Mermaid diagrams live in div.mermaid > svg, but this handles any inline

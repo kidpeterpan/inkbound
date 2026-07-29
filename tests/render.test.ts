@@ -205,6 +205,56 @@ describe("normalizeMermaidSvg (via cleanupDom, real fixture)", () => {
     expect(el.querySelectorAll("foreignObject").length).toBe(0);
     expect(el.querySelectorAll("text").length).toBe(0);
   });
+
+  it("rewrites the <style> element's selectors to the new prefixed svg id (leaves no bare-old-id selector)", () => {
+    const original = div(MERMAID_FIXTURE);
+    const oldId = original.querySelector("svg")!.id;
+    expect(oldId).toBeTruthy();
+
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const style = el.querySelector("style");
+    expect(style).not.toBeNull();
+    const newId = el.querySelector("svg")!.id;
+    expect(newId).not.toBe(oldId);
+    expect(newId.endsWith(oldId)).toBe(true);
+
+    // The style now targets the new id...
+    expect(style!.textContent).toContain(`#${newId}`);
+    // ...and no longer contains the bare old id as a selector (a plain
+    // substring match would be a false negative if newId simply extends
+    // oldId, so this checks specifically for "#OLD" not followed by an
+    // id-continuation character).
+    const bareOldIdSelector = new RegExp(`#${oldId}(?![A-Za-z0-9_-])`);
+    expect(bareOldIdSelector.test(style!.textContent ?? "")).toBe(false);
+  });
+
+  it("gives each of two duplicated diagrams a <style> block scoped to its OWN prefix", () => {
+    const el = div(MERMAID_FIXTURE + MERMAID_FIXTURE);
+    normalizeMermaidSvg(el);
+    const svgs = Array.from(el.querySelectorAll("svg"));
+    expect(svgs.length).toBe(2);
+    const [svg1, svg2] = svgs;
+    expect(svg1.id.startsWith("m1_")).toBe(true);
+    expect(svg2.id.startsWith("m2_")).toBe(true);
+
+    const style1 = svg1.querySelector("style")!.textContent ?? "";
+    const style2 = svg2.querySelector("style")!.textContent ?? "";
+    expect(style1).toContain(`#${svg1.id}`);
+    expect(style2).toContain(`#${svg2.id}`);
+    // Cross-contamination check: the m1_-prefixed style must not reference
+    // any m2_ id and vice versa.
+    expect(style1.includes(svg2.id)).toBe(false);
+    expect(style2.includes(svg1.id)).toBe(false);
+  });
+
+  it("adds a sans-serif fallback to the mermaid font-family CSS variable (which only resolves inside Obsidian)", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const style = el.querySelector("style");
+    expect(style!.textContent).toContain("var(--font-mermaid, sans-serif)");
+    expect(style!.textContent).not.toContain("var(--font-mermaid)");
+  });
 });
 
 describe("rewriteLinks", () => {

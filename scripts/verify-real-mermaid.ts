@@ -32,6 +32,29 @@ const chapters = readdirSync(textDir)
   .filter((f) => f.startsWith("chapter_"))
   .sort();
 
+// Extracts every "#some-id" ID-selector token that appears in the SELECTOR
+// part of a CSS rule (i.e. before its "{"), ignoring anything inside the
+// declaration body so color values like "fill:#333;" are never mistaken for
+// selectors.
+function extractSelectorIds(cssText: string): string[] {
+  const ids: string[] = [];
+  for (const rule of cssText.split("}")) {
+    const openIdx = rule.indexOf("{");
+    if (openIdx === -1) continue;
+    const selectorPart = rule.slice(0, openIdx);
+    const idMatches = selectorPart.match(/#[A-Za-z_][\w-]*/g) ?? [];
+    for (const m of idMatches) ids.push(m.slice(1));
+  }
+  return ids;
+}
+
+// Also treats url(#some-id) occurrences anywhere in the style text (selector
+// or declaration) as a reference that must resolve, since a broken url(#...)
+// reference (e.g. a marker fill) is exactly the same class of bug.
+function extractUrlRefIds(cssText: string): string[] {
+  return Array.from(cssText.matchAll(/url\(#([A-Za-z_][\w-]*)\)/g)).map((m) => m[1]);
+}
+
 const builder = new EpubBuilder({ title: "verify-real", author: "verify", language: "th" });
 let foBefore = 0;
 let foAfter = 0;
@@ -39,6 +62,8 @@ let textAfter = 0;
 let pInSpanBefore = 0;
 let pInSpanAfter = 0;
 let svgCount = 0;
+let stylePassCount = 0;
+let styleFailCount = 0;
 
 for (const name of chapters) {
   const raw = readFileSync(path.join(textDir, name), "utf8");
@@ -53,6 +78,34 @@ for (const name of chapters) {
   foAfter += holder.querySelectorAll("foreignObject").length;
   pInSpanAfter += holder.querySelectorAll("span p").length;
   textAfter += holder.querySelectorAll("text").length;
+
+  // Style-scoping check: every #id token referenced by this chapter's
+  // <style> blocks (as a selector, or via url(#id)) must resolve to an id
+  // that actually exists in this chapter's post-cleanup markup. If the
+  // style-rewrite step regresses (or is bypassed), mermaid's stylesheet
+  // keeps targeting pre-prefix ids that no longer exist anywhere in the
+  // chapter, every rule stops matching, and diagrams render as solid black
+  // blobs (everything falls back to SVG's default fill).
+  const idsInChapter = new Set(
+    Array.from(holder.querySelectorAll("[id]")).map((el) => el.getAttribute("id"))
+  );
+  const unresolved: string[] = [];
+  holder.querySelectorAll("style").forEach((style) => {
+    const cssText = style.textContent ?? "";
+    const referenced = [...extractSelectorIds(cssText), ...extractUrlRefIds(cssText)];
+    for (const id of referenced) {
+      if (!idsInChapter.has(id)) unresolved.push(id);
+    }
+  });
+  const status = unresolved.length === 0 ? "PASS" : "FAIL";
+  if (status === "PASS") stylePassCount++;
+  else styleFailCount++;
+  const uniqueUnresolved = Array.from(new Set(unresolved));
+  const detail = uniqueUnresolved.length
+    ? ` (unresolved: ${uniqueUnresolved.slice(0, 5).join(", ")}${uniqueUnresolved.length > 5 ? ", ..." : ""})`
+    : "";
+  console.log(`[style-scoping] ${status} ${name}${detail}`);
+
   // Drop <img> references: the images themselves are not re-embedded here, and
   // a dangling href would add noise unrelated to the SVG question under test.
   holder.querySelectorAll("img").forEach((el) => el.remove());
@@ -69,6 +122,9 @@ async function main() {
   console.log(`foreignObject before -> after:     ${foBefore} -> ${foAfter}`);
   console.log(`<p> inside <span> before -> after: ${pInSpanBefore} -> ${pInSpanAfter}`);
   console.log(`<text> elements after:             ${textAfter}`);
+  console.log(
+    `[style-scoping] TOTAL: ${stylePassCount} PASS, ${styleFailCount} FAIL (of ${chapters.length} chapters)`
+  );
   console.log(`wrote ${out}`);
 }
 
