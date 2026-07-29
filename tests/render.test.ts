@@ -524,6 +524,26 @@ describe("rasterizeMermaidDiagrams", () => {
     expect(r.warnings).toHaveLength(1);
   });
 
+  it("rounds a fractional rasterizer-reported width to an integer <img width> attribute", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1]), width: 200.6, height: 100 }));
+    const root = div(
+      '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="200.6" height="100"></svg></div>'
+    );
+    await rasterizeMermaidDiagrams(root, 0);
+    const img = root.querySelector("img")!;
+    expect(img.getAttribute("width")).toBe("201");
+  });
+
+  it("omits the width attribute rather than writing 'NaN' when the rasterizer reports a non-finite width", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1]), width: NaN, height: 100 }));
+    const root = div(
+      '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg></div>'
+    );
+    await rasterizeMermaidDiagrams(root, 0);
+    const img = root.querySelector("img")!;
+    expect(img.hasAttribute("width")).toBe(false);
+  });
+
   it("does not double-process a wrapped svg.mermaid, and still picks up a bare (unwrapped) one", async () => {
     setSvgRasterizer(async () => ({ bytes: new Uint8Array([1]), width: 10, height: 10 }));
     const root = div(
@@ -593,8 +613,13 @@ describe("rasterizeMermaidDiagrams", () => {
       HTMLCanvasElement.prototype.toDataURL = (() =>
         "data:image/png;base64,AAECAw==") as unknown as typeof HTMLCanvasElement.prototype.toDataURL;
 
+      // Fractional width (774.8046875 is the real mermaid fixture's actual
+      // svg width — see tests/fixtures/mermaid-real.xhtml) is deliberate:
+      // XHTML's `width` attribute must be an integer (epubcheck RSC-005), so
+      // this fixture is discriminating against a regression that writes the
+      // raw fractional value straight through instead of rounding it.
       const root = div(
-        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect width="10" height="10"/></svg></div>'
+        '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="774.8046875" height="80"><rect width="10" height="10"/></svg></div>'
       );
       const r = await rasterizeMermaidDiagrams(root, 2);
       expect(r.warnings).toHaveLength(0);
@@ -605,7 +630,8 @@ describe("rasterizeMermaidDiagrams", () => {
       const img = root.querySelector("p > img")!;
       expect(img.getAttribute("src")).toBe("../images/img_003.png");
       expect(img.getAttribute("alt")).toBe("diagram");
-      expect(img.getAttribute("width")).toBe("120");
+      expect(img.getAttribute("width")).toMatch(/^\d+$/);
+      expect(img.getAttribute("width")).toBe("775");
     });
 
     it("falls back when the Image element fails to load", async () => {

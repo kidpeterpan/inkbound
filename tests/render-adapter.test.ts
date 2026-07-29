@@ -134,7 +134,11 @@ describe("renderUnitToChapter", () => {
   });
 
   it("rasterizes a mermaid diagram to a PNG <img>, composing numbering with a regular image in the same doc", async () => {
-    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1, 2, 3, 4]), width: 200, height: 100 }));
+    // Fractional width (a real mermaid svg's width, e.g. "774.8046875") is
+    // deliberate: XHTML's `width` attribute must be an integer (epubcheck
+    // RSC-005), so this is discriminating against a regression that writes
+    // the raw fractional value straight through.
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([1, 2, 3, 4]), width: 200.6, height: 100 }));
     const r = await renderUnitToChapter(
       appWith(null),
       newComponent(),
@@ -147,7 +151,9 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).not.toContain("<svg");
     expect(r.xhtmlBody).toContain('src="../images/img_002.png"');
     expect(r.xhtmlBody).toContain('alt="diagram"');
-    expect(r.xhtmlBody).toContain('width="200"');
+    const widthMatch = /width="(\d+)"/.exec(r.xhtmlBody);
+    expect(widthMatch?.[1]).toMatch(/^\d+$/);
+    expect(widthMatch?.[1]).toBe("201");
     expect(r.xhtmlBody).toMatch(/<p><img[^>]*\/><\/p>/);
     expect(r.images).toEqual([
       { vaultPath: "pic.png", newHref: "../images/img_001.png" },

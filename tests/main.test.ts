@@ -965,7 +965,11 @@ describe("failure paths", () => {
 describe("mermaid rasterization (Round 3)", () => {
   it("case 13: an injected rasterizer turns a mermaid diagram into a PNG asset — no inline svg, no svg property left", async () => {
     const fakeBytes = new Uint8Array([9, 9, 9, 9]);
-    setSvgRasterizer(async () => ({ bytes: fakeBytes, width: 200, height: 100 }));
+    // Fractional width (a real mermaid svg's width, e.g. "774.8046875") is
+    // deliberate: XHTML's `width` attribute must be an integer (epubcheck
+    // RSC-005 — a real device re-export caught exactly this regression), so
+    // this test is discriminating against writing the raw fractional value.
+    setSvgRasterizer(async () => ({ bytes: fakeBytes, width: 200.6, height: 100 }));
     const { app, root } = await buildVault({
       "with_diagram.md": "# Diagram\n\n```mermaid\ngraph TD; A-->B;\n```\n",
     });
@@ -980,6 +984,9 @@ describe("mermaid rasterization (Round 3)", () => {
     expect(chapter1).not.toContain("<svg");
     expect(epub.opf).toContain('href="images/img_001.png" media-type="image/png"');
     expect(epub.opf).not.toContain('properties="svg"');
+    const widthMatch = /width="([^"]*)"/.exec(chapter1);
+    expect(widthMatch?.[1]).toMatch(/^\d+$/);
+    expect(widthMatch?.[1]).toBe("201");
     const assetBytes = await epub.zip.file("OEBPS/images/img_001.png")!.async("uint8array");
     expect(Array.from(assetBytes)).toEqual(Array.from(fakeBytes));
     expect(warnings.filter((w) => w.includes("mermaid rasterization"))).toHaveLength(0);

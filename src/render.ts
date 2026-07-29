@@ -482,7 +482,14 @@ export async function rasterizeMermaidDiagrams(
       const img = document.createElement("img");
       img.setAttribute("src", newHref);
       img.setAttribute("alt", "diagram");
-      img.setAttribute("width", String(result.width));
+      // XHTML's `width` attribute must be an integer (epubcheck RSC-005: "must
+      // be a decimal number without any significant digits after the decimal
+      // point") — a real mermaid svg's width is fractional (e.g.
+      // "774.8046875"), so round it. Omit the attribute entirely rather than
+      // writing "NaN" if the width is missing/non-finite.
+      if (Number.isFinite(result.width)) {
+        img.setAttribute("width", String(Math.round(result.width)));
+      }
       const p = document.createElement("p");
       p.appendChild(img);
       host.replaceWith(p);
