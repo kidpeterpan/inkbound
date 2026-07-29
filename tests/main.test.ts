@@ -492,7 +492,16 @@ describe("onload: command and menu registration", () => {
   });
 
   it("each command's callback runs the corresponding export against the active file", async () => {
-    const { app, root } = await buildVault({ "sub/note.md": "# Note\n\nBody text.\n" });
+    // "sub/note.md" links to "sub/other.md" so the export-linked assertion
+    // below can prove something export-linked-SPECIFIC happened (2 chapters
+    // via bfsLinked), not just "a third export ran" — the review finding
+    // pointed out the old fixture had no links at all, so `exportLinked`
+    // produced the exact same 1-chapter "note.epub" as `exportSingle` (same
+    // title, same filename, no way to tell them apart from the assertion).
+    const { app, root } = await buildVault({
+      "sub/note.md": "# Note\n\nBody text, links to [[other]].\n",
+      "sub/other.md": "# Other\n\nA second note in the same folder.\n",
+    });
     const plugin = await makeOnloadedPlugin(app);
     const activeFile = tfile(root, "sub/note.md");
     (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
@@ -508,8 +517,12 @@ describe("onload: command and menu registration", () => {
     await invokeAndWait(plugin, "exportFolder", () => commands["export-folder"].callback?.());
     expect(await outDirEntries()).toContain("sub.epub");
 
+    // Overwrites the "note.epub" exportSingle just produced — that's fine
+    // since we read it immediately after, before anything else writes to it
+    // again, so it reflects exportLinked's own result.
     await invokeAndWait(plugin, "exportLinked", () => commands["export-linked"].callback?.());
-    expect(successNotices().length).toBeGreaterThanOrEqual(3);
+    const linkedEpub = await readEpub("note.epub");
+    expect(linkedEpub.spineCount(linkedEpub.opf)).toBe(2);
   });
 
   it("a markdown file's context menu offers working note-export and linked-export items", async () => {
@@ -537,6 +550,21 @@ describe("onload: command and menu registration", () => {
 
     await invokeAndWait(plugin, "exportFolder", () => menu.items[0].onClickFn?.(new MouseEvent("click")));
     expect(await outDirEntries()).toContain("sub.epub");
+  });
+
+  it("a non-markdown file's context menu offers no export items (pins the extension guard)", async () => {
+    // Nothing else fires file-menu with anything but a .md TFile or a
+    // TFolder, so main.ts:48's `file.extension === "md"` guard was unpinned —
+    // a regression offering "Export note to EPUB" on, say, a PNG would have
+    // passed every other test here.
+    const { app, root } = await buildVault({ "picture.png": new Uint8Array([1, 2, 3]) });
+    const fireFileMenu = captureFileMenu(app);
+    await makeOnloadedPlugin(app);
+
+    const menu = new Menu();
+    fireFileMenu(menu as never, tfile(root, "picture.png"));
+
+    expect(menu.items).toEqual([]);
   });
 });
 
@@ -626,6 +654,13 @@ describe("failure paths", () => {
   });
 
   it("F2: a cross-chapter link still resolves to the correct chapter after an earlier chapter is skipped", async () => {
+    // Review finding: `href="chapter_003.xhtml"` alone is emitted whether or
+    // not chapter 2 was actually skipped — hrefByPath (src/main.ts:155) is
+    // built from job.files BEFORE any chapter is read, so the href a link
+    // resolves to is invariant to whether the read later fails. The missing
+    // half of the promise is that chapter 3 itself — the thing the link
+    // actually points at — genuinely exists with its real content, not a
+    // placeholder and not shifted out of position by the skip.
     const { app, root } = await buildVault({
       "three/1_first.md": "# First\n\nSee [[3_third]] for the ending.\n",
       "three/2_second.md": "# Second\n\nSecond body text.\n",
@@ -636,8 +671,11 @@ describe("failure paths", () => {
 
     await plugin.exportFolder(tfolder(root, "three"));
 
-    const chapter1 = await (await readEpub("three.epub")).chapter(1);
+    const epub = await readEpub("three.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    const chapter1 = await epub.chapter(1);
     expect(chapter1).toContain('href="chapter_003.xhtml"');
+    expect(await epub.chapter(3)).toContain("Third body text");
   });
 
   it("F3: a missing image produces a warning and the export still succeeds", async () => {
@@ -776,6 +814,25 @@ describe("failure paths", () => {
 
     expect(await outDirEntries()).toContain("push_fail.epub");
     expect(successNotices().some((n) => /saved locally, push failed/.test(n))).toBe(true);
+  });
+
+  it("a push that rejects with a non-Error value still reports a readable failure", async () => {
+    // Review finding: `e instanceof Error ? e.message : String(e)` (src/main.ts:232)
+    // has a real, reachable non-Error branch — the throw site is this
+    // suite's OWN injected network fake. `setRequestUrlImpl` rejecting with a
+    // bare string propagates unchanged through obsidianHttp (no try/catch
+    // around its `await requestUrl(...)`) and through BooxDropClient.push
+    // (same), landing in main.ts's catch as a string, not an Error.
+    const { app, root } = await buildVault({ "push_throw.md": "Body.\n" });
+    setRequestUrlImpl(async () => {
+      throw "boom";
+    });
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox:8085" });
+
+    await plugin.exportSingle(tfile(root, "push_throw.md"));
+
+    expect(await outDirEntries()).toContain("push_throw.epub");
+    expect(successNotices().some((n) => n.includes("push failed: boom"))).toBe(true);
   });
 
   it("F10: push disabled means the upload endpoint is never contacted", async () => {
