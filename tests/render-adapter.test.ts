@@ -16,13 +16,20 @@ function appWith(dest: TFile | null) {
   } as never;
 }
 
-// The stub's Component (tests/fixtures/obsidian-stub.ts) has a private
-// `children` field, which under tsc's real "obsidian" package types (no
-// vitest alias there) makes it nominally incompatible with the `Component`
-// type render-adapter.ts imports from "obsidian" — a plain `newComponent()`
-// fails `tsc --noEmit` even though it's fine at runtime under vitest's
-// alias. Cast through `never` at the single construction site instead of
-// peppering every call with an inline cast.
+// The stub's Component (tests/fixtures/obsidian-stub.ts) declares a
+// `children` field that the real "obsidian" package's `Component` (its
+// .d.ts, which is what tsc sees here — there's no vitest alias for plain
+// tsc) does not have. It is NOT the field's `private` visibility that
+// causes the incompatibility (removing `private` doesn't fix it): the real
+// cause is that `children` is an extra property at all, combined with the
+// self-referential generic bounds on `addChild<T extends Component>` /
+// `removeChild<T extends Component>` in obsidian's real .d.ts, which make
+// the assignability check between the two `Component` types bidirectional
+// regardless of visibility. A plain `new Component()` passed where
+// render-adapter.ts expects "obsidian"'s `Component` fails `tsc --noEmit`
+// even though it's fine at runtime under vitest's alias (both sides are the
+// stub there). Cast through `never` at the single construction site instead
+// of peppering every call with an inline cast.
 function newComponent(): never {
   return new Component() as never;
 }
