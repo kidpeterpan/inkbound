@@ -163,6 +163,112 @@ describe("rewriteImages", () => {
     expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
   });
 
+  // ── A: generic, case-insensitive scheme classification ────────────────
+
+  it("leaves an uppercase HTTPS scheme untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="HTTPS://x.com/y.jpg">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("HTTPS://x.com/y.jpg");
+  });
+
+  it("leaves an uppercase DATA scheme untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="DATA:image/png;base64,AAAA">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("DATA:image/png;base64,AAAA");
+  });
+
+  it("leaves a blob: scheme untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="blob:https://x.com/abc-123">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("blob:https://x.com/abc-123");
+  });
+
+  it("leaves a file:// scheme untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="file:///Users/pan/pic.png">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("file:///Users/pan/pic.png");
+  });
+
+  it("leaves a mailto: scheme untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="mailto:x@y.z">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("mailto:x@y.z");
+  });
+
+  it("leaves a protocol-relative src untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="//host/x.png">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("//host/x.png");
+  });
+
+  // ── B: tighter idempotence sentinel ────────────────────────────────────
+
+  it("does not treat a sibling-folder relative reference as already rewritten", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="../images/fig.png">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "../images/fig.png", newHref: "../images/img_001.png" },
+    ]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
+  });
+
+  // ── C: empty src ────────────────────────────────────────────────────────
+
+  it("skips an empty src without allocating an image number or warning", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src=""><img src="pic.png">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "pic.png", newHref: "../images/img_001.png" },
+    ]);
+    const imgs = el.querySelectorAll("img");
+    expect(imgs[0].getAttribute("src")).toBe("");
+    expect(imgs[1].getAttribute("src")).toBe("../images/img_001.png");
+  });
+
+  it("skips an img with no src attribute at all", () => {
+    const base = "/Users/pan/vault";
+    const el = div("<img>");
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+  });
+
+  // ── D: app:// src whose path doesn't contain basePath ──────────────────
+
+  it("falls through to basename resolution when app:// path lacks basePath", () => {
+    const base = "/Users/pan/vault";
+    const el = div('<img src="app://abc123/some/other/place/fig.png">');
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "fig.png", newHref: "../images/img_001.png" },
+    ]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
+  });
+
+  // ── E: strip #fragment in the app:// branch too ────────────────────────
+
+  it("strips a #fragment from an app:// src so the extension match succeeds", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="app://abc123${base}/fig.jpg#anchor">`);
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "fig.jpg", newHref: "../images/img_001.jpg" },
+    ]);
+  });
+
   it("numbers sequentially across app://, relative and remote srcs in one document, skipping remote", () => {
     const base = "/Users/pan/vault";
     const el = div(

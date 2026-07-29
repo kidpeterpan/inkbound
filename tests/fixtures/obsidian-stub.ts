@@ -3,7 +3,7 @@
 // type declarations only (node_modules/obsidian/package.json has "main": ""),
 // so src/main.ts has never actually been executed outside a real Obsidian
 // install. This stub gives esbuild something real to bundle in obsidian's
-// place (aliased in scripts/local-export.ts), so the harness runs the REAL
+// place (require-shimmed in scripts/local-export.ts), so the harness runs the REAL
 // src/main.ts orchestrator end to end.
 //
 // Signatures here were read directly from node_modules/obsidian/obsidian.d.ts
@@ -118,6 +118,13 @@ export interface RequestUrlParamLike {
   throw?: boolean;
 }
 
+// Only real caller in the harness's default scenarios is main.ts's cover
+// download (BooxDrop push goes through this too, but only when
+// pushAfterExport/booxUrl are set, which the harness leaves off) — so the
+// branch log below is labeled "cover:" rather than generically. Without this,
+// an offline run silently exercises the cover-FAILURE path (fetch() throws)
+// instead of the success path, and the operator can't tell from the harness
+// output which one actually ran.
 export async function requestUrl(request: RequestUrlParamLike | string): Promise<{
   status: number;
   headers: Record<string, string>;
@@ -126,17 +133,26 @@ export async function requestUrl(request: RequestUrlParamLike | string): Promise
   json: unknown;
 }> {
   const req = typeof request === "string" ? { url: request } : request;
-  const res = await fetch(req.url, {
-    method: req.method ?? "GET",
-    headers: req.headers,
-    body: req.body as BodyInit | undefined,
-  });
+  let res: Response;
+  try {
+    res = await fetch(req.url, {
+      method: req.method ?? "GET",
+      headers: req.headers,
+      body: req.body as BodyInit | undefined,
+    });
+  } catch (e) {
+    console.log(`[local-export] cover: fetch failed — ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
+  }
   const arrayBuffer = await res.arrayBuffer();
   const headers: Record<string, string> = {};
   res.headers.forEach((v, k) => {
     headers[k.toLowerCase()] = v;
   });
   const status = res.status;
+  console.log(
+    `[local-export] cover: fetched ${arrayBuffer.byteLength} bytes (${headers["content-type"] ?? "unknown"}, status ${status})`
+  );
   if (status >= 400 && req.throw !== false) {
     throw new Error(`Request failed, status ${status}`);
   }

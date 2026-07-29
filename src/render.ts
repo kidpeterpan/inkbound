@@ -84,24 +84,42 @@ export function rewriteImages(
   const found: { vaultPath: string; newHref: string }[] = [];
   root.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src") ?? "";
-    // Remote or self-contained: leave completely untouched.
-    if (/^(?:https?:|data:|\/\/)/.test(src)) return;
-    // Already rewritten by a previous pass: idempotence guard.
-    if (src.startsWith("../images/")) return;
+    // Missing/empty src: nothing to resolve, nothing to warn about.
+    if (src === "") return;
+    // Protocol-relative (scheme-less): leave completely untouched.
+    if (/^\/\//.test(src)) return;
+    // Any other scheme (http:, https:, data:, blob:, file:, mailto:, ...)
+    // except our own "app://" internal-resource scheme: leave untouched.
+    // Case-insensitive per RFC 3986 (scheme names are not case sensitive).
+    const scheme = /^([a-z][a-z0-9+.\-]*):/i.exec(src)?.[1].toLowerCase();
+    if (scheme && scheme !== "app") return;
+    // Already rewritten by a previous pass: idempotence guard. Matches only
+    // what this function itself emits, not an arbitrary note-relative
+    // "../images/..." reference from a sibling folder.
+    if (/^\.\.\/images\/img_\d+\.[a-z0-9]+$/i.test(src)) return;
 
     let vaultPath: string;
-    if (src.startsWith("app://")) {
-      const noQuery = src.split("?")[0];
+    if (scheme === "app") {
+      const noQueryOrFragment = src.split(/[?#]/)[0];
       let decoded: string;
       try {
-        decoded = decodeURIComponent(noQuery);
+        decoded = decodeURIComponent(noQueryOrFragment);
       } catch {
         // Malformed URI (e.g., literal % in filename): skip this image.
         return;
       }
       const at = decoded.indexOf(basePath);
-      if (at === -1) return;
-      vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
+      if (at === -1) {
+        // Path doesn't contain the given basePath (multi-vault, symlinked
+        // attachment folders, path-case differences). Fall through with just
+        // the basename so the caller's fuzzy resolver (getFirstLinkpathDest)
+        // gets a chance, and failing that, the missing-image warning fires —
+        // every image ends up either embedded or warned, never silently
+        // left as a broken app:// href.
+        vaultPath = decoded.split("/").pop() ?? decoded;
+      } else {
+        vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
+      }
     } else {
       // Relative or vault-absolute markdown image path (not app://-resolved).
       // Left UNRESOLVED here — the caller resolves it against the source

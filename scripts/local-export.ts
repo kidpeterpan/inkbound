@@ -22,7 +22,7 @@ import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
 
-const VAULT_ROOT = "~/Documents/pan_vault";
+const VAULT_ROOT = process.env.VAULT_ROOT ?? "~/Documents/pan_vault";
 const REPO_ROOT = path.resolve(__dirname, "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "local-out");
 const BUNDLE_PATH = path.join(REPO_ROOT, ".local-export-bundle.cjs");
@@ -177,6 +177,41 @@ async function perChapterImageStats(epubPath: string): Promise<ChapterImageStats
   return stats;
 }
 
+interface DanglingImageInvariant {
+  totalChecked: number;
+  missing: string[]; // "../images/X" srcs whose OEBPS/images/X target isn't in the zip
+  pass: boolean;
+}
+
+// The manifest↔zip invariant (inspectEpub) and the "rewritten" count
+// (perChapterImageStats) both only look at what's *referenced* — an <img>
+// pointing at a file present in NEITHER the manifest nor the zip passes both
+// checks silently. This invariant instead resolves every "../images/X" src to
+// its actual zip entry and asserts it exists, so a build that embedded
+// nothing can no longer report a clean bill of health.
+async function checkDanglingImages(epubPath: string): Promise<DanglingImageInvariant> {
+  const bytes = readFileSync(epubPath);
+  const zip = await JSZip.loadAsync(bytes);
+  const entries = new Set(Object.keys(zip.files).filter((n) => !zip.files[n].dir));
+  const chapterNames = Object.keys(zip.files)
+    .filter((n) => /^OEBPS\/text\/chapter_\d+\.xhtml$/.test(n))
+    .sort();
+
+  const missing: string[] = [];
+  let totalChecked = 0;
+  for (const name of chapterNames) {
+    const text = await zip.file(name)!.async("string");
+    const imgSrcs = [...text.matchAll(/<img\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+    for (const src of imgSrcs) {
+      if (!src.startsWith("../images/")) continue;
+      totalChecked++;
+      const target = `OEBPS/images/${src.slice("../images/".length)}`;
+      if (!entries.has(target)) missing.push(src);
+    }
+  }
+  return { totalChecked, missing, pass: missing.length === 0 };
+}
+
 async function main(): Promise<void> {
   const [, , modeArg, targetRel] = process.argv;
   if (!modeArg || !targetRel) usageError("Missing arguments.");
@@ -319,6 +354,19 @@ async function main(): Promise<void> {
   const totalRewritten = chapterStats.reduce((a, c) => a + c.rewritten, 0);
   const totalOther = chapterStats.reduce((a, c) => a + c.other, 0);
   console.log(`\n--- Totals: <img> total=${totalImg} rewritten=${totalRewritten} other/dangling=${totalOther} ---`);
+
+  const dangling = await checkDanglingImages(outPath);
+  console.log(
+    `\n--- Dangling-image invariant (every ../images/X actually present in the zip): ${dangling.pass ? "PASS" : "FAIL"} (checked ${dangling.totalChecked}) ---` +
+      (dangling.pass ? "" : `\n  offending srcs: ${JSON.stringify(dangling.missing)}`)
+  );
+
+  const hasBadWarning = warnLines.some(
+    (w) => w.includes("missing image:") || w.includes("unsupported image type:")
+  );
+  if (!dangling.pass || hasBadWarning) {
+    process.exitCode = 1;
+  }
 
   // Clean up the gitignored temp bundle; local-out/ is left for inspection.
   try {

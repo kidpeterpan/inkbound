@@ -7,6 +7,7 @@ import { EpubBuilder, chapterHref, escapeXml } from "./epub";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
+import { mediaTypeForExt } from "./media-types";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 import {
@@ -165,11 +166,16 @@ export default class EpubExportPlugin extends Plugin {
                 af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath, file.path);
               }
               if (!(af instanceof TFile)) throw new Error("not found in vault");
-              const bytes = new Uint8Array(await this.app.vault.readBinary(af));
               const ext = img.newHref.split(".").pop()!;
-              const mediaType = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
-                : ext === "svg" ? "image/svg+xml" : ext === "gif" ? "image/gif"
-                : ext === "webp" ? "image/webp" : "image/png";
+              const mediaType = mediaTypeForExt(ext);
+              if (!mediaType) {
+                // Outside the allowlist (e.g. .bmp/.tiff/.avif/.md): embedding
+                // it would mislabel the asset and epubcheck flags malformed
+                // images / non-core media types. Skip, don't embed.
+                warnings.push(`unsupported image type: ${img.vaultPath} (referenced by ${file.path})`);
+                continue;
+              }
+              const bytes = new Uint8Array(await this.app.vault.readBinary(af));
               builder.addAsset(img.newHref.replace(/^\.\.\//, ""), bytes, mediaType);
             } catch {
               // Missing image: export continues (spec's error table) — this
