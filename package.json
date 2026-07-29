@@ -7,16 +7,18 @@
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "deploy": "npm run build && bash scripts/deploy.sh",
-    "epubcheck": "tsx scripts/build-sample.ts && if command -v epubcheck >/dev/null; then epubcheck sample.epub; else echo 'epubcheck not installed — brew install epubcheck to validate'; fi"
+    "epubcheck": "tsx scripts/build-sample.ts && if command -v epubcheck >/dev/null; then epubcheck sample.epub; else echo 'epubcheck not installed — brew install epubcheck to validate'; fi",
+    "local-export": "tsx scripts/local-export.ts"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
     "esbuild": "^0.21.5",
+    "jsdom": "^24.1.0",
+    "marked": "^18.0.7",
     "obsidian": "^1.5.7",
     "tsx": "^4.16.0",
     "typescript": "^5.5.3",
-    "vitest": "^2.0.0",
-    "jsdom": "^24.1.0"
+    "vitest": "^2.0.0"
   },
   "dependencies": {
     "jszip": "^3.10.1"

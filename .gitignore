@@ -2,3 +2,5 @@ node_modules/
 main.js
 *.epub
 .superpowers/
+local-out/
+.local-export-bundle.cjs
