@@ -409,7 +409,7 @@ git commit -m "feat: every export scope resolves metadata from its note's frontm
 
 Run: `npm i -D @vitest/coverage-v8@^2` (must match vitest 2.x).
 
-- [ ] **Step 2: Rewrite `vitest.config.ts`** (thresholds deliberately absent — Task 10 adds them)
+- [ ] **Step 2: Rewrite `vitest.config.ts`** (thresholds deliberately absent — Task 9 adds them)
 
 ```ts
 import { defineConfig } from "vitest/config";

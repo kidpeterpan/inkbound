@@ -17,12 +17,15 @@
 
 import { mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import * as path from "path";
+import * as os from "os";
 import Module from "module";
 import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
 
-const VAULT_ROOT = process.env.VAULT_ROOT ?? "~/Documents/pan_vault";
+// Defaults to the author's vault location without hardcoding a machine-specific
+// absolute path; override with VAULT_ROOT=/path/to/vault.
+const VAULT_ROOT = process.env.VAULT_ROOT ?? path.join(os.homedir(), "Documents", "pan_vault");
 const REPO_ROOT = path.resolve(__dirname, "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "local-out");
 const BUNDLE_PATH = path.join(REPO_ROOT, ".local-export-bundle.cjs");
