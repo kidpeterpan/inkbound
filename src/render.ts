@@ -84,18 +84,36 @@ export function rewriteImages(
   const found: { vaultPath: string; newHref: string }[] = [];
   root.querySelectorAll("img").forEach((img) => {
     const src = img.getAttribute("src") ?? "";
-    if (!src.startsWith("app://")) return; // remote or already-rewritten images pass through
-    const noQuery = src.split("?")[0];
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(noQuery);
-    } catch {
-      // Malformed URI (e.g., literal % in filename): skip this image.
-      return;
+    // Remote or self-contained: leave completely untouched.
+    if (/^(?:https?:|data:|\/\/)/.test(src)) return;
+    // Already rewritten by a previous pass: idempotence guard.
+    if (src.startsWith("../images/")) return;
+
+    let vaultPath: string;
+    if (src.startsWith("app://")) {
+      const noQuery = src.split("?")[0];
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(noQuery);
+      } catch {
+        // Malformed URI (e.g., literal % in filename): skip this image.
+        return;
+      }
+      const at = decoded.indexOf(basePath);
+      if (at === -1) return;
+      vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
+    } else {
+      // Relative or vault-absolute markdown image path (not app://-resolved).
+      // Left UNRESOLVED here — the caller resolves it against the source
+      // note (render.ts stays pure, zero obsidian imports).
+      const noQueryOrFragment = src.split(/[?#]/)[0];
+      try {
+        vaultPath = decodeURIComponent(noQueryOrFragment);
+      } catch {
+        // Malformed URI (e.g., literal % in filename): skip this image.
+        return;
+      }
     }
-    const at = decoded.indexOf(basePath);
-    if (at === -1) return;
-    const vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
     const extMatch = /\.(\w+)$/.exec(vaultPath);
     const ext = extMatch ? extMatch[1].toLowerCase() : "png";
     // startIndex offsets numbering so images from different chapters in the

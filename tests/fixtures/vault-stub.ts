@@ -5,9 +5,15 @@
 // Indexing is scoped to a "scan root" (a subtree of the vault) and is lazy:
 // getAbstractFileByPath/cachedRead/readBinary/getFileCache all stat/read
 // files on demand with no whole-vault walk. Only link resolution
-// (getFirstLinkpathDest / resolvedLinks) needs to know every markdown
+// (getFirstLinkpathDest / resolvedLinks) needs to know every file's
 // basename in scope, so that's the one thing that does a bounded recursive
-// walk of the scan root — never the whole vault.
+// walk of the scan root — never the whole vault. Real Obsidian's
+// `getFirstLinkpathDest` resolves ANY file type (it's the same resolver
+// used for `![[image.png]]` embeds and bare-filename markdown image links,
+// not just note wikilinks), so this stub indexes every file under the scan
+// root, not only `.md` — markdown wikilink resolution (basename, ".md"
+// implied) and non-markdown fuzzy-filename resolution (e.g. images
+// referenced from a sibling `assets/` folder) share the same fallback path.
 
 import * as fs from "fs";
 import * as path from "path";
@@ -94,14 +100,20 @@ export interface VaultStubHandle {
 export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultStubHandle {
   const normalizedScanRoot = normalizeRel(scanRootRel);
 
-  // ── bounded recursive walk of the scan root, markdown files only ──
+  // ── bounded recursive walk of the scan root: every file, plus a
+  //    markdown-only subset for wikilink-specific logic (resolvedLinks) ──
   const mdIndex: string[] = [];
+  const fileIndex: string[] = [];
   (function walk(rel: string) {
     const full = path.join(vaultRoot, rel);
     for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
       const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(childRel);
-      else if (entry.name.toLowerCase().endsWith(".md")) mdIndex.push(childRel);
+      if (entry.isDirectory()) {
+        walk(childRel);
+      } else {
+        fileIndex.push(childRel);
+        if (entry.name.toLowerCase().endsWith(".md")) mdIndex.push(childRel);
+      }
     }
   })(normalizedScanRoot);
 
@@ -118,10 +130,27 @@ export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultSt
   }
 
   function getFirstLinkpathDest(linkpath: string, sourcePath: string): TFile | null {
-    const target = linkpath.trim().replace(/\.md$/i, "");
-    const candidates = mdIndex.filter((rel) => path.basename(rel, ".md") === target);
-    if (candidates.length === 0) return null;
+    const raw = linkpath.trim();
     const sourceDir = path.dirname(sourcePath);
+
+    // 1. Direct path resolution: try the linkpath as written relative to
+    //    the source note's folder, then as a vault-root-relative path.
+    //    Mirrors real Obsidian trying a literal path before fuzzy fallback.
+    for (const cand of [normalizeRel(path.join(sourceDir, raw)), normalizeRel(raw)]) {
+      if (fileIndex.includes(cand)) return new TFile(vaultRoot, cand);
+    }
+
+    // 2. Fuzzy fallback: match by basename across every indexed file.
+    //    Note wikilinks omit the extension (assume ".md"); markdown image
+    //    syntax and embeds always carry the real extension.
+    const hasExt = /\.[^./\\]+$/.test(raw) && !/\.md$/i.test(raw);
+    const target = hasExt ? path.basename(raw) : path.basename(raw).replace(/\.md$/i, "");
+    const pool = hasExt ? fileIndex : mdIndex;
+    const candidates = pool.filter((rel) => {
+      const base = path.basename(rel);
+      return hasExt ? base === target : base.replace(/\.md$/i, "") === target;
+    });
+    if (candidates.length === 0) return null;
     const sameFolder = candidates.find((c) => path.dirname(c) === sourceDir);
     const chosen = sameFolder ?? [...candidates].sort()[0];
     return new TFile(vaultRoot, chosen);

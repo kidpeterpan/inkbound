@@ -118,6 +118,77 @@ describe("rewriteImages", () => {
     const found = rewriteImages(el, base, 2);
     expect(found[0].newHref).toBe("../images/img_003.png");
   });
+
+  it("rewrites a bare relative markdown image src", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="fig03-1_nested_boxes.png">`);
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "fig03-1_nested_boxes.png", newHref: "../images/img_001.png" },
+    ]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
+    expect(el.querySelector("img")?.getAttribute("alt")).toBe("");
+  });
+
+  it("rewrites a nested relative markdown image src", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="assets/pic.png">`);
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "assets/pic.png", newHref: "../images/img_001.png" },
+    ]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
+  });
+
+  it("leaves remote and self-contained srcs completely untouched", () => {
+    const base = "/Users/pan/vault";
+    const el = div(
+      '<img src="https://x.com/y.jpg">'
+      + '<img src="data:image/png;base64,AAAA">'
+      + '<img src="//cdn.example.com/z.png">'
+    );
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    const imgs = el.querySelectorAll("img");
+    expect(imgs[0].getAttribute("src")).toBe("https://x.com/y.jpg");
+    expect(imgs[1].getAttribute("src")).toBe("data:image/png;base64,AAAA");
+    expect(imgs[2].getAttribute("src")).toBe("//cdn.example.com/z.png");
+  });
+
+  it("leaves an already-rewritten src untouched (idempotence)", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="../images/img_001.png">`);
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([]);
+    expect(el.querySelector("img")?.getAttribute("src")).toBe("../images/img_001.png");
+  });
+
+  it("numbers sequentially across app://, relative and remote srcs in one document, skipping remote", () => {
+    const base = "/Users/pan/vault";
+    const el = div(
+      `<img src="app://abc123${base}/first.png">`
+      + '<img src="https://x.com/skip.jpg">'
+      + '<img src="second.png">'
+    );
+    const found = rewriteImages(el, base);
+    expect(found).toEqual([
+      { vaultPath: "first.png", newHref: "../images/img_001.png" },
+      { vaultPath: "second.png", newHref: "../images/img_002.png" },
+    ]);
+    const imgs = el.querySelectorAll("img");
+    expect(imgs[0].getAttribute("src")).toBe("../images/img_001.png");
+    expect(imgs[1].getAttribute("src")).toBe("https://x.com/skip.jpg");
+    expect(imgs[2].getAttribute("src")).toBe("../images/img_002.png");
+  });
+
+  it("preserves extension for a relative .jpg src and applies startIndex offset", () => {
+    const base = "/Users/pan/vault";
+    const el = div(`<img src="photo.jpg">`);
+    const found = rewriteImages(el, base, 5);
+    expect(found).toEqual([
+      { vaultPath: "photo.jpg", newHref: "../images/img_006.jpg" },
+    ]);
+  });
 });
 
 describe("serializeBody", () => {
