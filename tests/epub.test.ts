@@ -69,6 +69,21 @@ describe("EpubBuilder container", () => {
     expect(opf).toContain('<meta name="cover" content="cover-image"/>');
   });
 
+  it('declares properties="svg" on the manifest item for a chapter containing inline SVG', async () => {
+    const b = new EpubBuilder(META);
+    b.addChapter(
+      "Diagram",
+      '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg"><text>x</text></svg></div>'
+    );
+    b.addChapter("No Diagram", "<p>plain text</p>");
+    const zip = await JSZip.loadAsync(await b.build());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    const ch1Item = opf.match(/<item id="ch_001".*?\/>/)?.[0];
+    const ch2Item = opf.match(/<item id="ch_002".*?\/>/)?.[0];
+    expect(ch1Item).toContain('properties="svg"');
+    expect(ch2Item).not.toContain('properties="svg"');
+  });
+
   it("chapterHref pads to 3 digits", () => {
     expect(chapterHref(0)).toBe("text/chapter_001.xhtml");
     expect(chapterHref(11)).toBe("text/chapter_012.xhtml");

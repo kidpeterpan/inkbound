@@ -20,6 +20,7 @@ interface Chapter {
   href: string;
   title: string;
   body: string;
+  hasSvg: boolean;
 }
 interface Asset {
   href: string;
@@ -36,7 +37,18 @@ export class EpubBuilder {
   addChapter(title: string, xhtmlBody: string): string {
     const index = this.chapters.length;
     const href = chapterHref(index);
-    this.chapters.push({ id: `ch_${String(index + 1).padStart(3, "0")}`, href, title, body: xhtmlBody });
+    // EPUB 3 (OPF-014) requires the manifest item for any XHTML document
+    // containing inline SVG to declare properties="svg". A plain substring
+    // check is sufficient — this only decides a manifest attribute, not
+    // markup correctness.
+    const hasSvg = xhtmlBody.includes("<svg");
+    this.chapters.push({
+      id: `ch_${String(index + 1).padStart(3, "0")}`,
+      href,
+      title,
+      body: xhtmlBody,
+      hasSvg,
+    });
     return href;
   }
 
@@ -78,7 +90,10 @@ export class EpubBuilder {
         : "";
     const coverMeta = coverItem ? `<meta name="cover" content="cover-image"/>` : "";
     const items = this.chapters
-      .map((c) => `<item id="${c.id}" href="${c.href}" media-type="application/xhtml+xml"/>`)
+      .map(
+        (c) =>
+          `<item id="${c.id}" href="${c.href}" media-type="application/xhtml+xml"${c.hasSvg ? ' properties="svg"' : ""}/>`
+      )
       .concat(
         this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`)
       )

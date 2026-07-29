@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   stripFrontmatter,
   stripDynamicBlocks,
   cleanupDom,
+  normalizeMermaidSvg,
   rewriteLinks,
   rewriteImages,
   serializeBody,
@@ -12,6 +15,29 @@ function div(html: string): HTMLElement {
   const el = document.createElement("div");
   el.innerHTML = html;
   return el;
+}
+
+// Real captured Obsidian mermaid output (binary-search flowchart, Grokking
+// Algorithms) — 18,761 chars, 19 foreignObject (15 with real width/height, 4
+// empty edge-label placeholders), 26 ids, 15 <p> inside <span>, 10 url(#…)
+// references, 10 marker/clip-path attributes, 1 <style> block, 0 <text>.
+// Testing against this rather than a hand-written approximation is the
+// point: it can actually fail if the transform regresses.
+const MERMAID_FIXTURE = readFileSync(join(__dirname, "fixtures/mermaid-real.xhtml"), "utf8");
+
+// Collects every id/href/url(#...) reference under root and asserts each one
+// resolves to an id that actually exists in the document.
+function assertAllReferencesResolve(root: HTMLElement): void {
+  const ids = new Set(Array.from(root.querySelectorAll("[id]")).map((el) => el.getAttribute("id")));
+  root.querySelectorAll("*").forEach((el) => {
+    Array.from(el.attributes).forEach((attr) => {
+      const urlMatch = attr.value.match(/url\(#([^)]+)\)/);
+      if (urlMatch) expect(ids.has(urlMatch[1])).toBe(true);
+      if ((attr.name === "href" || attr.name.endsWith(":href")) && attr.value.startsWith("#")) {
+        expect(ids.has(attr.value.slice(1))).toBe(true);
+      }
+    });
+  });
 }
 
 describe("stripFrontmatter", () => {
@@ -72,6 +98,112 @@ describe("cleanupDom", () => {
     cleanupDom(el);
     expect(el.querySelector("a")).toBeNull();
     expect(el.textContent).toContain("#book");
+  });
+});
+
+describe("normalizeMermaidSvg (via cleanupDom, real fixture)", () => {
+  it("removes every foreignObject and every p-inside-span (the 186-error root cause)", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    expect(el.querySelectorAll("foreignObject").length).toBe(0);
+    expect(el.querySelectorAll("span p").length).toBe(0);
+  });
+
+  it("creates real SVG <text> elements with the actual fixture label content", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const texts = Array.from(el.querySelectorAll("text"));
+    expect(texts.length).toBeGreaterThanOrEqual(15);
+    const combined = texts.map((t) => t.textContent).join(" | ");
+    // Real label strings read off the fixture's <p> elements, not invented.
+    expect(combined).toContain("low <= high?");
+    expect(combined).toContain("return None");
+    expect(combined).toContain("guess == item?");
+  });
+
+  it("preserves a multi-line label (mermaid's <br/>-joined <p>) as two tspans", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const texts = Array.from(el.querySelectorAll("text"));
+    const multiLine = texts.find((t) => (t.textContent ?? "").includes("mid = (low + high)"));
+    expect(multiLine).toBeDefined();
+    const tspans = multiLine!.querySelectorAll("tspan");
+    expect(tspans.length).toBe(2);
+    expect(tspans[0].textContent).toBe("mid = (low + high) // 2");
+    expect(tspans[1].textContent).toBe("guess = list[mid]");
+    expect(tspans[1].getAttribute("dy")).toBe("1.2em");
+  });
+
+  it("created <text>/<tspan> nodes are in the SVG namespace", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const text = el.querySelector("text");
+    expect(text).not.toBeNull();
+    expect(text!.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    const tspan = el.querySelector("tspan");
+    expect(tspan).not.toBeNull();
+    expect(tspan!.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  });
+
+  it("every id in the document is unique after normalization", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    const ids = Array.from(el.querySelectorAll("[id]")).map((n) => n.getAttribute("id"));
+    expect(ids.length).toBeGreaterThan(0);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("every url(#X) / href=#X reference resolves to an existing id", () => {
+    const el = div(MERMAID_FIXTURE);
+    cleanupDom(el);
+    assertAllReferencesResolve(el);
+  });
+
+  it("gives a second, separately-indexed diagram in the same root a different id prefix", () => {
+    const el = div(MERMAID_FIXTURE + MERMAID_FIXTURE);
+    normalizeMermaidSvg(el);
+    const ids = Array.from(el.querySelectorAll("[id]")).map((n) => n.getAttribute("id")!);
+    // Every id is still globally unique across both diagrams...
+    expect(new Set(ids).size).toBe(ids.length);
+    // ...because the two copies were prefixed distinctly (m1_ / m2_).
+    expect(ids.some((id) => id.startsWith("m1_"))).toBe(true);
+    expect(ids.some((id) => id.startsWith("m2_"))).toBe(true);
+    assertAllReferencesResolve(el);
+  });
+
+  it('rewrites a plain href="#id" reference (e.g. <use>) to the prefixed id', () => {
+    const el = div(
+      '<svg xmlns="http://www.w3.org/2000/svg" id="root"><defs><path id="shape" d="M0 0"/></defs>' +
+        '<use href="#shape"/></svg>'
+    );
+    normalizeMermaidSvg(el);
+    expect(el.querySelector("use")?.getAttribute("href")).toBe("#m1_shape");
+    assertAllReferencesResolve(el);
+  });
+
+  it('rewrites an xlink:href="#id" reference to the prefixed id', () => {
+    const el = div(
+      '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="root">' +
+        '<defs><path id="shape" d="M0 0"/></defs><use xlink:href="#shape"/></svg>'
+    );
+    normalizeMermaidSvg(el);
+    expect(el.querySelector("use")?.getAttribute("xlink:href")).toBe("#m1_shape");
+  });
+
+  it('leaves a dangling href="#id" untouched when the id isn\'t present in this svg', () => {
+    const el = div('<svg xmlns="http://www.w3.org/2000/svg" id="root"><use href="#missing"/></svg>');
+    normalizeMermaidSvg(el);
+    expect(el.querySelector("use")?.getAttribute("href")).toBe("#missing");
+  });
+
+  it("removes an empty edge-label foreignObject (height=0 width=0, no text) instead of creating an empty <text>", () => {
+    const el = div(
+      '<svg xmlns="http://www.w3.org/2000/svg" id="x"><g><foreignObject height="0" width="0">' +
+        '<div xmlns="http://www.w3.org/1999/xhtml"><span class="edgeLabel"></span></div></foreignObject></g></svg>'
+    );
+    normalizeMermaidSvg(el);
+    expect(el.querySelectorAll("foreignObject").length).toBe(0);
+    expect(el.querySelectorAll("text").length).toBe(0);
   });
 });
 
