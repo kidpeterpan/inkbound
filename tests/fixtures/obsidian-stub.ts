@@ -14,6 +14,58 @@ import * as fsSync from "fs";
 import * as pathMod from "path";
 import { marked } from "marked";
 
+// ── DOM helper polyfills ──────────────────────────────────────────────────
+//
+// The real Obsidian app monkey-patches `Node.prototype` with `empty()` and
+// `createEl()` (declared as an ambient global augmentation in
+// node_modules/obsidian/obsidian.d.ts's `interface Node`) before any plugin
+// code runs. jsdom's Node has neither. `EpubExportSettingTab.display()`
+// (src/settings.ts) calls both on `containerEl`, so exercising display() in
+// tests needs the same minimal behavior installed. Narrowed to exactly what
+// settings.ts uses (`empty()`, and `createEl(tag, { text })`) — not a
+// general-purpose polyfill of the whole Node interface.
+interface DomElementInfoLike {
+  cls?: string | string[];
+  text?: string;
+  attr?: Record<string, string | number | boolean | null>;
+}
+
+if (typeof Node !== "undefined" && !("empty" in Node.prototype)) {
+  Object.defineProperty(Node.prototype, "empty", {
+    value: function (this: Node): void {
+      while (this.firstChild) this.removeChild(this.firstChild);
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
+  Object.defineProperty(Node.prototype, "createEl", {
+    value: function (
+      this: Node,
+      tag: string,
+      o?: DomElementInfoLike | string,
+      callback?: (el: HTMLElement) => void
+    ): HTMLElement {
+      const el = document.createElement(tag);
+      const info: DomElementInfoLike = typeof o === "string" ? { cls: o } : (o ?? {});
+      if (info.cls) el.className = Array.isArray(info.cls) ? info.cls.join(" ") : info.cls;
+      if (info.text !== undefined) el.textContent = info.text;
+      if (info.attr) {
+        for (const [k, v] of Object.entries(info.attr)) {
+          if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+        }
+      }
+      this.appendChild(el);
+      callback?.(el);
+      return el;
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
 // ── Notice ──────────────────────────────────────────────────────────────
 
 export const NOTICES: string[] = [];
@@ -277,32 +329,58 @@ export class PluginSettingTab {
   hide(): void {}
 }
 
-class ChainableControl {
-  setValue(_v: unknown): this {
+// Test-introspection state only (mirrors the NOTICES array above): the real
+// Obsidian `Setting`/control classes expose no way to read back what a caller
+// passed to setValue/onChange/setLimits/etc, so settings.test.ts (Task 7) has
+// no way to invoke the onChange/onClick closures `display()` registers or
+// assert on the limits it passed. These extra public fields are additive —
+// every method still matches the real API's name/params/`this`-return
+// exactly — they just also record what was passed, for tests to read and
+// invoke directly. Reset SETTINGS.length = 0 in beforeEach, same as NOTICES.
+export class ChainableControl {
+  value: unknown;
+  placeholder?: string;
+  limits?: [number, number, number];
+  buttonText?: string;
+  disabled?: boolean;
+  onChangeFn?: (v: unknown) => unknown;
+  onClickFn?: (evt: MouseEvent) => unknown;
+
+  setValue(v: unknown): this {
+    this.value = v;
     return this;
   }
-  onChange(_fn: (v: unknown) => unknown): this {
+  onChange(fn: (v: unknown) => unknown): this {
+    this.onChangeFn = fn;
     return this;
   }
-  setPlaceholder(_p: string): this {
+  setPlaceholder(p: string): this {
+    this.placeholder = p;
     return this;
   }
-  setLimits(_min: number, _max: number, _step: number): this {
+  setLimits(min: number, max: number, step: number): this {
+    this.limits = [min, max, step];
     return this;
   }
   setDynamicTooltip(): this {
     return this;
   }
-  setButtonText(_t: string): this {
+  setButtonText(t: string): this {
+    this.buttonText = t;
     return this;
   }
-  onClick(_fn: (evt: MouseEvent) => unknown): this {
+  onClick(fn: (evt: MouseEvent) => unknown): this {
+    this.onClickFn = fn;
     return this;
   }
-  setDisabled(_d: boolean): this {
+  setDisabled(d: boolean): this {
+    this.disabled = d;
     return this;
   }
 }
+
+/** Every `Setting` constructed since the last reset — see the comment above `ChainableControl`. */
+export const SETTINGS: Setting[] = [];
 
 export class Setting {
   settingEl: HTMLElement;
@@ -310,6 +388,8 @@ export class Setting {
   nameEl: HTMLElement;
   descEl: HTMLElement;
   controlEl: HTMLElement;
+  /** The control passed to whichever add*() was called last (settings.ts calls exactly one per Setting). */
+  control?: ChainableControl;
 
   constructor(containerEl: HTMLElement) {
     this.settingEl = document.createElement("div");
@@ -320,6 +400,7 @@ export class Setting {
     this.settingEl.appendChild(this.infoEl);
     this.settingEl.appendChild(this.controlEl);
     containerEl.appendChild(this.settingEl);
+    SETTINGS.push(this);
   }
   setName(name: string): this {
     this.nameEl.textContent = name;
@@ -330,19 +411,27 @@ export class Setting {
     return this;
   }
   addText(cb: (c: ChainableControl) => unknown): this {
-    cb(new ChainableControl());
+    const c = new ChainableControl();
+    this.control = c;
+    cb(c);
     return this;
   }
   addToggle(cb: (c: ChainableControl) => unknown): this {
-    cb(new ChainableControl());
+    const c = new ChainableControl();
+    this.control = c;
+    cb(c);
     return this;
   }
   addSlider(cb: (c: ChainableControl) => unknown): this {
-    cb(new ChainableControl());
+    const c = new ChainableControl();
+    this.control = c;
+    cb(c);
     return this;
   }
   addButton(cb: (c: ChainableControl) => unknown): this {
-    cb(new ChainableControl());
+    const c = new ChainableControl();
+    this.control = c;
+    cb(c);
     return this;
   }
 }
