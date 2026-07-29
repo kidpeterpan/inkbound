@@ -9,7 +9,9 @@
     "test:coverage": "vitest run --coverage",
     "deploy": "npm run build && bash scripts/deploy.sh",
     "epubcheck": "tsx scripts/build-sample.ts && if command -v epubcheck >/dev/null; then epubcheck sample.epub; else echo 'epubcheck not installed — brew install epubcheck to validate'; fi",
-    "local-export": "tsx scripts/local-export.ts"
+    "local-export": "tsx scripts/local-export.ts",
+    "version:check": "tsx scripts/version.ts check",
+    "version:bump": "tsx scripts/version.ts bump"
   },
   "devDependencies": {
     "@types/jsdom": "^28.0.3",
