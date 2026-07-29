@@ -41,4 +41,32 @@ describe("BooxDropClient", () => {
     const client = new BooxDropClient("http://boox:8085", async () => ({ status: 500 }));
     await expect(client.push("x.epub", new Uint8Array([9]))).rejects.toThrow(/500/);
   });
+
+  it("targets the device's real library-upload endpoint", () => {
+    expect(UPLOAD_PATH).toBe("/api/library/upload");
+  });
+
+  it("push resolves on the device's real success envelope", async () => {
+    const body = '{"code":0,"data":{"name":"x.epub"},"successful":true}';
+    const client = new BooxDropClient("http://boox:8085", async () => ({ status: 200, text: body }));
+    await expect(client.push("x.epub", new Uint8Array([9]))).resolves.toBeUndefined();
+  });
+
+  it("push throws when a 200 body reports application-level failure", async () => {
+    const client = new BooxDropClient("http://boox:8085", async () => ({
+      status: 200,
+      text: '{"successful":false,"message":"no space left"}',
+    }));
+    await expect(client.push("x.epub", new Uint8Array([9]))).rejects.toThrow(/no space left/);
+  });
+
+  it("push throws on a non-zero code even when successful is absent", async () => {
+    const client = new BooxDropClient("http://boox:8085", async () => ({ status: 200, text: '{"code":7}' }));
+    await expect(client.push("x.epub", new Uint8Array([9]))).rejects.toThrow(/code 7/);
+  });
+
+  it("push accepts a 2xx whose body is not JSON", async () => {
+    const client = new BooxDropClient("http://boox:8085", async () => ({ status: 200, text: "OK" }));
+    await expect(client.push("x.epub", new Uint8Array([9]))).resolves.toBeUndefined();
+  });
 });

@@ -12,5 +12,13 @@ export const obsidianHttp: HttpFn = async (req) => {
     body: req.body,
     throw: false,
   });
-  return { status: res.status };
+  // res.text is a getter that can throw on a binary or empty body; the status
+  // alone is still a usable result, so never let that sink the request.
+  let text: string | undefined;
+  try {
+    text = res.text;
+  } catch {
+    text = undefined;
+  }
+  return { status: res.status, text };
 };

@@ -1,7 +1,13 @@
 // The ONLY module that knows BooxDrop's unofficial HTTP API.
-// Default path is the community-documented endpoint; Task 10 verifies it
-// against the real device (firmware differences land here and only here).
-export const UPLOAD_PATH = "/api/std/upload";
+// VERIFIED 2026-07-29 against a real Onyx Boox on firmware serving the Vue
+// BOOX Drop SPA: the app's own uploadLibraryFile() posts FormData to
+// /api/library/upload, field name "file". A live probe returned 200 with
+// {"code":0,"successful":true,...} and the file appeared under
+// /storage/emulated/0/Books/. (/api/storage/upload exists too, but drops the
+// file into general storage rather than the Books library.)
+// Re-probe procedure if a firmware update breaks this: fetch
+// http://<device>:8085/js/app.js and grep for "upload".
+export const UPLOAD_PATH = "/api/library/upload";
 
 export type HttpFn = (req: {
   url: string;
@@ -9,7 +15,7 @@ export type HttpFn = (req: {
   headers?: Record<string, string>;
   body?: ArrayBuffer;
   throw?: boolean;
-}) => Promise<{ status: number }>;
+}) => Promise<{ status: number; text?: string }>;
 
 export function buildMultipart(boundary: string, filename: string, data: Uint8Array): Uint8Array {
   const enc = new TextEncoder();
@@ -54,6 +60,22 @@ export class BooxDropClient {
     });
     if (res.status < 200 || res.status >= 300) {
       throw new Error(`BooxDrop upload failed with status ${res.status}`);
+    }
+    // A 2xx is necessary but not sufficient: BooxDrop reports application-level
+    // failures in the body as {"successful":false} / a non-zero "code".
+    // A body we cannot parse is not treated as a failure — the status stands.
+    if (res.text) {
+      let parsed: { successful?: boolean; code?: number; message?: string } | null = null;
+      try {
+        parsed = JSON.parse(res.text);
+      } catch {
+        return;
+      }
+      if (parsed && (parsed.successful === false || (typeof parsed.code === "number" && parsed.code !== 0))) {
+        throw new Error(
+          `BooxDrop rejected the upload${parsed.message ? `: ${parsed.message}` : ` (code ${parsed.code})`}`
+        );
+      }
     }
   }
 }
