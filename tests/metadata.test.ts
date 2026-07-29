@@ -25,6 +25,12 @@ describe("normalizeLanguage", () => {
     expect(normalizeLanguage(["en"], "th")).toBe("th");
     expect(normalizeLanguage("   ", "th")).toBe("th");
   });
+  it("falls back for null (Obsidian's shape for a key written with no value)", () => {
+    expect(normalizeLanguage(null, "th")).toBe("th");
+  });
+  it("falls back for a numeric-looking string, which fails both the BCP-47 shape and the name table", () => {
+    expect(normalizeLanguage("123", "th")).toBe("th");
+  });
 });
 
 describe("resolveAuthor", () => {
@@ -49,6 +55,12 @@ describe("resolveAuthor", () => {
     expect(resolveAuthor(undefined, "")).toBe("Unknown");
     expect(resolveAuthor(undefined, "   ")).toBe("Unknown");
   });
+  it("falls back for null (Obsidian's shape for a key written with no value)", () => {
+    expect(resolveAuthor(null, "Pan")).toBe("Pan");
+  });
+  it("falls back for a nested array instead of throwing or stringifying the inner array", () => {
+    expect(resolveAuthor([["A"]], "Pan")).toBe("Pan");
+  });
 });
 
 describe("resolveTitle", () => {
@@ -65,6 +77,12 @@ describe("resolveTitle", () => {
     expect(resolveTitle("clean_code", ["", "   "])).toBe("clean_code");
     expect(resolveTitle("clean_code", 7)).toBe("clean_code");
   });
+  it("falls back to basename for null (Obsidian's shape for a key written with no value)", () => {
+    expect(resolveTitle("clean_code", null)).toBe("clean_code");
+  });
+  it("falls back to basename for a nested array instead of throwing", () => {
+    expect(resolveTitle("clean_code", [["x"]])).toBe("clean_code");
+  });
 });
 
 describe("resolveCoverUrl", () => {
@@ -79,10 +97,46 @@ describe("resolveCoverUrl", () => {
     expect(resolveCoverUrl(["https://x.com/c.jpg"])).toBeNull();
     expect(resolveCoverUrl("")).toBeNull();
   });
+  it("returns null for null (Obsidian's shape for a key written with no value)", () => {
+    expect(resolveCoverUrl(null)).toBeNull();
+  });
 });
 
 describe("resolveMeta", () => {
   const defaults = { fallbackAuthor: "Pan", language: "th" };
+
+  it("falls back on every field for null frontmatter values (Obsidian's shape for a key written with no value)", () => {
+    // e.g. the vault's clean_code.md has `aliases:` followed by nothing, which
+    // Obsidian/YAML parses as `null`, not an empty string or missing key.
+    expect(
+      resolveMeta(
+        { aliases: null, author: null, language: null, coverUrl: null },
+        "clean_code",
+        defaults
+      )
+    ).toEqual({
+      title: "clean_code",
+      author: "Pan",
+      language: "th",
+      coverUrl: null,
+    });
+  });
+
+  it("falls back on nested-array aliases and author instead of throwing", () => {
+    expect(
+      resolveMeta({ aliases: [["x"]], author: [["A"]] }, "clean_code", defaults)
+    ).toEqual({
+      title: "clean_code",
+      author: "Pan",
+      language: "th",
+      coverUrl: null,
+    });
+  });
+
+  it("falls back on a numeric-looking language string", () => {
+    const m = resolveMeta({ language: "123" }, "clean_code", defaults);
+    expect(m.language).toBe("th");
+  });
 
   it("resolves every field from real vault-shaped frontmatter", () => {
     expect(
