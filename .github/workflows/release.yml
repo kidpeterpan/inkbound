@@ -88,5 +88,13 @@ jobs:
           else
             gh release create "$TAG" --title "Inkbound $TAG" --notes "$notes" "${assets[@]}"
           fi
-          gh release view "$TAG" --json tagName,assets \
-            --jq '"published \(.tagName) with assets: \(.assets | map(.name) | join(", "))"'
+          # A release left in draft state is invisible to Obsidian's installer
+          # and to unauthenticated API clients, so force it published every
+          # time. This also rescues a draft left behind by an earlier failed
+          # release attempt, which is otherwise easy to miss.
+          gh release edit "$TAG" --draft=false --latest
+
+          gh release view "$TAG" --json tagName,isDraft,assets \
+            --jq '"published=\(.isDraft | not) tag=\(.tagName) assets=\(.assets | map(.name) | join(", "))"'
+          test "$(gh release view "$TAG" --json isDraft --jq .isDraft)" = "false" \
+            || { echo "::error::release $TAG is still a draft"; exit 1; }
