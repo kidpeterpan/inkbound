@@ -76,6 +76,60 @@ Found under **Settings → Community plugins → Inkbound**:
 | Device URL               | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                    |
 | Push after export        | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL. |
 
+## A worked example
+
+Say you keep book notes like this, one folder per book, one note per chapter:
+
+```
+Reading/
+└── grokking-algorithms/
+    ├── grokking-algorithms.md      <- the index note
+    ├── 01_introduction.md
+    ├── 02_selection_sort.md
+    ├── 03_recursion.md
+    ├── 10_where_to_go_next.md
+    └── assets/
+        └── fig02-1_arrays.png
+```
+
+Give the index note this frontmatter:
+
+```yaml
+---
+aliases:
+  - Grokking Algorithms
+author: Aditya Y. Bhargava
+language: english
+coverUrl: https://example.com/grokking-cover.jpg
+tags:
+  - book
+  - main
+---
+```
+
+Then right-click the `grokking-algorithms` folder and choose **Export folder
+to EPUB**. You get a single `Grokking Algorithms.epub` containing:
+
+- The index note first, then the chapters in numeric order — `01`, `02`, `03`,
+  `10`. Note that `10` comes last, not after `01`, because the `NN_` prefix is
+  read as a number rather than sorted as text.
+- **Grokking Algorithms** as the book title, taken from `aliases` rather than
+  the filename, with Aditya Y. Bhargava as the author.
+- The cover image downloaded from `coverUrl` and embedded, so it shows on your
+  reader's shelf.
+- Every figure from `assets/` embedded in the chapter that references it,
+  whether you wrote it as `![[fig02-1_arrays.png]]` or
+  `![Arrays](assets/fig02-1_arrays.png)`.
+- `dc:language` set to `en`, from `language: english`.
+
+The index note is found by its `book` + `main` tags. If you would rather not
+tag it, name it after the folder instead — `grokking-algorithms.md` inside
+`grokking-algorithms/` is detected the same way. Without either, the folder
+name becomes the title and every note is treated as a chapter.
+
+Chapter titles come from filenames, so `03_recursion` appears in the table of
+contents as written. Rename the files if you want prettier chapter names.
+
 ## Frontmatter fields
 
 Every export scope resolves its book metadata from the exporting note's own

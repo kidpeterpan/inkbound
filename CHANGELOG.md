@@ -3,6 +3,13 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.6
+
+- Added a worked example to the README: a real folder layout, the index note's
+  frontmatter, and exactly what comes out the other side. It also spells out the
+  two things people get wrong first — that `10_` sorts after `02_` because the
+  prefix is read as a number, and that chapter titles come from filenames.
+
 ## 1.0.5
 
 - Rewrote the README for people deciding whether to install the plugin. The
