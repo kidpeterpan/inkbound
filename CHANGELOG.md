@@ -3,6 +3,16 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.5
+
+- Rewrote the README for people deciding whether to install the plugin. The
+  Obsidian directory renders it as the plugin's page, and it previously opened
+  with build tooling and test-strategy notes before saying what the plugin does.
+- Clearer store description, and the developer documentation moved to
+  `docs/DEVELOPMENT.md` where it no longer crowds the plugin page. Nothing was
+  removed — the honest account of what the tests can and cannot prove moved with
+  it.
+
 ## 1.0.4
 
 - Added an optional `fundingUrl` so Obsidian can show a support link on the
