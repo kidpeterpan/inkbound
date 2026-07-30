@@ -1,6 +1,6 @@
 {
   "name": "inkbound",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "description": "Export notes, book folders, or linked notes as EPUB for e-ink readers, with optional wireless delivery to Onyx Boox.",
   "author": "kidpeterpan",

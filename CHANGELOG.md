@@ -3,6 +3,19 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.3
+
+Clears the remaining advisories from the plugin directory's review.
+
+- DOM creation now uses Obsidian's `createEl` helper. It is an ambient global,
+  so the pure render module keeps its zero-`obsidian`-imports property and stays
+  unit-testable; SVG nodes still use `createElementNS`, which `createEl` cannot
+  express.
+- The settings tab now implements `getSettingDefinitions()`, so its settings are
+  indexed by Obsidian's settings search on 1.13.0 and later. The existing
+  settings UI is unchanged, and `minAppVersion` stays at 1.5.0 — older versions
+  simply ignore the new method.
+
 ## 1.0.2
 
 Addresses feedback from the plugin directory's automated review.
