@@ -62,18 +62,31 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          for f in main.js manifest.json styles.css; do
-            test -f "$f" || { echo "::error::missing release asset $f"; exit 1; }
+
+          # main.js and manifest.json are mandatory. styles.css is optional and
+          # is only shipped when it has content — GitHub rejects zero-byte
+          # release assets, which silently fails the whole release step.
+          assets=(main.js manifest.json)
+          for f in "${assets[@]}"; do
+            test -s "$f" || { echo "::error::required release asset $f is missing or empty"; exit 1; }
           done
-          notes="Install manually: download \`main.js\`, \`manifest.json\` and \`styles.css\` into \`<vault>/.obsidian/plugins/inkbound/\`, then enable **Inkbound** in Settings → Community plugins."
+          if [ -s styles.css ]; then
+            assets+=(styles.css)
+          else
+            echo "styles.css is empty — omitting it (Obsidian only needs it when the plugin ships styles)"
+          fi
+          echo "assets: ${assets[*]}"
+
+          # Surface who we are and what we may do, so a permissions failure is
+          # obvious in the log instead of an opaque exit 1.
+          gh api "repos/$GITHUB_REPOSITORY" --jq '"repo visibility: \(.visibility), permissions: \(.permissions)"' || true
+
+          notes="Install manually: download the release assets into \`<vault>/.obsidian/plugins/inkbound/\`, then enable **Inkbound** in Settings → Community plugins."
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG exists — re-uploading assets"
-            gh release upload "$TAG" main.js manifest.json styles.css --clobber
+            gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" \
-              --title "Inkbound $TAG" \
-              --notes "$notes" \
-              main.js manifest.json styles.css
+            gh release create "$TAG" --title "Inkbound $TAG" --notes "$notes" "${assets[@]}"
           fi
           gh release view "$TAG" --json tagName,assets \
             --jq '"published \(.tagName) with assets: \(.assets | map(.name) | join(", "))"'
