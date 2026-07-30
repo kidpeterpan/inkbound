@@ -3,13 +3,23 @@
 // rationale in render-adapter.ts): the npm "obsidian" package ships type
 // declarations with no runtime JS, so importing it here would make this
 // module unloadable by vitest and collapse the unit-test coverage this file
-// currently has. That means the `document.createElement(...)` calls below
-// cannot be swapped for Obsidian's `createEl`/`createDiv`/`createSpan`
-// helpers (those require the "obsidian" runtime patch on Node.prototype) —
-// they are intentional, not oversights. The plain-HTML-element sites
-// (span/p/canvas/img) fall under this rule; the SVG-namespaced sites
-// (createElementNS calls, elsewhere in this file) are commented individually
-// since createEl cannot set the SVG namespace at all.
+// currently has.
+//
+// Correction (2026-07-30): the plain-HTML-element `document.createElement`
+// call sites below (span/p/canvas/img) DO use Obsidian's `createEl` now.
+// `createEl`/`createDiv`/`createSpan`/`createFragment` are declared in
+// node_modules/obsidian/obsidian.d.ts as AMBIENT GLOBAL FUNCTIONS (inside a
+// `declare global { ... }` block), not only as `Node.prototype` methods —
+// calling the bare global requires no `import` statement, so this file keeps
+// its zero-"obsidian"-imports property (still loadable by vitest) while
+// using the real helper. tests/fixtures/obsidian-stub.ts installs a matching
+// global `createEl` polyfill for the test environment (jsdom has neither the
+// real Obsidian app's global nor its Node.prototype patch).
+//
+// The SVG-namespaced sites (createElementNS calls, elsewhere in this file)
+// are NOT converted: createEl cannot set the SVG namespace at all, and SVG
+// text created in the wrong namespace serializes (and renders) incorrectly.
+// Those keep `document.createElementNS(SVG_NS, ...)`, commented individually.
 //
 // NOTE: no `/* eslint-disable prefer-create-el */` directive is added here —
 // that rule ships in eslint-plugin-obsidianmd (Obsidian's own review
@@ -231,7 +241,7 @@ export function cleanupDom(root: HTMLElement): void {
     // with no data-href, so rewriteLinks's internal-link/data-href check
     // never sees them — they'd otherwise pass through as dead fragment
     // links in the EPUB (epubcheck RSC-012; dead taps on e-ink readers).
-    const span = document.createElement("span");
+    const span = createEl("span");
     span.textContent = a.textContent ?? "";
     a.replaceWith(span);
   });
@@ -247,7 +257,7 @@ export function cleanupDom(root: HTMLElement): void {
     } else {
       // No rendered content: replace with omission marker.
       const name = embed.getAttribute("src") ?? "unknown";
-      const p = document.createElement("p");
+      const p = createEl("p");
       p.className = "omitted";
       p.textContent = `[embedded content omitted: ${name}]`;
       embed.replaceWith(p);
@@ -275,7 +285,7 @@ export function rewriteLinks(
       a.removeAttribute("target");
       a.removeAttribute("rel");
     } else {
-      const span = document.createElement("span");
+      const span = createEl("span");
       span.textContent = a.textContent ?? "";
       a.replaceWith(span);
     }
@@ -429,7 +439,7 @@ async function defaultRasterizeSvg(
     });
     if (!loaded) return null;
 
-    const canvas = document.createElement("canvas");
+    const canvas = createEl("canvas");
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
     const ctx = canvas.getContext("2d");
@@ -501,7 +511,7 @@ export async function rasterizeMermaidDiagrams(
     if (result) {
       const index = startIndex + images.length + 1;
       const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;
-      const img = document.createElement("img");
+      const img = createEl("img");
       img.setAttribute("src", newHref);
       img.setAttribute("alt", "diagram");
       // XHTML's `width` attribute must be an integer (epubcheck RSC-005: "must
@@ -512,7 +522,7 @@ export async function rasterizeMermaidDiagrams(
       if (Number.isFinite(result.width)) {
         img.setAttribute("width", String(Math.round(result.width)));
       }
-      const p = document.createElement("p");
+      const p = createEl("p");
       p.appendChild(img);
       host.replaceWith(p);
       images.push({ newHref, bytes: result.bytes, mediaType: "image/png" });

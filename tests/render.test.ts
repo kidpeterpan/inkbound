@@ -42,6 +42,44 @@ function assertAllReferencesResolve(root: HTMLElement): void {
   });
 }
 
+// tests/fixtures/obsidian-stub.ts installs a bare-global `createEl` (loaded
+// via tests/setup/no-network.ts for every test file) mirroring Obsidian's
+// ambient global declared in node_modules/obsidian/obsidian.d.ts. src/render.ts
+// calls this global directly (see its top-of-file comment) for every
+// plain-HTML-element site the obsidianmd/prefer-create-el review warning
+// flagged. The one behavior that differs from the Node.prototype method of
+// the same name — no auto-append to a parent — is asserted here directly,
+// since getting that wrong would silently change DOM structure everywhere
+// render.ts uses it.
+describe("global createEl polyfill (test harness)", () => {
+  it("creates the requested tag without appending it to any parent", () => {
+    const el = createEl("span");
+    expect(el.tagName.toLowerCase()).toBe("span");
+    expect(el.parentNode).toBeNull();
+  });
+
+  it("applies cls/text/attr from the DomElementInfo argument", () => {
+    const el = createEl("p", { cls: "omitted", text: "hello", attr: { "data-x": "1" } });
+    expect(el.className).toBe("omitted");
+    expect(el.textContent).toBe("hello");
+    expect(el.getAttribute("data-x")).toBe("1");
+    expect(el.parentNode).toBeNull();
+  });
+
+  it("treats a bare string argument as the class name", () => {
+    const el = createEl("span", "foo bar");
+    expect(el.className).toBe("foo bar");
+  });
+
+  it("invokes the callback with the created element", () => {
+    let seen: HTMLElement | undefined;
+    const el = createEl("canvas", undefined, (c) => {
+      seen = c;
+    });
+    expect(seen).toBe(el);
+  });
+});
+
 describe("stripFrontmatter", () => {
   it("removes a leading yaml block", () => {
     expect(stripFrontmatter("---\ntags: [x]\n---\n# Hi")).toBe("# Hi");

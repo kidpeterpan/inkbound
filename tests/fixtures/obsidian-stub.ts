@@ -30,6 +30,21 @@ interface DomElementInfoLike {
   attr?: Record<string, string | number | boolean | null>;
 }
 
+// Shared by both the Node.prototype method below and the bare-global function
+// further down — both apply the same subset of DomElementInfo (cls/text/attr)
+// to a freshly created element; only whether the result gets appended to a
+// parent differs between the two forms.
+function applyDomElementInfo(el: HTMLElement, o: DomElementInfoLike | string | undefined): void {
+  const info: DomElementInfoLike = typeof o === "string" ? { cls: o } : (o ?? {});
+  if (info.cls) el.className = Array.isArray(info.cls) ? info.cls.join(" ") : info.cls;
+  if (info.text !== undefined) el.textContent = info.text;
+  if (info.attr) {
+    for (const [k, v] of Object.entries(info.attr)) {
+      if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+    }
+  }
+}
+
 if (typeof Node !== "undefined" && !("empty" in Node.prototype)) {
   Object.defineProperty(Node.prototype, "empty", {
     value: function (this: Node): void {
@@ -49,14 +64,7 @@ if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
       callback?: (el: HTMLElement) => void
     ): HTMLElement {
       const el = document.createElement(tag);
-      const info: DomElementInfoLike = typeof o === "string" ? { cls: o } : (o ?? {});
-      if (info.cls) el.className = Array.isArray(info.cls) ? info.cls.join(" ") : info.cls;
-      if (info.text !== undefined) el.textContent = info.text;
-      if (info.attr) {
-        for (const [k, v] of Object.entries(info.attr)) {
-          if (v !== null && v !== undefined) el.setAttribute(k, String(v));
-        }
-      }
+      applyDomElementInfo(el, o);
       this.appendChild(el);
       callback?.(el);
       return el;
@@ -64,6 +72,39 @@ if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
     writable: true,
     configurable: true,
   });
+}
+
+// ── Global `createEl` polyfill ────────────────────────────────────────────
+//
+// Distinct from the Node.prototype method above: node_modules/obsidian/
+// obsidian.d.ts also declares `createEl`/`createDiv`/`createSpan`/
+// `createFragment` as bare AMBIENT GLOBAL FUNCTIONS (inside a
+// `declare global { ... }` block, not the `interface Node` augmentation) —
+// the real Obsidian app installs both forms before plugin code runs.
+// src/render.ts (a pure module with ZERO "obsidian" imports, so it can't
+// reference the Node.prototype method's `this` and can't import a value from
+// "obsidian" either) calls the bare global form directly for its
+// plain-HTML-element sites. jsdom has neither form, so both need polyfilling
+// for tests to exercise those call sites.
+//
+// CRITICAL DIFFERENCE from the Node.prototype method: the real bare global
+// does NOT append the created element to any parent — it only creates and
+// (optionally) configures it, leaving placement entirely to the caller.
+// Getting this wrong (e.g. copy-pasting the Node.prototype body including its
+// `appendChild`) would silently change DOM structure for every render.ts call
+// site; asserted directly in tests/render.test.ts ("global createEl does not
+// append to any parent").
+if (typeof (globalThis as { createEl?: unknown }).createEl === "undefined") {
+  (globalThis as { createEl?: unknown }).createEl = function createEl(
+    tag: string,
+    o?: DomElementInfoLike | string,
+    callback?: (el: HTMLElement) => void
+  ): HTMLElement {
+    const el = document.createElement(tag);
+    applyDomElementInfo(el, o);
+    callback?.(el);
+    return el;
+  };
 }
 
 // ── Notice ──────────────────────────────────────────────────────────────

@@ -1,4 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import type {
+  SettingDefinitionItem,
+  SettingDefinitionGroup,
+  SettingDefinitionAction,
+  SettingDefinitionControl,
+} from "obsidian";
 import { resolveOutputPath, summarizeWarnings, DEFAULT_SETTINGS } from "../src/settings-core";
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
@@ -9,6 +15,25 @@ import {
   setRequestUrlImpl,
   resetRequestUrlImpl,
 } from "./fixtures/obsidian-stub";
+
+// Flattens getSettingDefinitions()'s nested groups into a single ordered list
+// of leaf items (control-bearing definitions and actions), the same order a
+// declarative-search index would see them in.
+function flattenDefinitions(
+  defs: SettingDefinitionItem[]
+): (SettingDefinitionControl | SettingDefinitionAction)[] {
+  const out: (SettingDefinitionControl | SettingDefinitionAction)[] = [];
+  for (const def of defs) {
+    if ("items" in def && Array.isArray((def as SettingDefinitionGroup).items)) {
+      out.push(...flattenDefinitions((def as SettingDefinitionGroup).items ?? []));
+    } else if ("control" in def && def.control) {
+      out.push(def as SettingDefinitionControl);
+    } else if ("action" in def && typeof def.action === "function") {
+      out.push(def as SettingDefinitionAction);
+    }
+  }
+  return out;
+}
 
 describe("resolveOutputPath", () => {
   it("expands empty folder to ~/Downloads", () => {
@@ -183,5 +208,69 @@ describe("EpubExportSettingTab", () => {
     makeTab({ booxUrl: "http://192.168.1.42:8085" });
     await controlFor("Test connection").onClickFn?.(new MouseEvent("click"));
     expect(NOTICES.some((n) => n.includes("NOT reachable"))).toBe(true);
+  });
+
+  // ── getSettingDefinitions() (declarative settings-search API, Obsidian 1.13+) ──
+
+  it("case 10: getSettingDefinitions returns one definition per setting, plus the BooxDrop group and the Test-connection action", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    expect(flat.map((d) => d.name)).toEqual([
+      "Output folder",
+      "Default link depth",
+      "Language (dc:language)",
+      "Fallback author",
+      "Device URL",
+      "Push after export",
+      "Test connection",
+    ]);
+  });
+
+  it("case 11: every control definition's key matches a DEFAULT_SETTINGS key, and the set of keys is exactly DEFAULT_SETTINGS' keys", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const keys = flat
+      .filter((d): d is SettingDefinitionControl => "control" in d && Boolean(d.control))
+      .map((d) => d.control.key);
+    expect(new Set(keys)).toEqual(new Set(Object.keys(DEFAULT_SETTINGS)));
+  });
+
+  it("case 12: the link-depth slider definition carries the 1-3 bounds", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const linkDepth = flat.find((d) => d.name === "Default link depth") as SettingDefinitionControl;
+    expect(linkDepth.control).toMatchObject({ type: "slider", key: "linkDepth", min: 1, max: 3, step: 1 });
+  });
+
+  it("case 13: the BooxDrop group is a declarative group headed 'BooxDrop'", () => {
+    const { tab } = makeTab();
+    const group = tab
+      .getSettingDefinitions()
+      .find((d) => "heading" in d && d.heading === "BooxDrop") as SettingDefinitionGroup;
+    expect(group).toBeDefined();
+    expect(group.type).toBe("group");
+  });
+
+  it("case 14: the declarative Test-connection action reaches the same code path as the display() button (reachable case)", async () => {
+    setRequestUrlImpl(async () => ({
+      status: 200,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    }));
+    const { tab } = makeTab({ booxUrl: "http://192.168.1.42:8085" });
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const testAction = flat.find((d) => d.name === "Test connection") as SettingDefinitionAction;
+    await testAction.action(document.createElement("div"), 0);
+    expect(NOTICES.some((n) => n.includes("reachable") && !n.includes("NOT"))).toBe(true);
+  });
+
+  it("case 15: the declarative Test-connection action shows the same no-device-URL notice as the button", async () => {
+    const { tab } = makeTab({ booxUrl: "" });
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const testAction = flat.find((d) => d.name === "Test connection") as SettingDefinitionAction;
+    await testAction.action(document.createElement("div"), 0);
+    expect(NOTICES).toEqual(["Set the device URL first."]);
   });
 });

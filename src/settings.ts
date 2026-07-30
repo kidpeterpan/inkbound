@@ -1,4 +1,5 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
+import type { SettingDefinitionItem } from "obsidian";
 import type EpubExportPlugin from "./main";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
@@ -12,6 +13,84 @@ export class EpubExportSettingTab extends PluginSettingTab {
     private plugin: EpubExportPlugin
   ) {
     super(app, plugin);
+  }
+
+  // Shared by display()'s "Test" button and getSettingDefinitions()'s "Test
+  // connection" action so the two rendering paths (imperative and
+  // declarative) can never drift on what testing the connection actually
+  // does.
+  private async testBooxConnection(): Promise<void> {
+    const s = this.plugin.settings;
+    if (!s.booxUrl) {
+      new Notice("Set the device URL first.");
+      return;
+    }
+    const ok = await new BooxDropClient(s.booxUrl, obsidianHttp).testConnection();
+    new Notice(
+      ok
+        ? "BooxDrop reachable ✓"
+        : "BooxDrop NOT reachable — check Wi-Fi, IP, and that BooxDrop is open on the device."
+    );
+  }
+
+  // Declarative counterpart to display(), read by Obsidian 1.13+ to index
+  // this plugin's settings for the global settings search. Older Obsidian
+  // (down to minAppVersion 1.5.0) never calls this and keeps using display()
+  // as-is; 1.13+ renders from these definitions instead (display() is then
+  // only a fallback, per SettingTab.display()'s own doc comment) but the
+  // default getControlValue/setControlValue (PluginSettingTab reads/writes
+  // `this.plugin.settings[key]`) means the `key` of every control below must
+  // — and does — match an EpubExportSettings field name exactly, so the two
+  // paths can't drift on where a value lives.
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [
+      {
+        name: "Output folder",
+        desc: "Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.",
+        control: { type: "text", key: "outputFolder" },
+      },
+      {
+        name: "Default link depth",
+        desc: "How far 'note + linked notes' follows wikilinks (1–3).",
+        control: { type: "slider", key: "linkDepth", min: 1, max: 3, step: 1 },
+      },
+      {
+        name: "Language (dc:language)",
+        control: { type: "text", key: "language" },
+      },
+      {
+        name: "Fallback author",
+        desc: "Used when a note/folder has no author frontmatter.",
+        control: { type: "text", key: "fallbackAuthor" },
+      },
+      {
+        type: "group",
+        heading: "BooxDrop",
+        items: [
+          {
+            name: "Device URL",
+            desc: "Shown on the Boox in the BooxDrop app, e.g. http://192.168.1.42:8085",
+            control: { type: "text", key: "booxUrl" },
+          },
+          {
+            name: "Push after export",
+            control: { type: "toggle", key: "pushAfterExport" },
+          },
+          {
+            name: "Test connection",
+            // Declared `void`-returning per SettingDefinitionAction, but this
+            // is an async function — TypeScript allows a Promise-returning
+            // function where `void` is expected, and returning the real
+            // promise (rather than fire-and-forget `void this.testBooxConnection()`)
+            // lets callers (and tests) `await` it deterministically instead
+            // of racing the Notice against whatever runs next.
+            action: async (): Promise<void> => {
+              await this.testBooxConnection();
+            },
+          },
+        ],
+      },
+    ];
   }
 
   display(): void {
@@ -82,19 +161,8 @@ export class EpubExportSettingTab extends PluginSettingTab {
       })
     );
 
-    new Setting(containerEl).setName("Test connection").addButton((b) =>
-      b.setButtonText("Test").onClick(async () => {
-        if (!s.booxUrl) {
-          new Notice("Set the device URL first.");
-          return;
-        }
-        const ok = await new BooxDropClient(s.booxUrl, obsidianHttp).testConnection();
-        new Notice(
-          ok
-            ? "BooxDrop reachable ✓"
-            : "BooxDrop NOT reachable — check Wi-Fi, IP, and that BooxDrop is open on the device."
-        );
-      })
-    );
+    new Setting(containerEl)
+      .setName("Test connection")
+      .addButton((b) => b.setButtonText("Test").onClick(() => this.testBooxConnection()));
   }
 }
