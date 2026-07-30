@@ -3,6 +3,22 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.2
+
+Addresses feedback from the plugin directory's automated review.
+
+- Replaced JSZip's IE-era `setImmediate`/`immediate` polyfills with small
+  Chromium-native shims. Those packages contained `new Function()` and injected
+  `<script>` elements, which prevented static analysis of the plugin bundle.
+- The BooxDrop settings heading now uses Obsidian's `Setting().setHeading()`
+  instead of a raw heading element, for a consistent settings UI.
+- Fire-and-forget promises in command, menu and settings callbacks are now
+  explicitly marked with `void`.
+- Tightened typing around caught errors, parsed JSON and frontmatter tags, and
+  removed a deprecated `setDynamicTooltip()` call.
+- Releases now carry notes generated from this changelog, and `main.js` and
+  `manifest.json` are published with build provenance attestations.
+
 ## 1.0.1
 
 First published release.
