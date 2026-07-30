@@ -1,3 +1,25 @@
+// This module is a pure function library with ZERO imports from "obsidian"
+// (see the CRITICAL ARCHITECTURAL CONSTRAINT in CLAUDE.md / the module-split
+// rationale in render-adapter.ts): the npm "obsidian" package ships type
+// declarations with no runtime JS, so importing it here would make this
+// module unloadable by vitest and collapse the unit-test coverage this file
+// currently has. That means the `document.createElement(...)` calls below
+// cannot be swapped for Obsidian's `createEl`/`createDiv`/`createSpan`
+// helpers (those require the "obsidian" runtime patch on Node.prototype) —
+// they are intentional, not oversights. The plain-HTML-element sites
+// (span/p/canvas/img) fall under this rule; the SVG-namespaced sites
+// (createElementNS calls, elsewhere in this file) are commented individually
+// since createEl cannot set the SVG namespace at all.
+//
+// NOTE: no `/* eslint-disable prefer-create-el */` directive is added here —
+// that rule ships in eslint-plugin-obsidianmd (Obsidian's own review
+// tooling), which is not a devDependency of this repo's eslint.config.mjs.
+// Naming the unregistered rule in a directive makes this project's own
+// `eslint .` fail hard ("Definition for rule ... was not found"), and a bare
+// `/* eslint-disable */` would blanket-suppress this file's real local rules
+// (no-explicit-any, no-unused-vars, ...) for no benefit. This comment is the
+// intentional substitute.
+
 const CHROME_SELECTORS = [
   ".edit-block-button",
   ".copy-code-button",
@@ -276,7 +298,7 @@ export function rewriteImages(
     // Any other scheme (http:, https:, data:, blob:, file:, mailto:, ...)
     // except our own "app://" internal-resource scheme: leave untouched.
     // Case-insensitive per RFC 3986 (scheme names are not case sensitive).
-    const scheme = /^([a-z][a-z0-9+.\-]*):/i.exec(src)?.[1].toLowerCase();
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(src)?.[1].toLowerCase();
     if (scheme && scheme !== "app") return;
     // Already rewritten by a previous pass: idempotence guard. Matches only
     // what this function itself emits, not an arbitrary note-relative

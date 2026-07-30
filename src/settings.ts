@@ -26,7 +26,7 @@ export class EpubExportSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.outputFolder).onChange((v) => {
           s.outputFolder = v;
-          save();
+          void save();
         })
       );
 
@@ -37,17 +37,16 @@ export class EpubExportSettingTab extends PluginSettingTab {
         sl
           .setLimits(1, 3, 1)
           .setValue(s.linkDepth)
-          .setDynamicTooltip()
           .onChange((v) => {
             s.linkDepth = v;
-            save();
+            void save();
           })
       );
 
     new Setting(containerEl).setName("Language (dc:language)").addText((t) =>
       t.setValue(s.language).onChange((v) => {
         s.language = v || "th";
-        save();
+        void save();
       })
     );
 
@@ -57,11 +56,11 @@ export class EpubExportSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.fallbackAuthor).onChange((v) => {
           s.fallbackAuthor = v;
-          save();
+          void save();
         })
       );
 
-    containerEl.createEl("h3", { text: "BooxDrop" });
+    new Setting(containerEl).setName("BooxDrop").setHeading();
 
     new Setting(containerEl)
       .setName("Device URL")
@@ -72,14 +71,14 @@ export class EpubExportSettingTab extends PluginSettingTab {
           .setValue(s.booxUrl)
           .onChange((v) => {
             s.booxUrl = v.trim();
-            save();
+            void save();
           })
       );
 
     new Setting(containerEl).setName("Push after export").addToggle((tg) =>
       tg.setValue(s.pushAfterExport).onChange((v) => {
         s.pushAfterExport = v;
-        save();
+        void save();
       })
     );
 

@@ -86,17 +86,24 @@ describe("EpubExportSettingTab", () => {
     resetRequestUrlImpl();
   });
 
-  it("case 1: renders a setting for each of the six fields plus the Test-connection button", () => {
+  it("case 1: renders a setting for each of the six fields plus the BooxDrop heading and Test-connection button", () => {
     makeTab();
     expect(SETTINGS.map((s) => s.nameEl.textContent)).toEqual([
       "Output folder",
       "Default link depth",
       "Language (dc:language)",
       "Fallback author",
+      "BooxDrop",
       "Device URL",
       "Push after export",
       "Test connection",
     ]);
+  });
+
+  it("case 1b: the BooxDrop section header is rendered as a heading via setHeading()", () => {
+    makeTab();
+    const heading = SETTINGS.find((s) => s.nameEl.textContent === "BooxDrop");
+    expect(heading?.isHeading).toBe(true);
   });
 
   it("case 2a: changing the output folder writes settings and saves", () => {

@@ -406,6 +406,8 @@ export class Setting {
   controlEl: HTMLElement;
   /** The control passed to whichever add*() was called last (settings.ts calls exactly one per Setting). */
   control?: ChainableControl;
+  /** Set by setHeading() — mirrors the real Setting's heading styling, recorded for test assertions. */
+  isHeading = false;
 
   constructor(containerEl: HTMLElement) {
     this.settingEl = document.createElement("div");
@@ -448,6 +450,11 @@ export class Setting {
     const c = new ChainableControl();
     this.control = c;
     cb(c);
+    return this;
+  }
+  /** @since 0.9.16 — real signature takes no args and returns `this`. */
+  setHeading(): this {
+    this.isHeading = true;
     return this;
   }
 }

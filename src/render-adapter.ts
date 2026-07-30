@@ -47,8 +47,11 @@ export async function renderUnitToChapter(
 ): Promise<ChapterRender> {
   const warnings: string[] = [];
   const md = stripDynamicBlocks(stripFrontmatter(markdown));
-  const el = document.createElement("div");
-  document.body.appendChild(el);
+  // Obsidian's createEl (ambient Node.prototype augmentation installed by the
+  // real app before plugin code runs — see tests/fixtures/obsidian-stub.ts's
+  // polyfill of the same) both creates the element and appends it to `this`
+  // in one call, replacing the createElement+appendChild pair.
+  const el = document.body.createEl("div");
   try {
     await MarkdownRenderer.render(app, md, el, sourcePath, component);
     cleanupDom(el);

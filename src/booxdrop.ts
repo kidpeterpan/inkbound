@@ -70,7 +70,8 @@ export class BooxDropClient {
     if (res.text) {
       let parsed: { successful?: boolean; code?: number; message?: string } | null = null;
       try {
-        parsed = JSON.parse(res.text);
+        const envelope: unknown = JSON.parse(res.text);
+        parsed = envelope as { successful?: boolean; code?: number; message?: string };
       } catch {
         return;
       }

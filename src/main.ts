@@ -33,7 +33,7 @@ export default class EpubExportPlugin extends Plugin {
     this.addCommand({
       id: "export-note",
       name: "Export note to EPUB",
-      callback: () => this.withActiveFile((f) => this.exportSingle(f)),
+      callback: () => this.withActiveFile((f) => void this.exportSingle(f)),
     });
     this.addCommand({
       id: "export-folder",
@@ -41,14 +41,14 @@ export default class EpubExportPlugin extends Plugin {
       callback: () =>
         this.withActiveFile((f) =>
           f.parent instanceof TFolder
-            ? this.exportFolder(f.parent)
+            ? void this.exportFolder(f.parent)
             : new Notice("Active note has no parent folder.")
         ),
     });
     this.addCommand({
       id: "export-linked",
       name: "Export note + linked notes to EPUB",
-      callback: () => this.withActiveFile((f) => this.exportLinked(f)),
+      callback: () => this.withActiveFile((f) => void this.exportLinked(f)),
     });
 
     this.registerEvent(
@@ -113,11 +113,7 @@ export default class EpubExportPlugin extends Plugin {
   // (spec: never fail an export over artwork).
   private async metaFromNote(file: TFile | null, fallbackBasename: string): Promise<ExportMeta> {
     const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
-    const resolved = resolveMeta(
-      fm as Record<string, unknown> | undefined,
-      file ? file.basename : fallbackBasename,
-      this.metaDefaults()
-    );
+    const resolved = resolveMeta(fm, file ? file.basename : fallbackBasename, this.metaDefaults());
     const meta: ExportMeta = {
       title: resolved.title,
       author: resolved.author,
@@ -160,7 +156,7 @@ export default class EpubExportPlugin extends Plugin {
     }
 
     const candidates = mdFiles.map((f) => {
-      const tags = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
+      const tags: unknown = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
       return {
         basename: f.basename,
         // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
@@ -302,7 +298,9 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loaded: unknown = await this.loadData();
+    const data = (loaded ?? {}) as Partial<EpubExportSettings>;
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
   }
   async saveSettings() {
     await this.saveData(this.settings);
