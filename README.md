@@ -8,7 +8,7 @@ them straight to an e-ink reader over the local network.
 **From a GitHub release (recommended):**
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the
-   [latest release](https://github.com/kidpeterpan/obsidian-plugin-epub-export/releases/latest).
+   [latest release](https://github.com/kidpeterpan/inkbound/releases/latest).
 2. Copy all three files into
    `<vault>/.obsidian/plugins/inkbound/` (create the folder if it doesn't
    exist).

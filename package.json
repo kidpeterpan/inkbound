@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kidpeterpan/obsidian-plugin-epub-export.git"
+    "url": "https://github.com/kidpeterpan/inkbound.git"
   },
   "scripts": {
     "build": "node esbuild.config.mjs production",
