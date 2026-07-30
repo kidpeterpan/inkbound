@@ -1,5 +1,18 @@
 import esbuild from "esbuild";
+import { fileURLToPath } from "node:url";
 const prod = process.argv[2] === "production";
+
+// JSZip pulls in `setimmediate` (directly) and `lie`'s `immediate` (transitively)
+// purely as IE-era setImmediate polyfills. Both ship a `new Function(...)` and/or
+// `document.createElement("script")` fallback, which Obsidian's plugin review
+// flags as dynamic code execution — dead weight in Electron/Chromium, which
+// always has a real setImmediate/queueMicrotask. Alias them to local shims that
+// use queueMicrotask/setTimeout instead. See shims/immediate.cjs and
+// shims/setimmediate.cjs for details.
+const alias = {
+  immediate: fileURLToPath(new URL("./shims/immediate.cjs", import.meta.url)),
+  setimmediate: fileURLToPath(new URL("./shims/setimmediate.cjs", import.meta.url)),
+};
 
 const buildOptions = {
   entryPoints: ["src/main.ts"],
@@ -9,6 +22,7 @@ const buildOptions = {
   target: "es2020",
   platform: "node",
   external: ["obsidian", "electron"],
+  alias,
   sourcemap: prod ? false : "inline",
   logLevel: "info",
 };

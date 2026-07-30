@@ -81,6 +81,14 @@ async function buildBundle(): Promise<void> {
     platform: "node",
     target: "es2020",
     external: ["obsidian", "electron"],
+    // Same alias as esbuild.config.mjs: route JSZip's `setimmediate` and
+    // `lie`'s `immediate` to the local shims so this harness bundle exercises
+    // the exact same async paths as the real shipped build (main.js), not
+    // the real polyfills' IE-era <script>/new Function fallbacks.
+    alias: {
+      immediate: path.join(REPO_ROOT, "shims/immediate.cjs"),
+      setimmediate: path.join(REPO_ROOT, "shims/setimmediate.cjs"),
+    },
     logLevel: "warning",
   });
 }

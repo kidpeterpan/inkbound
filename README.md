@@ -56,6 +56,22 @@ always written first, so a failed push never loses the export.
   reads and writes files on the local filesystem (via Node's `fs`) and is not
   available on Obsidian mobile.
 
+### Why this plugin needs filesystem access
+
+This plugin uses Node's `fs` module directly, outside the Obsidian vault API.
+That is intentional, not an oversight:
+
+- It writes the generated `.epub` file to the output folder configured in
+  **Settings → Inkbound → Output folder** (default `~/Downloads`) — a
+  location outside the vault, because the whole point is producing a file an
+  e-reader (or the BooxDrop app on a Boox device) can pick up directly.
+- It reads image files referenced by the exported notes through Obsidian's
+  vault API, not raw `fs` calls.
+- It never writes anywhere else on disk.
+
+`isDesktopOnly: true` is set in `manifest.json` for exactly this reason —
+direct filesystem access has no mobile equivalent.
+
 ## Install for development
 
 There is no packaged release; this plugin is installed by building it and
