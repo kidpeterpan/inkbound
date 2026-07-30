@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Both are required to publish artifact attestations, which let users
+      # cryptographically verify that main.js was built from this repository.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +49,18 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
       - run: npm run version:check
+
+      # Publishes a signed statement that these exact bytes were built by this
+      # workflow from this repository, so a user can verify the provenance of a
+      # downloaded release asset with `gh attestation verify main.js -R
+      # kidpeterpan/inkbound`. Requires the id-token and attestations
+      # permissions declared above.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            manifest.json
 
       # Uses the preinstalled gh CLI rather than a third-party action: one less
       # dependency, and a permissions failure surfaces as a readable HTTP error
@@ -81,12 +97,33 @@ jobs:
           # obvious in the log instead of an opaque exit 1.
           gh api "repos/$GITHUB_REPOSITORY" --jq '"repo visibility: \(.visibility), permissions: \(.permissions)"' || true
 
-          notes="Install manually: download the release assets into \`<vault>/.obsidian/plugins/inkbound/\`, then enable **Inkbound** in Settings → Community plugins."
+          # Release notes come from the matching CHANGELOG.md section, so the
+          # description lives in the repo under review rather than in a tag
+          # message that is easy to lose. Missing section => fail, rather than
+          # publish a release with no description.
+          notes_file="$(mktemp)"
+          awk -v v="$TAG" '
+            $0 == "## " v { inside = 1; next }
+            inside && /^## / { exit }
+            inside { print }
+          ' CHANGELOG.md > "$notes_file"
+          if [ ! -s "$notes_file" ]; then
+            echo "::error::CHANGELOG.md has no '## $TAG' section — add release notes for this version"
+            exit 1
+          fi
+          {
+            echo
+            echo "---"
+            echo
+            echo "Install manually by downloading the assets below into \`<vault>/.obsidian/plugins/inkbound/\`, then enable **Inkbound** in Settings → Community plugins."
+          } >> "$notes_file"
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG exists — re-uploading assets"
+            echo "release $TAG exists — updating notes and re-uploading assets"
+            gh release edit "$TAG" --title "Inkbound $TAG" --notes-file "$notes_file"
             gh release upload "$TAG" "${assets[@]}" --clobber
           else
-            gh release create "$TAG" --title "Inkbound $TAG" --notes "$notes" "${assets[@]}"
+            gh release create "$TAG" --title "Inkbound $TAG" --notes-file "$notes_file" "${assets[@]}"
           fi
           # A release left in draft state is invisible to Obsidian's installer
           # and to unauthenticated API clients, so force it published every
