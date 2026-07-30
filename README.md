@@ -1,4 +1,4 @@
-# EPUB Export
+# Inkbound
 
 An Obsidian plugin that exports notes as EPUB 3 books and, optionally, pushes
 them straight to an e-ink reader over the local network.
@@ -10,10 +10,10 @@ them straight to an e-ink reader over the local network.
 1. Download `main.js`, `manifest.json`, and `styles.css` from the
    [latest release](https://github.com/kidpeterpan/obsidian-plugin-epub-export/releases/latest).
 2. Copy all three files into
-   `<vault>/.obsidian/plugins/epub-export/` (create the folder if it doesn't
+   `<vault>/.obsidian/plugins/inkbound/` (create the folder if it doesn't
    exist).
-3. In Obsidian, go to **Settings → Community plugins** and enable **EPUB
-   Export**.
+3. In Obsidian, go to **Settings → Community plugins** and enable
+   **Inkbound**.
 
 > [!WARNING]
 > If Obsidian was already running when the plugin folder was added, the new
@@ -68,12 +68,11 @@ npm run deploy
 
 `npm run deploy` runs a production build (`npm run build`) and then
 `scripts/deploy.sh`, which copies `main.js`, `manifest.json`, and `styles.css`
-into `<vault>/.obsidian/plugins/epub-export/`. The destination vault defaults
+into `<vault>/.obsidian/plugins/inkbound/`. The destination vault defaults
 to `~/Documents/pan_vault`; override it by setting
 the `VAULT` environment variable, e.g. `VAULT=/path/to/vault npm run deploy`.
 
-Then, in Obsidian: **Settings → Community plugins** and enable **EPUB
-Export**.
+Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 
 > [!WARNING]
 > If Obsidian was already running when the plugin folder was copied in, the
@@ -84,7 +83,7 @@ Export**.
 
 ## Settings
 
-Found under **Settings → Community plugins → EPUB Export**:
+Found under **Settings → Community plugins → Inkbound**:
 
 | Setting                  | Default                      | Purpose                                                                                                                                                                               |
 | ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

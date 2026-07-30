@@ -1,9 +1,9 @@
 {
-  "id": "epub-export",
-  "name": "EPUB Export",
+  "id": "inkbound",
+  "name": "Inkbound",
   "version": "1.0.0",
   "minAppVersion": "1.5.0",
-  "description": "Export notes, book folders, or linked-note bundles as EPUB and push them to a Boox device via BooxDrop.",
+  "description": "Export notes, book folders, or linked notes as EPUB for e-ink readers, with optional wireless delivery to Onyx Boox.",
   "author": "kidpeterpan",
   "authorUrl": "https://github.com/kidpeterpan",
   "isDesktopOnly": true

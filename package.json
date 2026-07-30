@@ -1,8 +1,8 @@
 {
-  "name": "obsidian-epub-export",
+  "name": "inkbound",
   "version": "1.0.0",
   "private": true,
-  "description": "Export notes, book folders, or linked-note bundles as EPUB and push them to a Boox device via BooxDrop.",
+  "description": "Export notes, book folders, or linked notes as EPUB for e-ink readers, with optional wireless delivery to Onyx Boox.",
   "author": "kidpeterpan",
   "license": "MIT",
   "repository": {

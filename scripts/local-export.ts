@@ -278,8 +278,8 @@ async function main(): Promise<void> {
   }
 
   const manifest = {
-    id: "epub-export",
-    name: "EPUB Export",
+    id: "inkbound",
+    name: "Inkbound",
     version: "0.1.0",
     minAppVersion: "1.5.0",
     description: "harness run",

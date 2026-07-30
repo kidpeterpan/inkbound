@@ -131,10 +131,10 @@ export default class EpubExportPlugin extends Plugin {
           meta.coverBytes = new Uint8Array(res.arrayBuffer);
           meta.coverExt = isPng ? "png" : "jpg";
         } else {
-          console.warn("[epub-export] cover download failed", resolved.coverUrl, `status ${res.status}`);
+          console.warn("[inkbound] cover download failed", resolved.coverUrl, `status ${res.status}`);
         }
       } catch (e) {
-        console.warn("[epub-export] cover download failed", resolved.coverUrl, e);
+        console.warn("[inkbound] cover download failed", resolved.coverUrl, e);
       }
     }
     return meta;
@@ -290,11 +290,11 @@ export default class EpubExportPlugin extends Plugin {
           pushMsg = ` — saved locally, push failed: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
-      warnings.forEach((w) => console.warn("[epub-export]", w));
+      warnings.forEach((w) => console.warn("[inkbound]", w));
       const warnMsg = summarizeWarnings(warnings);
       new Notice(`EPUB saved to ${outPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`, 8000);
     } catch (e) {
-      console.error("[epub-export] export failed", e);
+      console.error("[inkbound] export failed", e);
       new Notice(`EPUB export failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       notice?.hide();

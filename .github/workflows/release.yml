@@ -65,13 +65,13 @@ jobs:
           for f in main.js manifest.json styles.css; do
             test -f "$f" || { echo "::error::missing release asset $f"; exit 1; }
           done
-          notes="Install manually: download \`main.js\`, \`manifest.json\` and \`styles.css\` into \`<vault>/.obsidian/plugins/epub-export/\`, then enable **EPUB Export** in Settings → Community plugins."
+          notes="Install manually: download \`main.js\`, \`manifest.json\` and \`styles.css\` into \`<vault>/.obsidian/plugins/inkbound/\`, then enable **Inkbound** in Settings → Community plugins."
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG exists — re-uploading assets"
             gh release upload "$TAG" main.js manifest.json styles.css --clobber
           else
             gh release create "$TAG" \
-              --title "EPUB Export $TAG" \
+              --title "Inkbound $TAG" \
               --notes "$notes" \
               main.js manifest.json styles.css
           fi
