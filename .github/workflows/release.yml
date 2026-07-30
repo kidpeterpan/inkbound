@@ -46,12 +46,34 @@ jobs:
       - run: npm run build
       - run: npm run version:check
 
+      # Uses the preinstalled gh CLI rather than a third-party action: one less
+      # dependency, and a permissions failure surfaces as a readable HTTP error
+      # instead of an opaque action failure. Idempotent — re-running the same
+      # tag re-uploads the assets instead of erroring on an existing release.
+      #
+      # Requires the repository's Settings -> Actions -> General -> "Workflow
+      # permissions" to be "Read and write permissions". With the read-only
+      # default, creating a release fails with
+      # "Resource not accessible by integration" even though the job declares
+      # contents: write above.
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          draft: false
-          files: |
-            main.js
-            manifest.json
-            styles.css
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for f in main.js manifest.json styles.css; do
+            test -f "$f" || { echo "::error::missing release asset $f"; exit 1; }
+          done
+          notes="Install manually: download \`main.js\`, \`manifest.json\` and \`styles.css\` into \`<vault>/.obsidian/plugins/epub-export/\`, then enable **EPUB Export** in Settings → Community plugins."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists — re-uploading assets"
+            gh release upload "$TAG" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$TAG" \
+              --title "EPUB Export $TAG" \
+              --notes "$notes" \
+              main.js manifest.json styles.css
+          fi
+          gh release view "$TAG" --json tagName,assets \
+            --jq '"published \(.tagName) with assets: \(.assets | map(.name) | join(", "))"'
