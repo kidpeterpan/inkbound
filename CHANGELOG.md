@@ -3,6 +3,12 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.4
+
+- Added an optional `fundingUrl` so Obsidian can show a support link on the
+  plugin's page. The plugin stays free and MIT-licensed, and no feature depends
+  on it.
+
 ## 1.0.3
 
 Clears the remaining advisories from the plugin directory's review.

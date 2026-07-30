@@ -269,6 +269,12 @@ handling of application-level failures (a 2xx HTTP status with
 `types.ts` holds shared interfaces only (no runtime code) and is excluded
 from the coverage report for that reason.
 
+## Support
+
+Inkbound is free and MIT-licensed. If it saves you time, you can
+[buy me a coffee](https://buymeacoffee.com/kidpeterpan) — entirely optional, and
+it never affects the plugin's features.
+
 ## License
 
 [MIT](./LICENSE) © 2026 kidpeterpan
