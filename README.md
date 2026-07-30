@@ -1,11 +1,36 @@
 # Inkbound
 
-An Obsidian plugin that exports notes as EPUB 3 books and, optionally, pushes
-them straight to an e-ink reader over the local network.
+Inkbound exports your Obsidian notes as EPUB ebooks, so you can read them
+comfortably on an e-ink device instead of a laptop screen.
 
-## Installation
+## What you get
 
-**From a GitHub release (recommended):**
+Export from the command palette or a right-click menu, in three ways:
+
+- **A single note** becomes a one-chapter book.
+- **A folder of notes** becomes a book, with chapters in filename order.
+- **A note plus everything it links to** — the active note and the notes it
+  links to, out to a depth you choose, become one book, with real links
+  between the chapters that came from the same export.
+
+Every export produces a real, valid EPUB 3 file. Images in your notes come
+through, and so do Mermaid diagrams — as pictures rather than live diagrams,
+since most e-ink readers cannot draw them otherwise. Any language works,
+including Thai.
+
+## Requirements
+
+- Obsidian **1.5.0** or newer.
+- **Desktop only** — Inkbound is not available on Obsidian mobile (see
+  "Known limitations" below).
+
+## Install
+
+**From Obsidian's Community plugins browser**, once Inkbound is listed
+there: **Settings → Community plugins → Browse**, search for "Inkbound",
+then **Install** and enable it.
+
+**From a GitHub release** (works today, before the plugin is listed):
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the
    [latest release](https://github.com/kidpeterpan/inkbound/releases/latest).
@@ -20,82 +45,23 @@ them straight to an e-ink reader over the local network.
 > plugin will not appear in the Community plugins list until you click the
 > **refresh** icon at the top of that list (or restart Obsidian).
 
-**From the community plugin store:** this plugin is **not yet listed** in
-Obsidian's community plugin browser — install it manually via the steps
-above.
+## How to use it
 
-## What it does
-
-Three export scopes, each reachable from the command palette or a right-click
+Three commands, available from the command palette and from a right-click
 context menu:
 
-- **Export note to EPUB** — the active note becomes a single-chapter book.
-- **Export folder as EPUB (active note's folder)** — every Markdown note in
-  the active note's parent folder becomes one book. If the folder has a note
-  tagged `book` + `main` in its frontmatter, that note is used as the index
-  (and its own frontmatter supplies the book's metadata); otherwise a note
-  whose filename matches the folder name is used as the index if one exists.
-  Remaining notes become chapters, ordered by a leading `NN_` numeric prefix
-  first, then alphabetically for anything unprefixed.
-- **Export note + linked notes to EPUB** — the active note plus every note it
-  links to, followed breadth-first out to a configurable depth (see
-  **Default link depth** below), becomes one book.
+- **Export note to EPUB** — exports the active note (or the note you
+  right-clicked) as a single-chapter book.
+- **Export folder as EPUB (active note's folder)** — exports every note in
+  the active note's folder as one book. Right-clicking a folder directly
+  offers the same export for that folder.
+- **Export note + linked notes to EPUB** — exports the active note plus the
+  notes it links to as one book.
 
-Every scope produces a real EPUB 3 file (via a hand-rolled builder, not a
-third-party EPUB library) with a chapter list, embedded images, and metadata
-(`dc:title`, `dc:creator`, `dc:language`, and a cover image when one is
-declared) resolved from the exporting note's own frontmatter. If **Push after
-export** is enabled and a **Device URL** is set, the finished EPUB is also
-uploaded to a Boox e-ink device running the BooxDrop app — the local file is
-always written first, so a failed push never loses the export.
-
-## Requirements
-
-- Obsidian **1.5.0** or newer (`minAppVersion` in `manifest.json`).
-- **Desktop only** (`isDesktopOnly: true` in `manifest.json`) — the plugin
-  reads and writes files on the local filesystem (via Node's `fs`) and is not
-  available on Obsidian mobile.
-
-### Why this plugin needs filesystem access
-
-This plugin uses Node's `fs` module directly, outside the Obsidian vault API.
-That is intentional, not an oversight:
-
-- It writes the generated `.epub` file to the output folder configured in
-  **Settings → Inkbound → Output folder** (default `~/Downloads`) — a
-  location outside the vault, because the whole point is producing a file an
-  e-reader (or the BooxDrop app on a Boox device) can pick up directly.
-- It reads image files referenced by the exported notes through Obsidian's
-  vault API, not raw `fs` calls.
-- It never writes anywhere else on disk.
-
-`isDesktopOnly: true` is set in `manifest.json` for exactly this reason —
-direct filesystem access has no mobile equivalent.
-
-## Install for development
-
-There is no packaged release; this plugin is installed by building it and
-copying the build output into a vault's plugins folder.
-
-```bash
-npm install
-npm run deploy
-```
-
-`npm run deploy` runs a production build (`npm run build`) and then
-`scripts/deploy.sh`, which copies `main.js`, `manifest.json`, and `styles.css`
-into `<vault>/.obsidian/plugins/inkbound/`. The destination vault defaults
-to `~/Documents/pan_vault`; override it by setting
-the `VAULT` environment variable, e.g. `VAULT=/path/to/vault npm run deploy`.
-
-Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
-
-> [!WARNING]
-> If Obsidian was already running when the plugin folder was copied in, the
-> new plugin will not appear in the Community plugins list until you click
-> the **refresh** icon at the top of that list (or restart Obsidian).
-> Community plugins must also be enabled overall (not in Restricted Mode) for
-> the toggle to be available at all.
+The finished `.epub` is written to the folder set in **Settings → Inkbound →
+Output folder** (`~/Downloads` by default), and a notice in Obsidian confirms
+the path once the export finishes. If **Push after export** is turned on,
+the same notice reports whether the send to your Boox device succeeded.
 
 ## Settings
 
@@ -114,20 +80,18 @@ Found under **Settings → Community plugins → Inkbound**:
 
 Every export scope resolves its book metadata from the exporting note's own
 frontmatter (the active note for single/linked exports, the detected index
-note for folder exports — see "What it does" above). Recognised fields:
+note for folder exports). Recognised fields:
 
-- **`aliases`** — the book title (`dc:title`). The first non-empty string, or
-  first non-empty string element if `aliases` is a list, is used; otherwise
-  the note's filename (without extension) is used. This is deliberately the
-  _book_ title only — per-chapter titles come from a separate mechanism
-  (heading/filename-based) and are unaffected by `aliases`.
-- **`author`** — `dc:creator`. A non-empty string is used as-is; a list of
-  strings is joined with `", "`; anything else (including an empty value)
-  falls back to the **Fallback author** setting, or `"Unknown"` if that is
-  also empty.
-- **`language`** — `dc:language`. A value already shaped like a BCP-47 tag
-  (e.g. `en`, `en-GB`, `th`) is lowercased and used as-is. Otherwise, an exact
-  (case-insensitive) match against this fixed table is used:
+- **`aliases`** — sets the book title (`dc:title`). The first non-empty
+  string, or first non-empty string in the list if `aliases` is a list, is
+  used; otherwise the note's filename is used. This is the _book_ title
+  only — chapter titles are derived separately from headings/filenames.
+- **`author`** — sets `dc:creator`. A string is used as-is; a list of
+  strings is joined with `", "`; anything else falls back to the
+  **Fallback author** setting, or `"Unknown"`.
+- **`language`** — sets `dc:language`. A BCP-47 tag (e.g. `en`, `en-GB`,
+  `th`) is used as-is (lowercased). Otherwise, one of these names is
+  matched, case-insensitively:
 
   | Frontmatter value | `dc:language` |
   | ----------------- | ------------- |
@@ -137,137 +101,42 @@ note for folder exports — see "What it does" above). Recognised fields:
   | `chinese`         | `zh`          |
   | `korean`          | `ko`          |
 
-  Anything else — an unrecognised name, a non-string value, or a missing
-  field — falls back to the **Language** setting. Unknown names deliberately
-  fall back rather than guess at a code.
+  Anything else falls back to the **Language** setting.
 
-- **`coverUrl`** — the book's cover image. Must be a string starting with
-  `http://` or `https://`; anything else (including a vault-relative path) is
-  treated as no cover. A cover that fails to download degrades the export to
-  coverless rather than failing it.
-- **`tags: [book, main]`** — used only for **folder** exports, to pick which
-  note in the folder is the index/metadata source (see "What it does"
-  above).
+- **`coverUrl`** — the book's cover image, as a full `http://` or `https://`
+  URL. A cover that fails to download degrades the export to coverless
+  rather than failing it.
+- **`tags: [book, main]`** — for **folder** exports, marks which note in the
+  folder is the index/metadata source. If no note is tagged this way,
+  Inkbound looks for a note whose filename matches the folder name.
 
-## Development commands
+## Sending to a Boox
 
-| Command                            | What it does                                                                                                                                        |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                     |
-| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                          |
-| `npm test`                         | Runs the vitest suite once.                                                                                                                         |
-| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.     |
-| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development").                            |
-| `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec. |
-| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                     |
-| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                         |
-| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                          |
-| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project.                                                                                                 |
-| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                       |
-| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                 |
-| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                         |
+Pushing to an Onyx Boox e-ink device is entirely optional. Turn on **Push
+after export** and set your device's **Device URL** (shown in the BooxDrop
+app on the device — both need to be on the same Wi-Fi network) and every
+export is uploaded straight to the device's library after it saves. The
+local file is always written first, so a failed push never loses your
+export — it just stays in your output folder.
 
-## Testing and its limits
+## Known limitations
 
-The 85%-per-file coverage gate (`npm run test:coverage`) is real, but it is
-important to understand what it does and does not prove. The `obsidian`
-npm package ships only TypeScript type declarations — no runtime
-JavaScript — so it cannot be imported by a test runner. To make the
-Obsidian-facing modules (`main.ts`, `settings.ts`, `render-adapter.ts`,
-`http.ts`) importable and measurable at all, `vitest.config.ts` aliases the
-`obsidian` import to a hand-written stub at
-`tests/fixtures/obsidian-stub.ts` — **for vitest only**; the real build
-(`esbuild.config.mjs`) keeps `obsidian` external and untouched, so what ships
-to Obsidian is not affected by the stub.
+- **Desktop only.** Inkbound is not available on Obsidian mobile, because it
+  writes the `.epub` file directly to a folder on disk (the one you choose
+  in Settings) and reads note images through your vault — both of which
+  need filesystem access that mobile does not offer.
+- **Display math (`$$` blocks) and note transclusion (`![[note]]` embeds)**
+  have not been verified against a real Obsidian render or a real device
+  yet. They may work, but treat exports containing them with a bit of extra
+  scrutiny until you've checked the result by eye.
+- **Mermaid diagrams export as images, not text.** They are converted to
+  pictures at export time so e-ink readers can display them, which means
+  they are no longer selectable or searchable text inside the EPUB.
 
-This means coverage measures how much of _our own logic_ the test suite
-exercises against that stub's behaviour. **It does not prove the plugin
-behaves correctly inside real Obsidian** — the stub's `MarkdownRenderer`, for
-instance, is `marked` plus post-processing, which is not what Obsidian itself
-renders. A green coverage gate is a necessary check, not a sufficient one.
+## Development
 
-The gates that actually touch real artifacts, in increasing order of realism:
-
-1. **`npm run local-export`** (the CLI harness, below) — runs the real
-   orchestrator against a real vault on disk and inspects the real EPUB zip,
-   but still outside Obsidian.
-2. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
-   with the industry-standard validator.
-3. **Manual testing inside Obsidian, on the actual Boox device** — the only
-   gate that exercises the real `MarkdownRenderer`, the real DOM Obsidian
-   produces, and the real BooxDrop HTTP API.
-
-See the design doc's "Risks and honest limits" section
-(`docs/superpowers/specs/2026-07-29-production-grade-coverage-design.md`) for
-the full reasoning.
-
-**Not yet verified on a real device or in real Obsidian rendering**, as of
-this writing:
-
-- The `app://` image-`src` branch (images Obsidian serves through an
-  `app://` URL rather than a plain vault-relative path).
-- `$$` display-math blocks.
-- Note transclusion (`![[note]]` embeds).
-- The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
-  stripped from rendered HTML) — its selectors are believed correct but have
-  not been confirmed against a live Obsidian render.
-- Non-Latin tags (e.g. Thai-language `#tags`), for the inline-tag-to-plain-text
-  rewrite in `cleanupDom`.
-
-Treat exports that exercise any of the above with extra scrutiny until they
-have been checked by hand.
-
-## The CLI harness
-
-`npm run local-export -- <note|folder|linked> <vault-relative-path>` (via
-`scripts/local-export.ts`) runs the _real_ `src/main.ts` orchestrator —
-`exportSingle`/`exportFolder`/`exportLinked`, unmodified — against a real
-vault on disk, with no Obsidian installation involved. It bundles `main.ts`
-with esbuild and redirects its `require("obsidian")` at runtime to the same
-`tests/fixtures/obsidian-stub.ts` instance the harness itself loads, so
-`instanceof TFile`-style checks inside the orchestrator work correctly. It
-then reports: every Notice the plugin raised, every `console.warn` line, the
-output file's path and size, a manifest/zip inventory check on the produced
-EPUB, per-chapter image counts, and a "dangling image" invariant (every
-`../images/X` reference actually present in the zip).
-
-This is more real than the vitest suite (it runs against actual vault files
-and produces an actual EPUB zip) but is still not Obsidian: it uses the same
-stub-backed `MarkdownRenderer`, so it cannot validate real Obsidian rendering
-either. Its value is catching orchestration/wiring bugs (missing chapters,
-broken image paths, wrong ordering) against real content, cheaply and
-repeatedly, before a manual device test.
-
-## BooxDrop
-
-BooxDrop push is an **optional** feature for owners of Onyx Boox e-ink
-devices — it uploads the finished EPUB to the device over BooxDrop's
-unofficial local API. It is disabled by default (the **Push after export**
-setting) and nothing else in this plugin depends on it; every export scope
-works fully with it left off.
-
-The BooxDrop upload endpoint is unofficial and firmware-versioned. What was
-verified, when, how to re-probe it after a firmware update, and the client's
-handling of application-level failures (a 2xx HTTP status with
-`"successful": false` in the JSON body) are all documented in
-`docs/booxdrop-probe.md` — read that before touching `src/booxdrop.ts`'s
-`UPLOAD_PATH`.
-
-## Architecture
-
-`src/` splits into two kinds of modules:
-
-- **Pure modules** — `metadata.ts`, `collect.ts`, `naming.ts`, `epub.ts`,
-  `epub-css.ts`, `media-types.ts`, `settings-core.ts` — have zero imports of
-  the `obsidian` package, so vitest loads and unit-tests them directly.
-- **Obsidian adapters** — `main.ts`, `settings.ts`, `render-adapter.ts`,
-  `http.ts` — import `obsidian` for its types and runtime globals (`Plugin`,
-  `Notice`, `TFile`, `requestUrl`, etc.) and are only importable in tests
-  through the `vitest.config.ts` alias to `tests/fixtures/obsidian-stub.ts`
-  described above under "Testing and its limits".
-
-`types.ts` holds shared interfaces only (no runtime code) and is excluded
-from the coverage report for that reason.
+Building from source, running the test suite, and the architecture notes
+live in [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md).
 
 ## Support
 
