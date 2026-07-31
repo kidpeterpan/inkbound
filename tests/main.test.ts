@@ -752,6 +752,25 @@ describe("failure paths", () => {
     expect(await epub.chapter(3)).toContain("Third body text");
   });
 
+  it("F(embed): a broken note embed produces a placeholder, a warning, and the export still succeeds", async () => {
+    // Exercises the whole orchestrator, not just renderUnitToChapter directly
+    // (see tests/render-adapter.test.ts's equivalent unit-level case) —
+    // proves the new embed warning reaches the same summarizeWarnings/Notice
+    // path F3 already proves for missing images, spec.md Clarifications Q2.
+    const { app, root } = await buildVault({
+      "with_broken_embed.md": "# Note\n\n![[Does Not Exist]]\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "with_broken_embed.md"));
+
+    const epub = await readEpub("with_broken_embed.epub");
+    expect(epub.spineCount(epub.opf)).toBe(1);
+    expect(await epub.chapter(1)).toContain("[embedded content omitted: Does Not Exist]");
+    expect(warnings.some((w) => /missing embed: Does Not Exist/.test(w))).toBe(true);
+    expect(successNotices().some((n) => n.includes("Exported with 1 warning"))).toBe(true);
+  });
+
   it("F3: a missing image produces a warning and the export still succeeds", async () => {
     const { app, root } = await buildVault({
       "with_missing.md": "# Note\n\n![](gone.png)\n",

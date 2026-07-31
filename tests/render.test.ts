@@ -5,6 +5,10 @@ import {
   stripFrontmatter,
   stripDynamicBlocks,
   cleanupDom,
+  flattenEmbeds,
+  splitEmbedTarget,
+  isImageEmbedSrc,
+  EMBED_RENDERED_ATTR,
   normalizeMermaidSvg,
   rewriteLinks,
   rewriteImages,
@@ -17,6 +21,48 @@ function div(html: string): HTMLElement {
   const el = document.createElement("div");
   el.innerHTML = html;
   return el;
+}
+
+// Builds the confirmed real-Obsidian note-embed wrapper shape (see
+// render.ts's "Note-embed hardening" comment) PROGRAMMATICALLY — the way the
+// real app builds it. It cannot be built via innerHTML: the HTML parser
+// hoists block <div>s out of a <span> inside a <p>, silently destroying the
+// exact structure under test.
+function realEmbedWrapper(opts: {
+  src: string;
+  /** HTML for the copy populateEmbeds rendered (its stamped div is created only when set). */
+  ourHtml?: string;
+  /** HTML for Obsidian's own async-rendered preview inside .markdown-embed-content. */
+  obsidianPreview?: string;
+  /** data-embed-reason populateEmbeds stamped, if any. */
+  reason?: string;
+  tag?: "span" | "div";
+}): HTMLElement {
+  const wrapper = document.createElement(opts.tag ?? "span");
+  wrapper.className = "internal-embed markdown-embed inline-embed";
+  wrapper.setAttribute("src", opts.src);
+  wrapper.setAttribute("alt", opts.src);
+  if (opts.reason) wrapper.setAttribute("data-embed-reason", opts.reason);
+  const title = document.createElement("div");
+  title.className = "embed-title markdown-embed-title";
+  title.textContent = opts.src;
+  wrapper.appendChild(title);
+  const content = document.createElement("div");
+  content.className = "markdown-embed-content";
+  if (opts.obsidianPreview) {
+    const preview = document.createElement("div");
+    preview.className = "markdown-preview-view markdown-rendered";
+    preview.innerHTML = opts.obsidianPreview;
+    content.appendChild(preview);
+  }
+  wrapper.appendChild(content);
+  if (opts.ourHtml !== undefined) {
+    const ours = document.createElement("div");
+    ours.setAttribute("data-inkbound-embed", "");
+    ours.innerHTML = opts.ourHtml;
+    wrapper.appendChild(ours);
+  }
+  return wrapper;
 }
 
 // Real captured Obsidian mermaid output (binary-search flowchart, Grokking
@@ -118,26 +164,225 @@ describe("cleanupDom", () => {
     expect(el.textContent).toContain("☑");
     expect(el.textContent).toContain("☐");
   });
-  it("unwraps rendered image embeds (preserves img)", () => {
-    const el = div(
-      '<span class="internal-embed image-embed is-loaded" src="pic.png"><img src="app://pic.png" alt="pic"></span>'
-    );
-    cleanupDom(el);
-    expect(el.querySelector("span.internal-embed")).toBeNull();
-    expect(el.querySelector("img")).not.toBeNull();
-    expect(el.textContent).not.toContain("[embedded content omitted");
-  });
-  it("replaces unrendered embeds with an omission marker", () => {
-    const el = div('<span class="internal-embed" src="drawing.excalidraw">x</span>');
-    cleanupDom(el);
-    expect(el.querySelector("span.internal-embed")).toBeNull();
-    expect(el.textContent).toContain("[embedded content omitted: drawing.excalidraw]");
+  it("flattens embed wrappers as part of cleanup (delegation to flattenEmbeds)", () => {
+    const el = div("<h1>Host content</h1>");
+    el.appendChild(realEmbedWrapper({ src: "Other Note", ourHtml: "<h2>Section</h2><p>Body text</p>" }));
+    const warnings = cleanupDom(el);
+    expect(el.querySelector(".internal-embed")).toBeNull();
+    expect(el.querySelector("h2")?.textContent).toBe("Section");
+    expect(el.querySelector("h1")?.textContent).toBe("Host content");
+    expect(warnings).toEqual([]);
   });
   it("degrades tag anchors to plain text (no dead #fragment links)", () => {
     const el = div('<p>text <a class="tag" href="#book" target="_blank" rel="noopener">#book</a></p>');
     cleanupDom(el);
     expect(el.querySelector("a")).toBeNull();
     expect(el.textContent).toContain("#book");
+  });
+});
+
+describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", () => {
+  it("replaces the wrapper with OUR rendered copy, discarding the title and Obsidian's own async preview", () => {
+    const el = document.createElement("div");
+    el.appendChild(
+      realEmbedWrapper({
+        src: "Other Note",
+        ourHtml: "<h2>Section</h2><p>Body text</p>",
+        obsidianPreview: "<p>obsidian's own late copy</p>",
+      })
+    );
+    const warnings = flattenEmbeds(el);
+    expect(warnings).toEqual([]);
+    expect(el.querySelector(".internal-embed")).toBeNull();
+    expect(el.querySelector(".markdown-embed-title")).toBeNull();
+    expect(el.querySelector("h2")?.textContent).toBe("Section");
+    // Race immunity: whatever Obsidian's async loader put in the content
+    // div is discarded, never duplicated alongside our copy.
+    expect(el.textContent).not.toContain("obsidian's own late copy");
+    expect(el.textContent).not.toContain("[embedded content omitted");
+  });
+
+  it("unwraps the enclosing <p> when the embed span is its only child (real shape: <p><span.internal-embed/></p>)", () => {
+    // An embed on its own line renders inside a <p>; leaving the embedded
+    // note's block content inside that <p> would be invalid XHTML.
+    const el = document.createElement("div");
+    const p = document.createElement("p");
+    p.setAttribute("dir", "auto");
+    p.appendChild(realEmbedWrapper({ src: "Other Note", ourHtml: "<h2>Section</h2>", tag: "span" }));
+    el.appendChild(p);
+    flattenEmbeds(el);
+    expect(el.querySelector("p h2")).toBeNull();
+    expect(el.querySelector("h2")?.textContent).toBe("Section");
+    expect(el.querySelector("p")).toBeNull(); // the wrapper-only <p> itself is gone
+  });
+
+  it("replaces an unresolved loaded embed (file-embed mod-empty) with the placeholder — no leaked 'Click to create.' text", () => {
+    const el = document.createElement("div");
+    const wrapper = document.createElement("span");
+    wrapper.className = "internal-embed is-loaded file-embed mod-empty";
+    wrapper.setAttribute("src", "Does Not Exist");
+    wrapper.setAttribute("data-embed-reason", "unresolved");
+    wrapper.textContent = '"Does Not Exist" is not created yet. Click to create.';
+    el.appendChild(wrapper);
+    const warnings = flattenEmbeds(el);
+    expect(warnings).toEqual(["missing embed: Does Not Exist"]);
+    expect(el.textContent).toContain("[embedded content omitted: Does Not Exist]");
+    expect(el.textContent).not.toContain("Click to create");
+  });
+
+  it("surfaces a distinct warning for a circular embed", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "Self", reason: "circular" }));
+    const warnings = flattenEmbeds(el);
+    expect(warnings).toEqual(["circular embed skipped: Self"]);
+    expect(el.textContent).toContain("[embedded content omitted: Self]");
+  });
+
+  it("surfaces a distinct warning for a heading/block-scoped embed (unsupported)", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "Note#Heading", reason: "unsupported-scope" }));
+    expect(flattenEmbeds(el)).toEqual(["unsupported embed scope (heading/block): Note#Heading"]);
+  });
+
+  it("surfaces a distinct warning for a non-note embed (unsupported type)", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "doc.pdf", reason: "unsupported-type" }));
+    expect(flattenEmbeds(el)).toEqual(["unsupported embed type (not a note): doc.pdf"]);
+  });
+
+  it("degrades a wrapper with neither rendered copy nor reason to the missing-embed placeholder", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "drawing.excalidraw" }));
+    expect(flattenEmbeds(el)).toEqual(["missing embed: drawing.excalidraw"]);
+    expect(el.textContent).toContain("[embedded content omitted: drawing.excalidraw]");
+  });
+
+  it("unwraps an image embed to its bare <img>, moving the wrapper's alt caption onto it", () => {
+    // The wrapper span's own alt/src attributes are invalid XHTML on a span
+    // (epubcheck RSC-005, observed on a real export) — only the img ships.
+    const el = div(
+      '<span alt="Figure 2-1: hover info" src="pic.png" class="internal-embed media-embed image-embed is-loaded"><img src="app://x/pic.png"></span>'
+    );
+    expect(flattenEmbeds(el)).toEqual([]);
+    expect(el.querySelector(".internal-embed")).toBeNull();
+    const img = el.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("app://x/pic.png");
+    expect(img?.getAttribute("alt")).toBe("Figure 2-1: hover info");
+  });
+
+  it("keeps the img's own alt when it already has one (wrapper caption does not overwrite)", () => {
+    const el = div(
+      '<span alt="caption" src="pic.png" class="internal-embed image-embed"><img src="x.png" alt="original"></span>'
+    );
+    flattenEmbeds(el);
+    expect(el.querySelector("img")?.getAttribute("alt")).toBe("original");
+  });
+
+  it("degrades an unresolved image embed (no <img> child) to the placeholder", () => {
+    const el = div('<span alt="gone.png" src="gone.png" class="internal-embed image-embed"></span>');
+    expect(flattenEmbeds(el)).toEqual(["missing embed: gone.png"]);
+    expect(el.textContent).toContain("[embedded content omitted: gone.png]");
+  });
+
+  it("flattens a nested embed inside our own rendered copy (innermost first)", () => {
+    const el = document.createElement("div");
+    const outer = realEmbedWrapper({ src: "Outer", ourHtml: "<p>outer top</p>" });
+    const ourDiv = outer.querySelector(`[${EMBED_RENDERED_ATTR}]`)!;
+    ourDiv.appendChild(realEmbedWrapper({ src: "Inner", ourHtml: "<p>inner body</p>" }));
+    el.appendChild(outer);
+    const warnings = flattenEmbeds(el);
+    expect(warnings).toEqual([]);
+    expect(el.querySelector(".internal-embed")).toBeNull();
+    expect(el.textContent).toContain("outer top");
+    expect(el.textContent).toContain("inner body");
+  });
+
+  it("does not warn for (or flatten) wrappers inside Obsidian's own discarded preview copy", () => {
+    // Obsidian's async preview of an embed can itself contain nested embed
+    // wrappers; they vanish with the preview and must not double-count.
+    const el = document.createElement("div");
+    const wrapper = realEmbedWrapper({
+      src: "Other Note",
+      ourHtml: "<p>our copy</p>",
+      obsidianPreview: '<span class="internal-embed" src="Nested Broken"></span>',
+    });
+    el.appendChild(wrapper);
+    const warnings = flattenEmbeds(el);
+    expect(warnings).toEqual([]);
+    expect(el.textContent).toContain("our copy");
+    expect(el.textContent).not.toContain("[embedded content omitted");
+  });
+
+  it("is idempotent: a second call finds nothing left to do", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "Other Note", ourHtml: "<p>Body.</p>" }));
+    expect(flattenEmbeds(el)).toEqual([]);
+    expect(flattenEmbeds(el)).toEqual([]);
+    expect(el.querySelector("p")?.textContent).toBe("Body.");
+  });
+
+  describe("fallback pass: bare title/content pair with no wrapper (renderer-variant safety net)", () => {
+    it("unwraps a populated pair, dropping the bare title text", () => {
+      const el = div(
+        '<div class="embed-title markdown-embed-title">Other Note</div>' +
+          '<div class="markdown-embed-content"><h2>Section</h2><p>Body text</p></div>'
+      );
+      const warnings = flattenEmbeds(el);
+      expect(el.querySelector(".markdown-embed-title")).toBeNull();
+      expect(el.querySelector(".markdown-embed-content")).toBeNull();
+      expect(el.querySelector("h2")?.textContent).toBe("Section");
+      expect(warnings).toEqual([]);
+    });
+
+    it("replaces a still-empty pair with an omission marker", () => {
+      const el = div(
+        '<div class="embed-title markdown-embed-title">drawing.excalidraw</div>' +
+          '<div class="markdown-embed-content"></div>'
+      );
+      const warnings = flattenEmbeds(el);
+      expect(el.textContent).toContain("[embedded content omitted: drawing.excalidraw]");
+      expect(warnings).toEqual(["missing embed: drawing.excalidraw"]);
+    });
+  });
+});
+
+describe("splitEmbedTarget / isImageEmbedSrc", () => {
+  it("passes a plain note target through", () => {
+    expect(splitEmbedTarget("Other Note")).toEqual({
+      raw: "Other Note",
+      linkpath: "Other Note",
+      heading: null,
+      block: null,
+    });
+  });
+
+  it("splits a heading-scoped target into linkpath + heading", () => {
+    expect(splitEmbedTarget("Note#Some Heading")).toEqual({
+      raw: "Note#Some Heading",
+      linkpath: "Note",
+      heading: "Some Heading",
+      block: null,
+    });
+  });
+
+  it("splits a block-scoped target into linkpath + block", () => {
+    expect(splitEmbedTarget("Note^abc123")).toEqual({
+      raw: "Note^abc123",
+      linkpath: "Note",
+      heading: null,
+      block: "abc123",
+    });
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(splitEmbedTarget("  Note  ").linkpath).toBe("Note");
+  });
+
+  it("detects image srcs case-insensitively and rejects note names", () => {
+    expect(isImageEmbedSrc("pic.PNG")).toBe(true);
+    expect(isImageEmbedSrc("diagram.jpeg")).toBe(true);
+    expect(isImageEmbedSrc("Other Note")).toBe(false);
+    expect(isImageEmbedSrc("doc.pdf")).toBe(false);
   });
 });
 
@@ -537,6 +782,26 @@ describe("serializeBody", () => {
 describe("rasterizeMermaidDiagrams", () => {
   afterEach(() => {
     setSvgRasterizer(null); // module state discipline, same reason as setRequestUrlImpl elsewhere
+  });
+
+  it("replaces Obsidian's Mermaid vault-trust guard with its source fence and warns (no 'Allow' button ships)", async () => {
+    // Exact structure captured from a real 2026-07-31 export where the vault
+    // hadn't allowed Mermaid rendering yet.
+    const root = div(
+      '<div><div class="mermaid-wrapper is-guarded">' +
+        '<div class="mermaid-guard-header"><div class="mermaid-guard-text">' +
+        '<div class="mermaid-guard-title">Display Mermaid diagrams in this vault?</div>' +
+        '<div class="mermaid-guard-description">Only allow if you trust this vault\'s contents.</div>' +
+        '</div><div class="mermaid-guard-actions"><button>Allow</button></div></div>' +
+        '<div class="mermaid-guard-source"><pre class="language-mermaid"><code class="language-mermaid is-loaded">graph LR</code></pre></div>' +
+        "</div></div>"
+    );
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(root.querySelector("button")).toBeNull();
+    expect(root.textContent).not.toContain("Display Mermaid diagrams");
+    expect(root.querySelector("pre.language-mermaid")?.textContent).toBe("graph LR");
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("click Allow on the diagram, then re-export");
   });
 
   it("falls back (with a warning) when the svg has no usable width/height", async () => {

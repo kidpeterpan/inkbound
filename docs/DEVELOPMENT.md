@@ -88,7 +88,6 @@ this writing:
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path).
 - `$$` display-math blocks.
-- Note transclusion (`![[note]]` embeds).
 - The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
   stripped from rendered HTML) — its selectors are believed correct but have
   not been confirmed against a live Obsidian render.

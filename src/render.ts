@@ -229,7 +229,225 @@ export function normalizeMermaidSvg(root: HTMLElement): void {
   });
 }
 
-export function cleanupDom(root: HTMLElement): void {
+// ── Note-embed hardening ───────────────────────────────────────────────────
+//
+// Second corrected understanding (2026-07-31, LIVE console diagnostics inside
+// a real Obsidian export run — the ground truth; supersedes both this
+// comment's previous revision, which inspected only serialized EPUB output
+// and wrongly concluded "no wrapper, never populated", and the original
+// pre-feature theory research.md documents):
+//
+// Real Obsidian's `MarkdownRenderer.render()` DOES wrap a note-to-note embed
+// (`![[note]]`) in a wrapper element carrying the authoritative linktext:
+//   <span alt="Note" src="Note" class="internal-embed markdown-embed inline-embed">
+//     <div class="embed-title markdown-embed-title">Note</div>
+//     <div class="markdown-embed-content"></div>
+//   </span>
+// The synchronous render leaves `.markdown-embed-content` empty — and then
+// Obsidian's own embed machinery MAY populate it asynchronously (adding
+// `is-loaded` to the wrapper and a `.markdown-preview-view` child to the
+// content div), on its own schedule, racing this plugin's pipeline. An
+// UNRESOLVED embed's wrapper is asynchronously rewritten to
+//   <span class="internal-embed file-embed mod-empty" src="X">"X" is not created yet. Click to create.</span>
+// (title/content pair gone entirely). Whether the async population has
+// happened by serialization time is a race — which is exactly why exports
+// showed embeds sometimes empty, and why any design that reads or waits on
+// Obsidian's own embed content is wrong.
+//
+// The race-immune design: render-adapter.ts's `populateEmbeds` renders its
+// OWN copy of each embedded note into a private child div stamped with
+// EMBED_RENDERED_ATTR, and `flattenEmbeds` below replaces the ENTIRE wrapper
+// with that stamped div's children — discarding whatever Obsidian's async
+// loader did or didn't put in `.markdown-embed-content` (and its "Click to
+// create." text for broken links), no matter when it lands.
+
+export const EMBED_WRAPPER_CLASS = "internal-embed";
+export const EMBED_TITLE_CLASS = "markdown-embed-title";
+export const EMBED_CONTENT_CLASS = "markdown-embed-content";
+/** Marks the div populateEmbeds rendered an embedded note's content into. */
+export const EMBED_RENDERED_ATTR = "data-inkbound-embed";
+
+// Known-image extensions Obsidian embeds inline as `<img>` rather than as a
+// note transclusion — mirrors media-types.ts's allowlist scope, kept as its
+// own narrow regex here so this pure module doesn't need to import from it.
+const EMBED_IMAGE_EXT = /\.(png|jpe?g|gif|svg|webp|bmp|tiff?|avif)$/i;
+
+export interface EmbedTarget {
+  /** The full linktext as written, e.g. "Note#Heading" or "Note^blockid". */
+  raw: string;
+  /** Just the note-name portion, with any "#..."/"^..." suffix stripped. */
+  linkpath: string;
+  /** Heading name after a "#" suffix (not a "^" block ref), if present. */
+  heading: string | null;
+  /** Block ID after a "^" suffix, if present. */
+  block: string | null;
+}
+
+// Splits an embed wrapper's `src` linktext (the authoritative target — real
+// Obsidian stamps the exact linkpath the user wrote, alias excluded, onto the
+// wrapper's src attribute) into its note path and optional heading/block
+// scope suffix. Replaces the old raw-markdown positional scan
+// (parseNoteEmbeds): with the src attribute available on every wrapper there
+// is nothing positional left to reconstruct.
+export function splitEmbedTarget(src: string): EmbedTarget {
+  const raw = src.trim();
+  const blockIdx = raw.indexOf("^");
+  const hashIdx = raw.indexOf("#");
+  const cutIdx = [blockIdx, hashIdx].filter((i) => i !== -1).sort((a, b) => a - b)[0];
+  const linkpath = cutIdx === undefined ? raw : raw.slice(0, cutIdx);
+  const heading = hashIdx !== -1 && hashIdx === cutIdx ? raw.slice(hashIdx + 1) : null;
+  const block = blockIdx !== -1 && blockIdx === cutIdx ? raw.slice(blockIdx + 1) : null;
+  return { raw, linkpath, heading, block };
+}
+
+/** True when an embed wrapper's src targets an image, not a note. */
+export function isImageEmbedSrc(src: string): boolean {
+  return EMBED_IMAGE_EXT.test(src.trim());
+}
+
+// Maps a populateEmbeds-stamped data-embed-reason to its warning message.
+function embedOmissionMessage(reason: string | null, name: string): string {
+  switch (reason) {
+    case "circular":
+      return `circular embed skipped: ${name}`;
+    case "unsupported-scope":
+      return `unsupported embed scope (heading/block): ${name}`;
+    case "unsupported-type":
+      return `unsupported embed type (not a note): ${name}`;
+    default:
+      return `missing embed: ${name}`;
+  }
+}
+
+// The omission marker an embed degrades to when it has no rendered content
+// (spec.md Clarifications Q2 — matches the existing missing-image/
+// cover-download-failure convention of surfacing degraded content in the
+// export's warning summary, not just inline).
+function embedOmissionPlaceholder(name: string): HTMLElement {
+  const p = createEl("p");
+  p.className = "omitted";
+  p.textContent = `[embedded content omitted: ${name}]`;
+  return p;
+}
+
+// An embed written on its own line renders as `<p><span.internal-embed/></p>`
+// — replacing just the wrapper would leave the embedded note's block content
+// (divs, headings, lists) inside that <p>, which is invalid XHTML (epubcheck
+// RSC-005). When the wrapper is the paragraph's only meaningful child, the
+// paragraph itself is the thing to replace. A wrapper with real inline
+// siblings (text around an inline embed) is replaced in place — a rare shape
+// with a known validity trade-off, preferred over destroying the sibling text.
+function embedReplaceTarget(wrapper: Element): Element {
+  const parent = wrapper.parentElement;
+  if (!parent || parent.tagName.toLowerCase() !== "p") return wrapper;
+  const onlyChild = Array.from(parent.childNodes).every(
+    (n) => n === wrapper || (n.nodeType === Node.TEXT_NODE && !(n.textContent ?? "").trim())
+  );
+  return onlyChild ? parent : wrapper;
+}
+
+// Returns any warnings produced while flattening embeds — the caller
+// (render-adapter.ts) folds these into the chapter's own warnings, enriching
+// them with chapter context this pure module doesn't have.
+//
+// Primary pass — wrapper-based (the confirmed real-Obsidian shape, see the
+// "Note-embed hardening" comment above): every `.internal-embed` wrapper is
+// replaced with the children of the EMBED_RENDERED_ATTR div populateEmbeds
+// rendered into it, or with the omission placeholder when populateEmbeds
+// deliberately left it unrendered (broken link, unsupported scope, circular
+// — the data-embed-reason it stamped picks the message). Everything ELSE
+// inside the wrapper — the bare `.embed-title` text, Obsidian's own
+// asynchronously-populated `.markdown-embed-content` copy, its "Click to
+// create." text for broken links — is discarded with the wrapper, which is
+// what makes this immune to the async-population race. Image embeds
+// (`![[pic.png]]`) are unwrapped to their bare `<img>` — the wrapper span's
+// own `alt`/`src` attributes are invalid XHTML — leaving the img itself for
+// rewriteImages. Wrappers are processed innermost-first so an embedded
+// note's own nested embeds flatten before their host.
+//
+// Fallback pass — a bare `.markdown-embed-title` + `.markdown-embed-content`
+// sibling pair with no wrapper ancestor (never observed from real Obsidian,
+// kept as a cheap safety net for renderer variants): unwrap if populated,
+// placeholder if empty.
+//
+// Both passes are idempotent: a processed wrapper/pair is removed from the
+// DOM, so a later call finds nothing left to do.
+export function flattenEmbeds(root: HTMLElement): string[] {
+  const warnings: string[] = [];
+
+  const wrappers = Array.from(root.querySelectorAll(`.${EMBED_WRAPPER_CLASS}`))
+    .filter((w) => {
+      // Inside Obsidian's own async-rendered embed preview: discarded
+      // wholesale when its host wrapper is replaced — flattening it here
+      // would double-count warnings for content that never ships.
+      return !w.parentElement?.closest(`.${EMBED_CONTENT_CLASS}`);
+    })
+    .reverse(); // document order is outermost-first; process innermost-first
+
+  for (const wrapper of wrappers) {
+    const name =
+      (wrapper.getAttribute("src") ?? wrapper.getAttribute("alt") ?? "unknown").trim() || "unknown";
+
+    if (isImageEmbedSrc(name)) {
+      // Image embed (`![[pic.png]]`): the wrapper span itself is the problem
+      // — its `alt`/`src` attributes are invalid on a span in XHTML
+      // (epubcheck RSC-005, observed on a real-Obsidian export). A resolved
+      // one is unwrapped to its bare <img> (inheriting the wrapper's alt
+      // caption — Obsidian puts the caption on the wrapper, not the img); an
+      // unresolved one (real Obsidian renders "not created yet. Click to
+      // create." text and no <img>) degrades to the placeholder instead of
+      // leaking that text into the book.
+      const img = wrapper.querySelector("img");
+      if (img) {
+        const caption = wrapper.getAttribute("alt");
+        if (caption && !img.getAttribute("alt")) img.setAttribute("alt", caption);
+        wrapper.replaceWith(img);
+      } else {
+        embedReplaceTarget(wrapper).replaceWith(embedOmissionPlaceholder(name));
+        warnings.push(embedOmissionMessage(wrapper.getAttribute("data-embed-reason"), name));
+      }
+      continue;
+    }
+
+    const ourDiv = wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`);
+    const target = embedReplaceTarget(wrapper);
+    if (ourDiv) {
+      const frag = document.createDocumentFragment();
+      Array.from(ourDiv.childNodes).forEach((child) => frag.appendChild(child));
+      target.replaceWith(frag);
+    } else {
+      const reason = wrapper.getAttribute("data-embed-reason");
+      target.replaceWith(embedOmissionPlaceholder(name));
+      warnings.push(embedOmissionMessage(reason, name));
+    }
+  }
+
+  root.querySelectorAll(`.${EMBED_TITLE_CLASS}`).forEach((titleEl) => {
+    if (titleEl.closest(`.${EMBED_WRAPPER_CLASS}`)) return; // wrapper pass owns it
+    const contentEl = titleEl.nextElementSibling;
+    if (!contentEl || !contentEl.classList.contains(EMBED_CONTENT_CLASS)) return; // malformed/unexpected: leave alone
+    if (contentEl.childNodes.length > 0) {
+      // Unwrap: the embedded note's own content already carries whatever
+      // title/heading it wants to show, so the bare `.embed-title` text
+      // (just the raw link name) is dropped rather than shown twice.
+      Array.from(contentEl.childNodes).forEach((child) => {
+        contentEl.parentNode?.insertBefore(child, contentEl);
+      });
+      contentEl.remove();
+      titleEl.remove();
+    } else {
+      const reason = contentEl.getAttribute("data-embed-reason");
+      const name = (titleEl.textContent ?? "unknown").trim();
+      contentEl.replaceWith(embedOmissionPlaceholder(name));
+      titleEl.remove();
+      warnings.push(embedOmissionMessage(reason, name));
+    }
+  });
+
+  return warnings;
+}
+
+export function cleanupDom(root: HTMLElement): string[] {
   normalizeMermaidSvg(root);
   for (const sel of CHROME_SELECTORS) root.querySelectorAll(sel).forEach((n) => n.remove());
   root.querySelectorAll('input[type="checkbox"]').forEach((input) => {
@@ -245,24 +463,7 @@ export function cleanupDom(root: HTMLElement): void {
     span.textContent = a.textContent ?? "";
     a.replaceWith(span);
   });
-  root.querySelectorAll("span.internal-embed, div.internal-embed").forEach((embed) => {
-    // Check if this embed has rendered content (img, video, or markdown-embed-content).
-    const hasRenderedContent = embed.querySelector("img, video, .markdown-embed-content") !== null;
-    if (hasRenderedContent) {
-      // Unwrap: replace the embed container with its child nodes.
-      Array.from(embed.childNodes).forEach((child) => {
-        embed.parentNode?.insertBefore(child, embed);
-      });
-      embed.remove();
-    } else {
-      // No rendered content: replace with omission marker.
-      const name = embed.getAttribute("src") ?? "unknown";
-      const p = createEl("p");
-      p.className = "omitted";
-      p.textContent = `[embedded content omitted: ${name}]`;
-      embed.replaceWith(p);
-    }
-  });
+  return flattenEmbeds(root);
 }
 
 export function rewriteLinks(
@@ -494,6 +695,29 @@ export async function rasterizeMermaidDiagrams(
   const images: RasterizedMermaidImage[] = [];
   const warnings: string[] = [];
   let warned = false;
+
+  // Obsidian's vault-trust gate for Mermaid (observed on a real 2026-07
+  // export): when the vault hasn't been allowed to render Mermaid, the
+  // diagram renders as guard UI instead of an svg —
+  //   <div class="mermaid-wrapper is-guarded">
+  //     <div class="mermaid-guard-header">…"Display Mermaid diagrams in this
+  //       vault?" text and an <button>Allow</button>…</div>
+  //     <div class="mermaid-guard-source"><pre class="language-mermaid">…</pre></div>
+  //   </div>
+  // Serializing that verbatim ships an inert "Allow" button into the book.
+  // Keep the readable part (the highlighted source fence), drop the UI
+  // chrome, and tell the user how to get the real diagram.
+  const guarded = root.querySelectorAll(".mermaid-wrapper.is-guarded");
+  if (guarded.length > 0) {
+    guarded.forEach((wrapper) => {
+      const source = wrapper.querySelector(".mermaid-guard-source pre");
+      if (source) wrapper.replaceWith(source);
+      else wrapper.remove();
+    });
+    warnings.push(
+      "mermaid diagram not rendered: Obsidian hasn't been allowed to display Mermaid in this vault — open the note in reading view, click Allow on the diagram, then re-export"
+    );
+  }
 
   const hosts: Element[] = [];
   root.querySelectorAll("div.mermaid").forEach((div) => hosts.push(div));

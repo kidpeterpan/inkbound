@@ -231,7 +231,12 @@ export default class EpubExportPlugin extends Plugin {
                 // as-is) — fall back to Obsidian's own link resolver, which
                 // handles paths relative to the source note and bare
                 // filenames (same resolver render-adapter.ts uses for links).
-                af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath!, file.path);
+                // img.sourcePath is set only for images that came from
+                // embedded content (FR-006, render-adapter.ts's
+                // populateEmbeds) — a relative path written inside an
+                // embedded note must resolve against THAT note's folder, not
+                // this chapter's own file.
+                af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath!, img.sourcePath ?? file.path);
               }
               if (!(af instanceof TFile)) throw new Error("not found in vault");
               const ext = img.newHref.split(".").pop()!;

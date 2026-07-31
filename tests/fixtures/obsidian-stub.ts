@@ -593,25 +593,73 @@ function transformLine(line: string, app: RenderApp, sourcePath: string, basePat
   };
 
   // 1. Image / note embeds: ![[name]] or ![[name|alias]]
-  let out = withCodeTokens.replace(/!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, rawName: string) => {
-    const name = rawName.trim();
-    let html: string;
-    if (IMAGE_EXT.test(name)) {
-      const dest = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
-      if (dest) {
-        const src = `app://localstub${encodeURI(basePath)}/${encodeURI(dest.path)}`;
-        html = `<span class="internal-embed image-embed is-loaded" src="${escapeAttr(name)}"><img src="${src}"></span>`;
+  let out = withCodeTokens.replace(
+    /!\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+    (_m, rawName: string, rawAlias?: string) => {
+      const name = rawName.trim();
+      let html: string;
+      if (IMAGE_EXT.test(name)) {
+        const dest = app.metadataCache.getFirstLinkpathDest(name, sourcePath);
+        if (dest) {
+          const src = `app://localstub${encodeURI(basePath)}/${encodeURI(dest.path)}`;
+          const caption = rawAlias ? rawAlias.trim() : name;
+          html = `<span alt="${escapeAttr(caption)}" src="${escapeAttr(name)}" class="internal-embed media-embed image-embed is-loaded"><img src="${src}"></span>`;
+        } else {
+          // Unresolved image embed: no <img> child, so flattenEmbeds's
+          // image-wrapper branch degrades it to an omission marker —
+          // mirrors a broken embed in real Obsidian.
+          html = `<span alt="${escapeAttr(name)}" src="${escapeAttr(name)}" class="internal-embed image-embed"></span>`;
+        }
       } else {
-        // Unresolved image embed: no <img> child, so cleanupDom's
-        // has-rendered-content check degrades it to an omission marker —
-        // mirrors a broken embed in real Obsidian.
-        html = `<span class="internal-embed image-embed" src="${escapeAttr(name)}"></span>`;
+        // Note-to-note embed: real Obsidian synchronously renders a wrapper
+        // carrying the authoritative linktext on `src` (see render.ts's
+        // "Note-embed hardening" comment — confirmed via live console
+        // diagnostics inside a real export run, 2026-07-31):
+        //   <span alt src class="internal-embed markdown-embed inline-embed">
+        //     <div class="embed-title markdown-embed-title">{name}</div>
+        //     <div class="markdown-embed-content"></div>
+        //   </span>
+        // and then MAY asynchronously either fill the content div with its
+        // own `.markdown-preview-view` render (resolved) or rewrite the
+        // wrapper's children to a "not created yet. Click to create." text
+        // (unresolved, `file-embed mod-empty`). This stub deterministically
+        // emits the fully-LOADED end state of that race — resolved embeds get
+        // a marker-text preview copy inside the content div, unresolved ones
+        // get the mod-empty shape — so tests prove the pipeline discards
+        // Obsidian's own copy (no duplicated content, no leaked "Click to
+        // create." text) rather than merely tolerating the empty pre-race
+        // state. Rendering the plugin's OWN copy (or degrading with a reason)
+        // is render-adapter.ts's populateEmbeds' job, exercised against this
+        // same stub's MarkdownRenderer.render/app.vault.cachedRead like real
+        // code.
+        // One deliberate fidelity gap: the real wrapper is a <span>, but this
+        // stub renders via `el.innerHTML =` and the HTML parser hoists block
+        // <div>s out of a span-inside-<p> (real Obsidian never hits the
+        // parser — it builds this DOM programmatically). A <div> wrapper on
+        // its own line parses as an HTML block, keeping the children where
+        // they belong; the pipeline under test is tag-agnostic (it selects on
+        // the `internal-embed` class). The <p>-unwrap behavior the real span
+        // shape triggers is unit-tested with programmatically-built DOM in
+        // tests/render.test.ts instead.
+        const title = (rawAlias ? rawAlias.trim() : name).trim();
+        const linkpath = name.split(/[#^]/)[0];
+        const dest = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
+        if (dest) {
+          html =
+            `<div alt="${escapeAttr(title)}" src="${escapeAttr(name)}" class="internal-embed markdown-embed inline-embed is-loaded">` +
+            `<div class="embed-title markdown-embed-title">${escapeHtml(title)}</div>` +
+            `<div class="markdown-embed-content"><div class="markdown-preview-view markdown-rendered"><p>[stub: obsidian's own async render of ${escapeHtml(name)}]</p></div></div>` +
+            `</div>`;
+        } else {
+          html =
+            `<span alt="${escapeAttr(title)}" src="${escapeAttr(name)}" class="internal-embed is-loaded file-embed mod-empty">` +
+            `${escapeHtml(`"${name}" is not created yet. Click to create.`)}` +
+            `</span>`;
+        }
       }
-    } else {
-      html = `<span class="internal-embed" src="${escapeAttr(name)}"></span>`;
+      return storeToken(html);
     }
-    return storeToken(html);
-  });
+  );
 
   // 2. Wikilinks (embeds already consumed above, so no `!` prefix remains)
   out = out.replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, rawName: string, rawAlias?: string) => {
