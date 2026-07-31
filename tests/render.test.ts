@@ -8,6 +8,8 @@ import {
   flattenEmbeds,
   splitEmbedTarget,
   isImageEmbedSrc,
+  findHeadingSection,
+  findSupportedBlock,
   EMBED_RENDERED_ATTR,
   normalizeMermaidSvg,
   rewriteLinks,
@@ -255,10 +257,16 @@ describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", 
     expect(el.textContent).toContain("[embedded content omitted: Self]");
   });
 
-  it("surfaces a distinct warning for a heading/block-scoped embed (unsupported)", () => {
+  it("surfaces a distinct warning for a heading-scoped embed whose heading wasn't found", () => {
     const el = document.createElement("div");
-    el.appendChild(realEmbedWrapper({ src: "Note#Heading", reason: "unsupported-scope" }));
-    expect(flattenEmbeds(el)).toEqual(["unsupported embed scope (heading/block): Note#Heading"]);
+    el.appendChild(realEmbedWrapper({ src: "Note#Heading", reason: "heading-not-found" }));
+    expect(flattenEmbeds(el)).toEqual(["heading not found: Note#Heading"]);
+  });
+
+  it("surfaces a distinct warning for a block-scoped embed whose block wasn't found", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "Note^blockid", reason: "block-not-found" }));
+    expect(flattenEmbeds(el)).toEqual(["block not found: Note^blockid"]);
   });
 
   it("surfaces a distinct warning for a non-note embed (unsupported type)", () => {
@@ -415,6 +423,82 @@ describe("splitEmbedTarget / isImageEmbedSrc", () => {
     expect(isImageEmbedSrc("diagram.jpeg")).toBe(true);
     expect(isImageEmbedSrc("Other Note")).toBe(false);
     expect(isImageEmbedSrc("doc.pdf")).toBe(false);
+  });
+});
+
+describe("findHeadingSection", () => {
+  it("ends the section before the next heading of the same level", () => {
+    const headings = [
+      { heading: "Heading A", level: 2, line: 0 },
+      { heading: "Heading B", level: 2, line: 4 },
+    ];
+    expect(findHeadingSection(headings, "Heading A", 8)).toEqual({ startLine: 0, endLine: 3 });
+  });
+
+  it("includes a deeper sub-heading before the next same-level heading ends it", () => {
+    const headings = [
+      { heading: "Heading A", level: 2, line: 0 },
+      { heading: "Sub A", level: 3, line: 4 },
+      { heading: "Heading B", level: 2, line: 8 },
+    ];
+    expect(findHeadingSection(headings, "Heading A", 12)).toEqual({ startLine: 0, endLine: 7 });
+  });
+
+  it("ends at the next heading of a HIGHER level even if a same-level one never follows", () => {
+    const headings = [
+      { heading: "Title", level: 1, line: 0 },
+      { heading: "Section", level: 2, line: 2 },
+      { heading: "Next Title", level: 1, line: 6 },
+    ];
+    expect(findHeadingSection(headings, "Section", 10)).toEqual({ startLine: 2, endLine: 5 });
+  });
+
+  it("runs to the note's last line when no following heading ends it", () => {
+    const headings = [{ heading: "Only Heading", level: 2, line: 3 }];
+    expect(findHeadingSection(headings, "Only Heading", 10)).toEqual({ startLine: 3, endLine: 9 });
+  });
+
+  it("uses the first match, in document order, when duplicate heading text exists", () => {
+    const headings = [
+      { heading: "Repeated", level: 2, line: 0 },
+      { heading: "Repeated", level: 2, line: 5 },
+    ];
+    expect(findHeadingSection(headings, "Repeated", 10)).toEqual({ startLine: 0, endLine: 4 });
+  });
+
+  it("matches case-insensitively and ignores leading/trailing whitespace (FR-002)", () => {
+    const headings = [{ heading: "  Some Heading  ", level: 2, line: 0 }];
+    expect(findHeadingSection(headings, "some heading", 5)).toEqual({ startLine: 0, endLine: 4 });
+  });
+
+  it("returns null when no heading matches", () => {
+    const headings = [{ heading: "Heading A", level: 2, line: 0 }];
+    expect(findHeadingSection(headings, "Nonexistent", 5)).toBeNull();
+  });
+});
+
+describe("findSupportedBlock", () => {
+  it("finds a block ID attached to a paragraph", () => {
+    const sections = [{ id: "abc123", type: "paragraph", startLine: 2, endLine: 3 }];
+    expect(findSupportedBlock(sections, "abc123")).toEqual({ startLine: 2, endLine: 3 });
+  });
+
+  it("finds a block ID attached to a heading (single line, not its section)", () => {
+    const sections = [
+      { id: "abc123", type: "heading", startLine: 4, endLine: 4 },
+      { id: undefined, type: "paragraph", startLine: 5, endLine: 6 },
+    ];
+    expect(findSupportedBlock(sections, "abc123")).toEqual({ startLine: 4, endLine: 4 });
+  });
+
+  it("returns null for a block ID attached to an unsupported type (e.g. a list item)", () => {
+    const sections = [{ id: "abc123", type: "list", startLine: 2, endLine: 2 }];
+    expect(findSupportedBlock(sections, "abc123")).toBeNull();
+  });
+
+  it("returns null for a block ID that doesn't exist in the note", () => {
+    const sections = [{ id: "other", type: "paragraph", startLine: 0, endLine: 1 }];
+    expect(findSupportedBlock(sections, "abc123")).toBeNull();
   });
 });
 

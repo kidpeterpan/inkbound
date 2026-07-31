@@ -577,9 +577,17 @@ interface RenderApp {
 // Private-Use-Area token wrappers (never produced by real note text) so the
 // later passes (tag detection, marked itself) can't accidentally re-mangle
 // already-substituted HTML.
+// Real Obsidian hides a trailing block-reference marker (`^blockid`) from
+// rendered output — it's addressing syntax, not visible content. Stripped
+// unconditionally (not just for scoped-embed extraction — specs/
+// 002-scoped-note-embeds/research.md) since any note's own paragraphs may
+// carry one whether or not anything currently embeds that block.
+const TRAILING_BLOCK_ID_RE = /\s+\^[A-Za-z0-9-]+\s*$/;
+
 function transformLine(line: string, app: RenderApp, sourcePath: string, basePath: string): string {
+  const withoutBlockId = line.replace(TRAILING_BLOCK_ID_RE, "");
   const codeParts: string[] = [];
-  const withCodeTokens = line.replace(/`[^`]*`/g, (m) => {
+  const withCodeTokens = withoutBlockId.replace(/`[^`]*`/g, (m) => {
     const token = `C${codeParts.length}`;
     codeParts.push(m);
     return token;

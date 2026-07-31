@@ -11,22 +11,43 @@
 // fails with "Failed to resolve entry for package obsidian"). Splitting this
 // adapter out mirrors the same fix already applied to settings.ts/
 // settings-core.ts (Adjustment B) for the identical reason.
-import { App, Component, MarkdownRenderer, TFile } from "obsidian";
+import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
 import {
   stripFrontmatter,
   stripDynamicBlocks,
   cleanupDom,
   splitEmbedTarget,
   isImageEmbedSrc,
+  findHeadingSection,
+  findSupportedBlock,
   rewriteLinks,
   rewriteImages,
   rasterizeMermaidDiagrams,
   serializeBody,
   EMBED_RENDERED_ATTR,
   EMBED_WRAPPER_CLASS,
+  type HeadingInfo,
+  type SectionInfo,
 } from "./render";
 
-// ── Note-embed content population (spec.md FR-001..FR-006) ────────────────
+// Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
+// into the plain arrays render.ts's pure heading/block functions expect —
+// see research.md's Unknown 1/4 for why the pure module doesn't take these
+// real Obsidian cache types directly.
+function toHeadingInfo(headings: CachedMetadata["headings"]): HeadingInfo[] {
+  return (headings ?? []).map((h) => ({ heading: h.heading, level: h.level, line: h.position.start.line }));
+}
+function toSectionInfo(sections: CachedMetadata["sections"]): SectionInfo[] {
+  return (sections ?? []).map((s) => ({
+    id: s.id,
+    type: s.type,
+    startLine: s.position.start.line,
+    endLine: s.position.end.line,
+  }));
+}
+
+// ── Note-embed content population (001-note-embed-hardening,
+// 002-scoped-note-embeds) ──────────────────────────────────────────────────
 //
 // Real Obsidian's MarkdownRenderer.render() synchronously emits a
 // `.internal-embed` wrapper for each `![[note]]` embed, carrying the exact
@@ -42,12 +63,14 @@ import {
 // linkpath the user wrote (alias excluded), heading/block suffix included —
 // so no positional pairing against the raw markdown is needed.
 //
-// Heading/block-scoped embeds (`![[Note#Heading]]`, `![[Note^block]]`) are a
-// deliberate scope cut (spec.md Assumptions): populating only a scoped
-// SECTION of a note requires this plugin to parse and extract that section
-// itself, which is real additional work with its own edge cases. Rather than
-// guess at it, those targets are left unrendered (data-embed-reason
-// "unsupported-scope") and degrade to the existing placeholder, same as a
+// Heading/block-scoped embeds (`![[Note#Heading]]`, `![[Note^block]]`) render
+// just that section/block (specs/002-scoped-note-embeds), by slicing the
+// target note's raw markdown using line positions from
+// `app.metadataCache.getFileCache()`, adapted to render.ts's pure
+// `findHeadingSection`/`findSupportedBlock` — see that feature's data-model.md
+// for the full extraction contract. A heading/block that doesn't resolve in
+// an otherwise-valid note degrades to the existing placeholder with a
+// distinct reason ("heading-not-found"/"block-not-found"), same as a
 // genuinely broken link. Embeds of non-markdown files (e.g. `![[doc.pdf]]`)
 // likewise degrade ("unsupported-type") rather than dumping binary content.
 //
@@ -97,10 +120,6 @@ async function populateEmbeds(
     if (!src || isImageEmbedSrc(src)) continue; // image embed: rewriteImages' job
 
     const target = splitEmbedTarget(src);
-    if (target.heading || target.block) {
-      wrapper.setAttribute("data-embed-reason", "unsupported-scope");
-      continue;
-    }
     const dest = app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
     if (!(dest instanceof TFile)) {
       wrapper.setAttribute("data-embed-reason", "unresolved");
@@ -111,14 +130,39 @@ async function populateEmbeds(
       continue;
     }
     if (visited.has(dest.path)) {
+      // Runs before any heading/block lookup, so a scoped embed targeting a
+      // note already in the current chain (including itself) degrades as
+      // circular the same way a whole-note embed would — no separate
+      // self-reference check needed (spec.md FR-008).
       wrapper.setAttribute("data-embed-reason", "circular");
       continue;
     }
 
+    const rawMd = await app.vault.cachedRead(dest);
+    let sectionMd: string;
+    if (target.heading || target.block) {
+      const mdLines = rawMd.split(/\r?\n/);
+      const cache = app.metadataCache.getFileCache(dest);
+      const loc = target.heading
+        ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
+        : findSupportedBlock(toSectionInfo(cache?.sections), target.block!);
+      if (!loc) {
+        wrapper.setAttribute("data-embed-reason", target.heading ? "heading-not-found" : "block-not-found");
+        continue;
+      }
+      // No stripFrontmatter here: frontmatter always sits before any heading/
+      // block worth embedding, so slicing against the RAW (frontmatter-
+      // included) line array — matching how the cache's own line numbers are
+      // computed — naturally excludes it without a separate strip step (see
+      // research.md's Unknown 2).
+      sectionMd = stripDynamicBlocks(mdLines.slice(loc.startLine, loc.endLine + 1).join("\n"));
+    } else {
+      sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
+    }
+
     const ourDiv = wrapper.createEl("div");
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-    const childMd = stripDynamicBlocks(stripFrontmatter(await app.vault.cachedRead(dest)));
-    await MarkdownRenderer.render(app, childMd, ourDiv, dest.path, component);
+    await MarkdownRenderer.render(app, sectionMd, ourDiv, dest.path, component);
 
     const childVisited = new Set(visited);
     childVisited.add(dest.path);

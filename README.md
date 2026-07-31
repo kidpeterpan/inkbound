@@ -203,9 +203,12 @@ export — it just stays in your output folder.
   Obsidian render or a real device yet. It may work, but treat exports
   containing it with a bit of extra scrutiny until you've checked the result
   by eye.
-- **Heading- and block-scoped embeds (`![[Note#Heading]]`, `![[Note^block]]`)**
-  are not rendered — they degrade to a clear inline placeholder plus an export
-  warning. Whole-note embeds (`![[note]]`) work fully, including nested ones.
+- **Block-scoped embeds (`![[Note^block]]`) only support a paragraph or a
+  heading line** — a block ID on a list item, table row, or other block type
+  degrades to a placeholder plus an export warning rather than being
+  extracted. Whole-note embeds and heading-scoped embeds
+  (`![[Note#Heading]]`) work fully, including nested embeds inside an
+  extracted section.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.

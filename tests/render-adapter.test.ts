@@ -11,7 +11,7 @@ import { renderUnitToChapter, setSvgRasterizer } from "../src/render-adapter";
 // reach their actual render path at all.
 function appWith(dest: TFile | null) {
   return {
-    metadataCache: { getFirstLinkpathDest: () => dest },
+    metadataCache: { getFirstLinkpathDest: () => dest, getFileCache: () => null },
     vault: {
       adapter: { getBasePath: () => "/vault" },
       cachedRead: () => Promise.resolve(""),
@@ -19,18 +19,108 @@ function appWith(dest: TFile | null) {
   } as never;
 }
 
+// Derives a real-Obsidian-shaped CachedMetadata (`headings`/`sections`, each
+// with a `position.start.line`/`position.end.line` — matching
+// node_modules/obsidian/obsidian.d.ts's HeadingCache/SectionCache, which is
+// what render-adapter.ts's toHeadingInfo/toSectionInfo actually consume)
+// computed directly from a test's own registered markdown, so a heading/
+// block-scoped embed test's expectations stay in sync with the fixture text
+// by construction, never a hand-maintained, separately-drifting line-number
+// map. Deliberately narrower than a full CommonMark parser: paragraphs are
+// "one or more non-blank, non-fence, non-heading, non-list lines", which is
+// all specs/002-scoped-note-embeds's tests need (list lines are recognized
+// only so a block ID attached to one is correctly classified as unsupported,
+// per that feature's Clarifications — this is not a general list parser).
+const BLOCK_ID_RE = /\^([A-Za-z0-9-]+)\s*$/;
+const LIST_LINE_RE = /^\s*([-*+]|\d+\.)\s+/;
+
+interface StubHeadingCache {
+  heading: string;
+  level: number;
+  position: { start: { line: number }; end: { line: number } };
+}
+interface StubSectionCache {
+  id: string | undefined;
+  type: string;
+  position: { start: { line: number }; end: { line: number } };
+}
+
+function pos(startLine: number, endLine: number): StubHeadingCache["position"] {
+  return { start: { line: startLine }, end: { line: endLine } };
+}
+
+function parseFileCache(content: string): { headings: StubHeadingCache[]; sections: StubSectionCache[] } {
+  const lines = content.split(/\r?\n/);
+  const headings: StubHeadingCache[] = [];
+  const sections: StubSectionCache[] = [];
+  let inFence = false;
+  let paraStart: number | null = null;
+
+  const flushParagraph = (endLine: number): void => {
+    if (paraStart === null || endLine < paraStart) return;
+    const m = BLOCK_ID_RE.exec(lines[endLine]);
+    sections.push({ id: m?.[1], type: "paragraph", position: pos(paraStart, endLine) });
+    paraStart = null;
+  };
+
+  lines.forEach((line, i) => {
+    if (/^\s*```/.test(line)) {
+      flushParagraph(i - 1);
+      inFence = !inFence;
+      return;
+    }
+    if (inFence) return;
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      flushParagraph(i - 1);
+      const text = heading[2].trim();
+      const idMatch = BLOCK_ID_RE.exec(text);
+      const headingText = idMatch ? text.slice(0, idMatch.index).trim() : text;
+      headings.push({ heading: headingText, level: heading[1].length, position: pos(i, i) });
+      sections.push({ id: idMatch?.[1], type: "heading", position: pos(i, i) });
+      return;
+    }
+
+    if (LIST_LINE_RE.test(line)) {
+      flushParagraph(i - 1);
+      const m = BLOCK_ID_RE.exec(line);
+      sections.push({ id: m?.[1], type: "list", position: pos(i, i) });
+      return;
+    }
+
+    if (line.trim() === "") {
+      flushParagraph(i - 1);
+      return;
+    }
+    if (paraStart === null) paraStart = i;
+  });
+  flushParagraph(lines.length - 1);
+
+  return { headings, sections };
+}
+
 // Builds an app whose vault.cachedRead resolves note content from a plain
 // path -> raw-markdown map, so a test can register what a target note
 // "contains" as real markdown (not pre-rendered HTML) and let the real,
 // unmodified MarkdownRenderer.render()/populateEmbeds recursion produce its
 // content — exercising the same code path a real vault export does, rather
-// than a second, parallel simulation.
+// than a second, parallel simulation. getFileCache derives heading/section
+// positions from that same registered markdown (see parseFileCache above),
+// so a heading-scoped or block-scoped embed test needs only write the
+// markdown once.
 function appWithNotes(
   notes: Record<string, string>,
   resolve: (linkpath: string, sourcePath: string) => TFile | null
 ) {
   return {
-    metadataCache: { getFirstLinkpathDest: resolve },
+    metadataCache: {
+      getFirstLinkpathDest: resolve,
+      getFileCache: (file: TFile) => {
+        const content = notes[file.path];
+        return content === undefined ? null : parseFileCache(content);
+      },
+    },
     vault: {
       adapter: { getBasePath: () => "/vault" },
       cachedRead: (file: TFile) => Promise.resolve(notes[file.path] ?? ""),
@@ -279,12 +369,121 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).not.toContain("Click to create");
   });
 
-  it("degrades a heading-scoped embed to the placeholder with a distinct warning (unsupported scope)", async () => {
-    // Heading/block-scoped embeds are a deliberate scope cut (spec.md
-    // Assumptions): populating just a SECTION of a note would require this
-    // plugin to parse and extract it itself, which is out of scope here.
+  it("renders just a heading-scoped embed's own section, not the whole target note (specs/002-scoped-note-embeds US1)", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      {
+        "Other Note.md":
+          "# Other Note\n\nIntro, not part of any section.\n\n## Some Heading\n\nJust this part.\n\n## Another Heading\n\nMust not appear.",
+      },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note#Some Heading]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Some Heading");
+    expect(r.xhtmlBody).toContain("Just this part.");
+    expect(r.xhtmlBody).not.toContain("Intro, not part");
+    expect(r.xhtmlBody).not.toContain("Another Heading");
+    expect(r.xhtmlBody).not.toContain("Must not appear");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("includes a deeper sub-heading before the next same-level heading ends the section", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      {
+        "Other Note.md":
+          "## Heading A\n\nBody A.\n\n### Sub A\n\nSub body — should be included.\n\n## Heading B\n\nMust not appear.",
+      },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note#Heading A]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Sub A");
+    expect(r.xhtmlBody).toContain("Sub body");
+    expect(r.xhtmlBody).not.toContain("Heading B");
+    expect(r.xhtmlBody).not.toContain("Must not appear");
+  });
+
+  it("runs to the end of the note when the matched heading has no following heading", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": "# Title\n\n## Last Heading\n\nFinal content, runs to the end." },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note#Last Heading]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Final content, runs to the end.");
+  });
+
+  it("resolves a nested embed inside an extracted heading section the same way a whole-note embed's nested embeds resolve (FR-004)", async () => {
+    const destOuter = new TFile("/vault", "Outer.md");
+    const destInner = new TFile("/vault", "Inner.md");
+    const app = appWithNotes(
+      {
+        "Outer.md": "## Section\n\n![[Inner]]\n\n## Next Section\n\nMust not appear.",
+        "Inner.md": "Inner note's own content.",
+      },
+      (linkpath) => (linkpath === "Outer" ? destOuter : linkpath === "Inner" ? destInner : null)
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Outer#Section]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Inner note's own content.");
+    expect(r.xhtmlBody).not.toContain("Next Section");
+    expect(r.xhtmlBody).not.toContain("Must not appear");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("degrades a heading-scoped embed to the placeholder with a distinct 'heading not found' warning when the note resolves but the heading doesn't (US3)", async () => {
     const dest = new TFile("/vault", "Other Note.md");
     const app = appWithNotes({ "Other Note.md": "## Some Heading\n\nJust this part." }, () => dest);
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note#Does Not Exist]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note#Does Not Exist]");
+    expect(r.warnings).toEqual(["heading not found: Other Note#Does Not Exist (referenced by note.md)"]);
+  });
+
+  it("degrades a heading-scoped embed to 'heading not found' when the note resolves but getFileCache itself returns null", async () => {
+    // Real Obsidian's getFileCache() can return null even for a valid TFile
+    // (e.g. not yet indexed) — toHeadingInfo/toSectionInfo's `?? []`
+    // fallback must degrade gracefully rather than throw.
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWith(dest);
     const r = await renderUnitToChapter(
       app,
       newComponent(),
@@ -295,9 +494,99 @@ describe("renderUnitToChapter", () => {
       0
     );
     expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note#Some Heading]");
-    expect(r.warnings).toEqual([
-      "unsupported embed scope (heading/block): Other Note#Some Heading (referenced by note.md)",
-    ]);
+    expect(r.warnings).toEqual(["heading not found: Other Note#Some Heading (referenced by note.md)"]);
+  });
+
+  it("degrades a block-scoped embed to 'block not found' when the note resolves but getFileCache itself returns null", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWith(dest);
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^blockid]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note^blockid]");
+    expect(r.warnings).toEqual(["block not found: Other Note^blockid (referenced by note.md)"]);
+  });
+
+  it("renders just a block-scoped embed's paragraph, not the surrounding content (specs/002-scoped-note-embeds US2)", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      {
+        "Other Note.md":
+          "Intro paragraph, not part of the embed.\n\nThis is the quoted paragraph. ^quote1\n\nOutro paragraph, also not part of it.",
+      },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^quote1]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("This is the quoted paragraph.");
+    expect(r.xhtmlBody).not.toContain("^quote1"); // block-ID marker is addressing syntax, not content
+    expect(r.xhtmlBody).not.toContain("Intro paragraph");
+    expect(r.xhtmlBody).not.toContain("Outro paragraph");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("renders just a block-scoped embed's heading line when the block ID is attached to a heading", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": "## A Heading ^head1\n\nBody content, not part of the block embed." },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^head1]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("A Heading");
+    expect(r.xhtmlBody).not.toContain("Body content");
+  });
+
+  it("degrades a block ID attached to an unsupported type (a list item) the same way a nonexistent block does (US2 acceptance scenario 3)", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes({ "Other Note.md": "- A list item. ^listblock\n- Another item." }, () => dest);
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^listblock]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note^listblock]");
+    expect(r.warnings).toEqual(["block not found: Other Note^listblock (referenced by note.md)"]);
+  });
+
+  it("degrades a block-scoped embed to the placeholder with a distinct 'block not found' warning when the note resolves but the block doesn't (US3)", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes({ "Other Note.md": "Just a paragraph, no block ID here." }, () => dest);
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^nonexistent]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note^nonexistent]");
+    expect(r.warnings).toEqual(["block not found: Other Note^nonexistent (referenced by note.md)"]);
   });
 
   it("FR-006: a link inside embedded content resolves relative to the embedded note, not the host", async () => {
@@ -408,6 +697,53 @@ describe("renderUnitToChapter", () => {
     expect(r.warnings).toEqual(["missing embed: Does Not Exist (referenced by note.md)"]);
   });
 
+  it("US3 acceptance scenario 3: a heading/block suffix on a nonexistent NOTE still produces the plain 'missing embed' message, not a heading/block-specific one", async () => {
+    // Confirms dest resolution runs first: the heading/block lookup is never
+    // reached (and never gets a chance to produce a different message) when
+    // the note itself doesn't resolve at all.
+    const r1 = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "![[Does Not Exist#Some Heading]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r1.warnings).toEqual(["missing embed: Does Not Exist#Some Heading (referenced by note.md)"]);
+
+    const r2 = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "![[Does Not Exist^blockid]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r2.warnings).toEqual(["missing embed: Does Not Exist^blockid (referenced by note.md)"]);
+  });
+
+  it("US3/FR-005/FR-006: heading-not-found, block-not-found, missing-embed, circular, and unsupported-type warnings are all textually distinct", async () => {
+    const destOther = new TFile("/vault", "Other Note.md");
+    const destSelf = new TFile("/vault", "note.md");
+    const app = appWithNotes({ "Other Note.md": "## Some Heading\n\nBody.", "note.md": "" }, (linkpath) =>
+      linkpath === "Other Note" ? destOther : linkpath === "note" ? destSelf : null
+    );
+    const [heading, block, missing, circular] = await Promise.all([
+      renderUnitToChapter(app, newComponent(), "![[Other Note#Nope]]", "note.md", new Map(), "/vault", 0),
+      renderUnitToChapter(app, newComponent(), "![[Other Note^nope]]", "note.md", new Map(), "/vault", 0),
+      renderUnitToChapter(app, newComponent(), "![[Nope]]", "note.md", new Map(), "/vault", 0),
+      renderUnitToChapter(app, newComponent(), "![[note]]", "note.md", new Map(), "/vault", 0),
+    ]);
+    const messages = [heading.warnings[0], block.warnings[0], missing.warnings[0], circular.warnings[0]];
+    expect(new Set(messages).size).toBe(messages.length); // all four distinct, no message collisions
+    expect(messages[0]).toContain("heading not found");
+    expect(messages[1]).toContain("block not found");
+    expect(messages[2]).toContain("missing embed");
+    expect(messages[3]).toContain("circular embed skipped");
+  });
+
   it("does not hang on a circular embed pair (A embeds B, B embeds A), and surfaces a circular-embed warning", async () => {
     const destA = new TFile("/vault", "A.md");
     const destB = new TFile("/vault", "B.md");
@@ -422,6 +758,27 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).toContain("Inside B");
     expect(r.xhtmlBody).toContain("Inside A");
     expect(r.warnings).toEqual(["circular embed skipped: B (referenced by note.md)"]);
+  });
+
+  it("treats a scoped embed of the host's own note as circular, not as a heading/block lookup (FR-008)", async () => {
+    // The dest/circular check runs BEFORE any heading/block resolution (see
+    // src/render-adapter.ts's populateEmbeds), so a note embedding a section
+    // of itself never reaches findHeadingSection/findSupportedBlock at all —
+    // it degrades exactly like any other self-referencing embed already
+    // would, with no new self-reference-specific code path.
+    const self = new TFile("/vault", "note.md");
+    const app = appWithNotes({ "note.md": "## Section\n\n![[note#Section]]" }, () => self);
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[note#Section]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.warnings).toEqual(["circular embed skipped: note#Section (referenced by note.md)"]);
+    expect(r.xhtmlBody).not.toContain("heading not found");
   });
 
   it("resolves a deeply nested chain of embeds (3+ levels) without hanging", async () => {

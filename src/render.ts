@@ -305,15 +305,90 @@ export function isImageEmbedSrc(src: string): boolean {
   return EMBED_IMAGE_EXT.test(src.trim());
 }
 
+// ── Scoped (heading/block) embed extraction ────────────────────────────────
+//
+// A heading-scoped (`![[Note#Heading]]`) or block-scoped (`![[Note^blockid]]`)
+// embed needs to know WHERE in the target note's raw markdown its section or
+// block starts and ends. Obsidian's own `app.metadataCache.getFileCache()`
+// already computes exactly this (line-numbered headings and root-level
+// sections) — render-adapter.ts adapts that real, Obsidian-specific cache
+// shape into the plain `HeadingInfo`/`SectionInfo` arrays below, so the
+// matching and boundary math here stays pure and independently testable
+// (see research.md's Unknown 4 for why this doesn't reuse Obsidian's own
+// `stripHeading()`/`stripHeadingForLink()` normalization functions).
+
+export interface HeadingInfo {
+  heading: string;
+  level: number;
+  /** 0-based line number in the note's raw markdown. */
+  line: number;
+}
+
+export interface HeadingSection {
+  /** 0-based, inclusive. */
+  startLine: number;
+  /** 0-based, inclusive. */
+  endLine: number;
+}
+
+// Finds the heading matching `target` (case-insensitive, leading/trailing
+// whitespace ignored — FR-002) and computes its section's line range: from
+// the heading's own line through the line before the next heading whose
+// level is equal to or higher (numerically lower or equal) than the matched
+// heading's, or through the note's last line if no such heading follows.
+// When more than one heading shares the same text, the first in document
+// order wins, matching how Obsidian itself resolves a duplicate heading link.
+export function findHeadingSection(
+  headings: HeadingInfo[],
+  target: string,
+  totalLines: number
+): HeadingSection | null {
+  const needle = target.trim().toLowerCase();
+  const matchIndex = headings.findIndex((h) => h.heading.trim().toLowerCase() === needle);
+  if (matchIndex === -1) return null;
+
+  const matched = headings[matchIndex];
+  const next = headings.slice(matchIndex + 1).find((h) => h.level <= matched.level);
+  const endLine = next ? next.line - 1 : totalLines - 1;
+  return { startLine: matched.line, endLine };
+}
+
+export interface SectionInfo {
+  id: string | undefined;
+  /** e.g. "paragraph" | "heading" | "list" | "table" | ... (non-exhaustive). */
+  type: string;
+  /** 0-based, inclusive. */
+  startLine: number;
+  /** 0-based, inclusive. */
+  endLine: number;
+}
+
+// Finds the block matching `blockId`, supporting only the block types
+// spec.md's Clarifications settled on (paragraphs and headings) — a block ID
+// that resolves to any other section type (or to no section at all, e.g. one
+// attached to a list item rather than a root-level section) is treated
+// identically to a genuinely nonexistent block ID: both return `null`, and
+// render-adapter.ts degrades them the same way (FR-006).
+export function findSupportedBlock(sections: SectionInfo[], blockId: string): HeadingSection | null {
+  const match = sections.find((s) => s.id === blockId && (s.type === "paragraph" || s.type === "heading"));
+  return match ? { startLine: match.startLine, endLine: match.endLine } : null;
+}
+
 // Maps a populateEmbeds-stamped data-embed-reason to its warning message.
+// No "unsupported-scope" case: every heading/block-suffixed embed now
+// attempts real resolution (findHeadingSection/findSupportedBlock above), so
+// nothing stamps that reason anymore — see spec.md's Scoped Note Embeds
+// feature and its FR-005/FR-006.
 function embedOmissionMessage(reason: string | null, name: string): string {
   switch (reason) {
     case "circular":
       return `circular embed skipped: ${name}`;
-    case "unsupported-scope":
-      return `unsupported embed scope (heading/block): ${name}`;
     case "unsupported-type":
       return `unsupported embed type (not a note): ${name}`;
+    case "heading-not-found":
+      return `heading not found: ${name}`;
+    case "block-not-found":
+      return `block not found: ${name}`;
     default:
       return `missing embed: ${name}`;
   }

@@ -19,9 +19,18 @@ import * as fs from "fs";
 import * as path from "path";
 import { App, FileSystemAdapter, TAbstractFile, TFile, TFolder } from "./obsidian-stub";
 
+// position shape matches node_modules/obsidian/obsidian.d.ts's HeadingCache/
+// SectionCache — real Obsidian's own Pos type has more fields (col, offset)
+// this harness never reads, so only start.line/end.line are populated here;
+// render-adapter.ts's toHeadingInfo/toSectionInfo only ever read those two.
+interface StubPos {
+  start: { line: number };
+  end: { line: number };
+}
 export interface FileCache {
   frontmatter: Record<string, unknown>;
-  headings: { heading: string; level: number }[];
+  headings: { heading: string; level: number; position: StubPos }[];
+  sections: { id?: string; type: string; position: StubPos }[];
 }
 
 function stripQuotes(s: string): string {
@@ -72,20 +81,75 @@ function parseFrontmatter(content: string): Record<string, unknown> {
   return fm;
 }
 
-function parseHeadings(content: string): { heading: string; level: number }[] {
-  const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
-  const headings: { heading: string; level: number }[] = [];
+// Computed against the FULL content (frontmatter included, no stripping) —
+// real Obsidian's own line numbers are relative to the whole file, and
+// render-adapter.ts's scoped-embed slicing reads raw `cachedRead()` content
+// the same way (see specs/002-scoped-note-embeds/research.md's Unknown 2).
+// Deliberately narrower than a full CommonMark parser: paragraphs are "one
+// or more non-blank, non-fence, non-heading, non-list lines" — enough to
+// exercise heading-scoped and paragraph/heading block-scoped embeds via
+// `npm run local-export`; list-item block IDs are recognized only so
+// they're correctly classified as unsupported, not extracted as if they
+// were a paragraph.
+const BLOCK_ID_RE = /\^([A-Za-z0-9-]+)\s*$/;
+const LIST_LINE_RE = /^\s*([-*+]|\d+\.)\s+/;
+
+function pos(startLine: number, endLine: number): StubPos {
+  return { start: { line: startLine }, end: { line: endLine } };
+}
+
+function parseHeadingsAndSections(content: string): {
+  headings: FileCache["headings"];
+  sections: FileCache["sections"];
+} {
+  const lines = content.split(/\r?\n/);
+  const headings: FileCache["headings"] = [];
+  const sections: FileCache["sections"] = [];
   let inFence = false;
-  for (const line of body.split(/\r?\n/)) {
+  let paraStart: number | null = null;
+
+  const flushParagraph = (endLine: number): void => {
+    if (paraStart === null || endLine < paraStart) return;
+    const m = BLOCK_ID_RE.exec(lines[endLine]);
+    sections.push({ id: m?.[1], type: "paragraph", position: pos(paraStart, endLine) });
+    paraStart = null;
+  };
+
+  lines.forEach((line, i) => {
     if (/^\s*```/.test(line)) {
+      flushParagraph(i - 1);
       inFence = !inFence;
-      continue;
+      return;
     }
-    if (inFence) continue;
-    const m = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (m) headings.push({ level: m[1].length, heading: m[2].trim() });
-  }
-  return headings;
+    if (inFence) return;
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (heading) {
+      flushParagraph(i - 1);
+      const text = heading[2].trim();
+      const idMatch = BLOCK_ID_RE.exec(text);
+      const headingText = idMatch ? text.slice(0, idMatch.index).trim() : text;
+      headings.push({ heading: headingText, level: heading[1].length, position: pos(i, i) });
+      sections.push({ id: idMatch?.[1], type: "heading", position: pos(i, i) });
+      return;
+    }
+
+    if (LIST_LINE_RE.test(line)) {
+      flushParagraph(i - 1);
+      const m = BLOCK_ID_RE.exec(line);
+      sections.push({ id: m?.[1], type: "list", position: pos(i, i) });
+      return;
+    }
+
+    if (line.trim() === "") {
+      flushParagraph(i - 1);
+      return;
+    }
+    if (paraStart === null) paraStart = i;
+  });
+  flushParagraph(lines.length - 1);
+
+  return { headings, sections };
 }
 
 function normalizeRel(p: string): string {
@@ -196,7 +260,8 @@ export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultSt
       } catch {
         return null;
       }
-      return { frontmatter: parseFrontmatter(content), headings: parseHeadings(content) };
+      const { headings, sections } = parseHeadingsAndSections(content);
+      return { frontmatter: parseFrontmatter(content), headings, sections };
     },
     getFirstLinkpathDest,
     get resolvedLinks(): Record<string, Record<string, number>> {
