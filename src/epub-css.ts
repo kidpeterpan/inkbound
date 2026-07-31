@@ -13,5 +13,9 @@ th, td { border: 1px solid #888; padding: 0.25em 0.5em; }
 .callout { border: 1px solid #555; padding: 0.5em 0.8em; margin: 1em 0; }
 .callout-title { font-weight: bold; }
 .omitted { color: #555; font-style: italic; }
+/* Backlink trail ("Linked from:") — reads as chrome, not prose, on e-ink:
+   hairline separator, slightly smaller, roomy line height for tap targets. */
+.backlinks { border-top: 1px solid #888; border-bottom: 1px solid #888; margin: 0.8em 0; padding: 0.3em 0; }
+.backlinks p { font-size: 0.85em; line-height: 1.9; margin: 0.2em 0; }
 /* ── PAN (Task 11): tune the reading experience for your Boox below ── */
 `;

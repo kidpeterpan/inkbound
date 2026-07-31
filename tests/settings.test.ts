@@ -5,7 +5,12 @@ import type {
   SettingDefinitionAction,
   SettingDefinitionControl,
 } from "obsidian";
-import { resolveOutputPath, summarizeWarnings, DEFAULT_SETTINGS } from "../src/settings-core";
+import {
+  resolveOutputPath,
+  summarizeWarnings,
+  DEFAULT_SETTINGS,
+  coerceBacklinkPosition,
+} from "../src/settings-core";
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
 import {
@@ -68,7 +73,24 @@ describe("DEFAULT_SETTINGS", () => {
       fallbackAuthor: "",
       booxUrl: "",
       pushAfterExport: false,
+      backlinkPosition: "start",
     });
+  });
+});
+
+describe("coerceBacklinkPosition", () => {
+  it("passes through the four valid values", () => {
+    expect(coerceBacklinkPosition("start")).toBe("start");
+    expect(coerceBacklinkPosition("end")).toBe("end");
+    expect(coerceBacklinkPosition("both")).toBe("both");
+    expect(coerceBacklinkPosition("none")).toBe("none");
+  });
+  it("degrades anything else to 'start' (hand-edited data.json must never crash an export)", () => {
+    expect(coerceBacklinkPosition("top")).toBe("start");
+    expect(coerceBacklinkPosition("")).toBe("start");
+    expect(coerceBacklinkPosition(undefined)).toBe("start");
+    expect(coerceBacklinkPosition(null)).toBe("start");
+    expect(coerceBacklinkPosition(42)).toBe("start");
   });
 });
 
@@ -111,11 +133,12 @@ describe("EpubExportSettingTab", () => {
     resetRequestUrlImpl();
   });
 
-  it("case 1: renders a setting for each of the six fields plus the BooxDrop heading and Test-connection button", () => {
+  it("case 1: renders a setting for each of the seven fields plus the BooxDrop heading and Test-connection button", () => {
     makeTab();
     expect(SETTINGS.map((s) => s.nameEl.textContent)).toEqual([
       "Output folder",
       "Default link depth",
+      "Backlink listing position",
       "Language (dc:language)",
       "Fallback author",
       "BooxDrop",
@@ -182,6 +205,38 @@ describe("EpubExportSettingTab", () => {
     expect(saveCalls).toBe(1);
   });
 
+  it("case 6b: the backlink-position dropdown offers start/end/both, defaults to start, writes the field and saves", () => {
+    const { plugin } = makeTab();
+    const control = controlFor("Backlink listing position");
+    expect(control.options).toEqual({
+      start: "Start of chapter",
+      end: "End of chapter",
+      both: "Both",
+      none: "None (no backlink list)",
+    });
+    expect(control.value).toBe("start");
+    control.onChangeFn?.("end");
+    expect(plugin.settings.backlinkPosition).toBe("end");
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6c: an out-of-union dropdown value is coerced to 'start' before being stored", () => {
+    const { plugin } = makeTab({ backlinkPosition: "both" });
+    controlFor("Backlink listing position").onChangeFn?.("bogus");
+    expect(plugin.settings.backlinkPosition).toBe("start");
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6d: loadSettings merges persisted data missing backlinkPosition to the 'start' default", async () => {
+    const plugin = new EpubExportPlugin({} as never, {} as never);
+    // Simulate an existing user's data.json written before this feature.
+    await plugin.saveData({ outputFolder: "~/exports", linkDepth: 2 });
+    await plugin.loadSettings();
+    expect(plugin.settings.backlinkPosition).toBe("start");
+    expect(plugin.settings.outputFolder).toBe("~/exports");
+    expect(plugin.settings.linkDepth).toBe(2);
+  });
+
   it("case 7: test connection with no device URL set shows a notice", async () => {
     makeTab({ booxUrl: "" });
     await controlFor("Test connection").onClickFn?.(new MouseEvent("click"));
@@ -218,6 +273,7 @@ describe("EpubExportSettingTab", () => {
     expect(flat.map((d) => d.name)).toEqual([
       "Output folder",
       "Default link depth",
+      "Backlink listing position",
       "Language (dc:language)",
       "Fallback author",
       "Device URL",
@@ -240,6 +296,22 @@ describe("EpubExportSettingTab", () => {
     const flat = flattenDefinitions(tab.getSettingDefinitions());
     const linkDepth = flat.find((d) => d.name === "Default link depth") as SettingDefinitionControl;
     expect(linkDepth.control).toMatchObject({ type: "slider", key: "linkDepth", min: 1, max: 3, step: 1 });
+  });
+
+  it("case 12b: the backlink-position definition is a dropdown keyed to backlinkPosition with the same options as display()", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const def = flat.find((d) => d.name === "Backlink listing position") as SettingDefinitionControl;
+    expect(def.control).toMatchObject({
+      type: "dropdown",
+      key: "backlinkPosition",
+      options: {
+        start: "Start of chapter",
+        end: "End of chapter",
+        both: "Both",
+        none: "None (no backlink list)",
+      },
+    });
   });
 
   it("case 13: the BooxDrop group is a declarative group headed 'BooxDrop'", () => {

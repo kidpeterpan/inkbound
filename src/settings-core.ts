@@ -4,6 +4,8 @@
 // src/settings.ts re-exports everything from here and adds the obsidian-facing
 // EpubExportSettingTab class.
 
+export type BacklinkPosition = "start" | "end" | "both" | "none";
+
 export interface EpubExportSettings {
   outputFolder: string;
   linkDepth: number;
@@ -11,6 +13,7 @@ export interface EpubExportSettings {
   fallbackAuthor: string;
   booxUrl: string;
   pushAfterExport: boolean;
+  backlinkPosition: BacklinkPosition;
 }
 
 export const DEFAULT_SETTINGS: EpubExportSettings = {
@@ -20,7 +23,15 @@ export const DEFAULT_SETTINGS: EpubExportSettings = {
   fallbackAuthor: "",
   booxUrl: "",
   pushAfterExport: false,
+  backlinkPosition: "start",
 };
+
+// Persisted data.json can hold anything (hand-edits, downgrades) — an
+// unrecognized value must degrade to the default, never crash or disable
+// the listing (spec FR-006/FR-008).
+export function coerceBacklinkPosition(value: unknown): BacklinkPosition {
+  return value === "end" || value === "both" || value === "none" ? value : "start";
+}
 
 export function resolveOutputPath(outputFolder: string, slug: string, homedir: string): string {
   let folder = outputFolder.trim();

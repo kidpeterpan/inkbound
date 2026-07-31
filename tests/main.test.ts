@@ -117,6 +117,7 @@ function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): E
     fallbackAuthor: "",
     booxUrl: "",
     pushAfterExport: false,
+    backlinkPosition: "start",
     ...settings,
   };
   return plugin;
@@ -192,6 +193,7 @@ async function makeOnloadedPlugin(
     fallbackAuthor: "",
     booxUrl: "",
     pushAfterExport: false,
+    backlinkPosition: "start",
     ...settings,
   });
   await plugin.onload();
@@ -453,6 +455,116 @@ describe("exportLinked", () => {
   });
 });
 
+// ── backlink trail (specs/001-breadcrumb-trail) ─────────────────────────
+
+describe("backlink trail", () => {
+  // a → b: a is chapter_001, b is chapter_002 (bfsLinked order).
+  const linkedVault = {
+    "linked/a.md": "Start note linking to [[b]].\n",
+    "linked/b.md": "Leaf note b.\n",
+  };
+
+  it("US1 case 1: the linked-to chapter lists the linking chapter; the linker itself has no trail", async () => {
+    const { app, root } = await buildVault(linkedVault);
+    const plugin = makePlugin(app);
+    await plugin.exportLinked(tfile(root, "linked/a.md"));
+
+    const epub = await readEpub("a.epub");
+    expect(await epub.chapter(2)).toContain(
+      '<div class="backlinks"><p>Linked from: <a href="chapter_001.xhtml">a</a></p></div>'
+    );
+    expect(await epub.chapter(1)).not.toContain('class="backlinks"');
+  });
+
+  it("US1 case 2: position 'start' puts the trail before the chapter body, 'end' after it", async () => {
+    const { app, root } = await buildVault(linkedVault);
+
+    await makePlugin(app, { backlinkPosition: "start" }).exportLinked(tfile(root, "linked/a.md"));
+    const start = await (await readEpub("a.epub")).chapter(2);
+    expect(start.indexOf('class="backlinks"')).toBeLessThan(start.indexOf("Leaf note b."));
+
+    await makePlugin(app, { backlinkPosition: "end" }).exportLinked(tfile(root, "linked/a.md"));
+    const end = await (await readEpub("a.epub")).chapter(2);
+    expect(end.indexOf('class="backlinks"')).toBeGreaterThan(end.indexOf("Leaf note b."));
+  });
+
+  it("US1 case 3: position 'both' renders the trail twice, around the body", async () => {
+    const { app, root } = await buildVault(linkedVault);
+    await makePlugin(app, { backlinkPosition: "both" }).exportLinked(tfile(root, "linked/a.md"));
+
+    const body = await (await readEpub("a.epub")).chapter(2);
+    const occurrences = body.split('class="backlinks"').length - 1;
+    expect(occurrences).toBe(2);
+    expect(body.indexOf('class="backlinks"')).toBeLessThan(body.indexOf("Leaf note b."));
+    expect(body.lastIndexOf('class="backlinks"')).toBeGreaterThan(body.indexOf("Leaf note b."));
+  });
+
+  it("US1 case 4: an out-of-union persisted position behaves as 'start'", async () => {
+    const { app, root } = await buildVault(linkedVault);
+    const plugin = makePlugin(app, { backlinkPosition: "top" as never });
+    await plugin.exportLinked(tfile(root, "linked/a.md"));
+
+    const body = await (await readEpub("a.epub")).chapter(2);
+    expect(body.indexOf('class="backlinks"')).toBeGreaterThanOrEqual(0);
+    expect(body.indexOf('class="backlinks"')).toBeLessThan(body.indexOf("Leaf note b."));
+  });
+
+  it("case 4b: position 'none' disables the trail — no chapter carries a backlinks block", async () => {
+    const { app, root } = await buildVault(linkedVault);
+    await makePlugin(app, { backlinkPosition: "none" }).exportLinked(tfile(root, "linked/a.md"));
+
+    const epub = await readEpub("a.epub");
+    expect(await epub.chapter(1)).not.toContain('class="backlinks"');
+    expect(await epub.chapter(2)).not.toContain('class="backlinks"');
+  });
+
+  it("US2 case 6: a chapter two others link to lists both, in book order, once each", async () => {
+    const { app, root } = await buildVault({
+      "linked/a.md": "Links to [[b]] and [[c]].\n",
+      "linked/b.md": "Also links to [[c]], twice: [[c]].\n",
+      "linked/c.md": "Popular leaf note.\n",
+    });
+    await makePlugin(app).exportLinked(tfile(root, "linked/a.md"));
+
+    const epub = await readEpub("a.epub");
+    // Book order is [a, b, c]; c is chapter_003 and lists a then b.
+    expect(await epub.chapter(3)).toContain(
+      'Linked from: <a href="chapter_001.xhtml">a</a>, <a href="chapter_002.xhtml">b</a>'
+    );
+    // b links c twice but must appear once.
+    const c = await epub.chapter(3);
+    expect(c.split("chapter_002.xhtml").length - 1).toBe(1);
+  });
+
+  it("US3 case 7: folder export — chapters the index links to list the index; unlinked chapters have no trail", async () => {
+    const { app, root } = await buildVault({
+      // Named after the folder → pickIndexNote's name branch finds it.
+      "guide/guide.md": "Overview linking to [[01_intro]] only.\n",
+      "guide/01_intro.md": "Intro chapter.\n",
+      "guide/02_details.md": "Details chapter nothing links to.\n",
+    });
+    await makePlugin(app).exportFolder(tfolder(root, "guide"));
+
+    const epub = await readEpub("guide.epub");
+    // Order: index first (chapter_001), then 01_intro, 02_details.
+    expect(await epub.chapter(2)).toContain(
+      '<div class="backlinks"><p>Linked from: <a href="chapter_001.xhtml">guide</a></p></div>'
+    );
+    expect(await epub.chapter(3)).not.toContain('class="backlinks"');
+    expect(await epub.chapter(1)).not.toContain('class="backlinks"');
+  });
+
+  it("US1 case 5: a single-note export never contains a backlink trail", async () => {
+    const { app, root } = await buildVault({
+      "solo.md": "A note that links to [[solo]] itself, and to [[nowhere]].\n",
+    });
+    await makePlugin(app).exportSingle(tfile(root, "solo.md"));
+
+    const epub = await readEpub("solo.epub");
+    expect(await epub.chapter(1)).not.toContain('class="backlinks"');
+  });
+});
+
 describe("cover art", () => {
   it("case 6: embeds a downloaded cover with the extension matching its content-type", async () => {
     const { app, root } = await buildVault({
@@ -704,6 +816,7 @@ describe("settings persistence", () => {
       fallbackAuthor: "Pan",
       booxUrl: "",
       pushAfterExport: false,
+      backlinkPosition: "start",
     });
 
     plugin.settings.outputFolder = outDir;
@@ -717,6 +830,7 @@ describe("settings persistence", () => {
       fallbackAuthor: "Pan",
       booxUrl: "",
       pushAfterExport: true,
+      backlinkPosition: "start",
     });
   });
 
@@ -738,6 +852,7 @@ describe("settings persistence", () => {
       fallbackAuthor: "",
       booxUrl: "",
       pushAfterExport: false,
+      backlinkPosition: "start",
     });
   });
 });

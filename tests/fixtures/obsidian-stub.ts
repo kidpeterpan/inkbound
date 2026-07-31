@@ -400,6 +400,7 @@ export class ChainableControl {
   limits?: [number, number, number];
   buttonText?: string;
   disabled?: boolean;
+  options?: Record<string, string>;
   onChangeFn?: (v: unknown) => unknown;
   onClickFn?: (evt: MouseEvent) => unknown;
 
@@ -420,6 +421,10 @@ export class ChainableControl {
     return this;
   }
   setDynamicTooltip(): this {
+    return this;
+  }
+  addOptions(options: Record<string, string>): this {
+    this.options = options;
     return this;
   }
   setButtonText(t: string): this {
@@ -488,6 +493,12 @@ export class Setting {
     return this;
   }
   addButton(cb: (c: ChainableControl) => unknown): this {
+    const c = new ChainableControl();
+    this.control = c;
+    cb(c);
+    return this;
+  }
+  addDropdown(cb: (c: ChainableControl) => unknown): this {
     const c = new ChainableControl();
     this.control = c;
     cb(c);

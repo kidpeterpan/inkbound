@@ -2,6 +2,7 @@ import { FileSystemAdapter, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder,
 import { promises as fs } from "fs";
 import { homedir } from "os";
 import { EpubBuilder, chapterHref, escapeXml } from "./epub";
+import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
@@ -12,6 +13,7 @@ import {
   DEFAULT_SETTINGS,
   EpubExportSettings,
   EpubExportSettingTab,
+  coerceBacklinkPosition,
   resolveOutputPath,
   summarizeWarnings,
 } from "./settings";
@@ -191,6 +193,33 @@ export default class EpubExportPlugin extends Plugin {
 
       const hrefByPath = new Map(job.files.map((f, i) => [f.path, chapterHref(i)]));
       const builder = new EpubBuilder(job.meta);
+
+      // Backlink trail: which chapters in THIS book link to each chapter,
+      // in book order. Sources come from the same resolvedLinks graph the
+      // linked-notes collector consumed, so anything bfsLinked counted as a
+      // link is guaranteed to show up as a backlink here.
+      const fileByPath = new Map(job.files.map((f) => [f.path, f]));
+      const backlinks = computeBacklinks(
+        this.app.metadataCache.resolvedLinks,
+        job.files.map((f) => f.path)
+      );
+      const backlinkPosition = coerceBacklinkPosition(this.settings.backlinkPosition);
+      const withBacklinks = (file: TFile, xhtmlBody: string): string => {
+        // "none" restores pre-feature output exactly — no trail on any chapter.
+        if (backlinkPosition === "none") return xhtmlBody;
+        const entries = (backlinks.get(file.path) ?? []).flatMap((path) => {
+          const source = fileByPath.get(path);
+          const href = hrefByPath.get(path);
+          // Chapters live side by side in text/, so link by filename only
+          // (same convention as rewriteLinks in render.ts).
+          return source && href ? [{ title: this.titleFor(source), href: href.replace(/^text\//, "") }] : [];
+        });
+        const fragment = renderBacklinksFragment(entries);
+        if (!fragment) return xhtmlBody;
+        if (backlinkPosition === "end") return xhtmlBody + fragment;
+        if (backlinkPosition === "both") return fragment + xhtmlBody + fragment;
+        return fragment + xhtmlBody;
+      };
       // Running total of images rewriteImages has STAMPED into chapter HTML
       // so far — not the count that later loaded as assets. The <img> hrefs
       // are burned into r.xhtmlBody the moment renderUnitToChapter returns,
@@ -257,7 +286,7 @@ export default class EpubExportPlugin extends Plugin {
               warnings.push(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
             }
           }
-          builder.addChapter(this.titleFor(file), r.xhtmlBody);
+          builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody));
         } catch (e) {
           warnings.push(`chapter skipped: ${file.path} — ${String(e)}`);
           // Placeholder keeps builder's chapter count == job.files.length, so
@@ -266,9 +295,11 @@ export default class EpubExportPlugin extends Plugin {
           // addChapter). Without this, a skipped chapter shifts every later
           // chapter's real href back by one, silently retargeting any link
           // that pointed at or past the failed chapter.
+          // The placeholder still gets the backlink trail: a failed chapter
+          // keeps its spine slot and can still be navigated back from.
           builder.addChapter(
             this.titleFor(file),
-            `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`
+            withBacklinks(file, `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`)
           );
         }
       }

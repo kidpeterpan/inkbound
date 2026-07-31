@@ -87,14 +87,15 @@ Found under **Settings → Community plugins → Inkbound**:
 
 ![The Inkbound settings tab, including the BooxDrop device URL and push toggle](docs/images/settings.png)
 
-| Setting                  | Default                      | Purpose                                                                                                                                                                               |
-| ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Output folder            | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                |
-| Default link depth       | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                   |
-| Language (`dc:language`) | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                        |
-| Fallback author          | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                      |
-| Device URL               | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                    |
-| Push after export        | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL. |
+| Setting                   | Default                      | Purpose                                                                                                                                                                                                                       |
+| ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Output folder             | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                                                        |
+| Default link depth        | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
+| Backlink listing position | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
+| Language (`dc:language`)  | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                                                                |
+| Fallback author           | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                                                              |
+| Device URL                | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                                                            |
+| Push after export         | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL.                                         |
 
 ## A worked example
 

@@ -4,8 +4,24 @@ import type EpubExportPlugin from "./main";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 
-export type { EpubExportSettings } from "./settings-core";
-export { DEFAULT_SETTINGS, resolveOutputPath, summarizeWarnings } from "./settings-core";
+import { coerceBacklinkPosition } from "./settings-core";
+
+export type { BacklinkPosition, EpubExportSettings } from "./settings-core";
+export {
+  DEFAULT_SETTINGS,
+  coerceBacklinkPosition,
+  resolveOutputPath,
+  summarizeWarnings,
+} from "./settings-core";
+
+// Single source for the dropdown's choices so display() and
+// getSettingDefinitions() can never drift on labels or allowed values.
+const BACKLINK_POSITION_OPTIONS: Record<string, string> = {
+  start: "Start of chapter",
+  end: "End of chapter",
+  both: "Both",
+  none: "None (no backlink list)",
+};
 
 export class EpubExportSettingTab extends PluginSettingTab {
   constructor(
@@ -53,6 +69,11 @@ export class EpubExportSettingTab extends PluginSettingTab {
         name: "Default link depth",
         desc: "How far 'note + linked notes' follows wikilinks (1–3).",
         control: { type: "slider", key: "linkDepth", min: 1, max: 3, step: 1 },
+      },
+      {
+        name: "Backlink listing position",
+        desc: 'Where each chapter shows the "Linked from:" list of chapters that link to it.',
+        control: { type: "dropdown", key: "backlinkPosition", options: BACKLINK_POSITION_OPTIONS },
       },
       {
         name: "Language (dc:language)",
@@ -118,6 +139,19 @@ export class EpubExportSettingTab extends PluginSettingTab {
           .setValue(s.linkDepth)
           .onChange((v) => {
             s.linkDepth = v;
+            void save();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Backlink listing position")
+      .setDesc('Where each chapter shows the "Linked from:" list of chapters that link to it.')
+      .addDropdown((d) =>
+        d
+          .addOptions(BACKLINK_POSITION_OPTIONS)
+          .setValue(s.backlinkPosition)
+          .onChange((v) => {
+            s.backlinkPosition = coerceBacklinkPosition(v);
             void save();
           })
       );
