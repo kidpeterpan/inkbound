@@ -3,6 +3,24 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.8
+
+Heading- and block-scoped note embeds (`![[Note#Heading]]`, `![[Note^blockid]]`)
+now render, instead of always degrading to a placeholder.
+
+- A heading-scoped embed shows that heading plus everything under it, down to
+  the next heading of equal or higher level — matching how Obsidian itself
+  scopes a heading link. Nested embeds inside the extracted section resolve
+  the same way they do inside a whole-note embed.
+- A block-scoped embed shows just the single paragraph or heading carrying
+  that block ID. A block ID on a list item, table row, or other block type
+  still degrades to the placeholder — extracting those would require
+  synthesizing a wrapping list/table around a single item just to keep the
+  output valid, which isn't attempted here.
+- An embed whose note exists but whose heading or block can't be found
+  degrades to the existing placeholder with a warning that specifically says
+  so ("heading not found" / "block not found"), distinct from a missing note.
+
 ## 1.0.7
 
 Note embeds (`![[note]]`) now actually work in exported books.
