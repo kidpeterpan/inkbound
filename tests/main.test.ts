@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/render-adapter";
+import { EpubBuilder } from "../src/epub";
 import {
   TFile,
   TFolder,
@@ -561,10 +562,6 @@ describe("onload: command and menu registration", () => {
     await invokeAndWait(plugin, "exportSingle", () => commands["export-note"].callback?.());
     expect(await outDirEntries()).toContain("note.epub");
 
-    // f.parent instanceof TFolder: TAbstractFile.parent (obsidian-stub.ts) is
-    // only null for the vault root itself, never for a file, so the
-    // ternary's "Active note has no parent folder." branch is unreachable
-    // via any real file in this fixture (and arguably in real Obsidian too).
     await invokeAndWait(plugin, "exportFolder", () => commands["export-folder"].callback?.());
     expect(await outDirEntries()).toContain("sub.epub");
 
@@ -671,6 +668,29 @@ describe("withActiveFile", () => {
   });
 });
 
+describe("export-folder command's parentless-file guard", () => {
+  it("shows 'Active note has no parent folder.' instead of exporting, for a file whose parent isn't a TFolder", async () => {
+    // Real Obsidian/the stub's TAbstractFile.parent is only ever null for
+    // the vault root itself (never for a real file), so this branch cannot
+    // be reached via any actual file in a real vault — it exists purely as
+    // defensive code against a TFile whose parent getter returns something
+    // other than a TFolder. Exercised directly here by shadowing the
+    // prototype's `parent` getter with an own property, the only way to
+    // observe this branch at all.
+    const { app, root } = await buildVault({ "sub/note.md": "Body.\n" });
+    const plugin = await makeOnloadedPlugin(app);
+    const activeFile = tfile(root, "sub/note.md");
+    Object.defineProperty(activeFile as object, "parent", { value: null, configurable: true });
+    (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+    const commands = commandsOf(plugin);
+
+    commands["export-folder"].callback?.();
+
+    expect(NOTICES).toContain("Active note has no parent folder.");
+    expect(await outDirEntries()).toEqual([]);
+  });
+});
+
 describe("settings persistence", () => {
   it("loadSettings merges saved data over the defaults; saveSettings persists the result", async () => {
     const plugin = new EpubExportPlugin({} as never, {} as never);
@@ -697,6 +717,27 @@ describe("settings persistence", () => {
       fallbackAuthor: "Pan",
       booxUrl: "",
       pushAfterExport: true,
+    });
+  });
+
+  it("loadSettings falls back to the defaults alone when loadData resolves to null (first run)", async () => {
+    // The stub's own Plugin.loadData() always resolves to at least `{}`
+    // (its `_data` field defaults to `{}` in the constructor), so it can
+    // never exercise loadSettings' `loaded ?? {}` nullish branch on its
+    // own — overriding the method directly is the only way to simulate a
+    // real first-run Obsidian install, where loadData() resolves to null.
+    const plugin = new EpubExportPlugin({} as never, {} as never);
+    plugin.loadData = async () => null;
+
+    await plugin.loadSettings();
+
+    expect(plugin.settings).toEqual({
+      outputFolder: "",
+      linkDepth: 1,
+      language: "th",
+      fallbackAuthor: "",
+      booxUrl: "",
+      pushAfterExport: false,
     });
   });
 });
@@ -978,6 +1019,22 @@ describe("failure paths", () => {
 
     expect(NOTICES.some((n) => n.startsWith("EPUB export failed"))).toBe(true);
     expect(errors.some((e) => e.includes("export failed"))).toBe(true);
+  });
+
+  it("a fatal export error that rejects with a non-Error value still reports a readable failure", async () => {
+    // Same "e instanceof Error ? e.message : String(e)" pattern as the push
+    // failure case above, but the OUTER export-level catch (src/main.ts's
+    // runExport) — F12 above only exercises this with a real fs Error, never
+    // a bare-value throw. builder.build() is spied to reject with a string,
+    // mirroring how a genuinely unexpected non-Error throw would surface.
+    const { app, root } = await buildVault({ "solo.md": "# Solo\n\nBody.\n" });
+    const plugin = makePlugin(app);
+    const buildSpy = vi.spyOn(EpubBuilder.prototype, "build").mockRejectedValueOnce("boom");
+
+    await plugin.exportSingle(tfile(root, "solo.md"));
+
+    expect(NOTICES).toContain("EPUB export failed: boom");
+    buildSpy.mockRestore();
   });
 });
 

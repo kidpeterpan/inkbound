@@ -19,6 +19,34 @@ describe("EpubBuilder container", () => {
     expect(head.includes("mimetypeapplication/epub+zip")).toBe(true);
   });
 
+  it("falls back to a manual RFC-4122 v4 UUID when crypto.randomUUID is unavailable", async () => {
+    // Node/vitest always has crypto.randomUUID, so the manual fallback in
+    // cryptoRandomUuid() (not exported — only reachable through a built OPF's
+    // dc:identifier) never runs unless it's temporarily removed here.
+    // `randomUUID` lives on Crypto.prototype, not as an own property of the
+    // `crypto` instance — `delete crypto.randomUUID` on the untouched object
+    // is a silent no-op (the inherited method remains reachable), so shadow
+    // it with a non-writable own property instead to actually hide it;
+    // `delete` on THAT own property (not plain reassignment, which throws
+    // against a non-writable property) cleanly restores the inherited one.
+    Object.defineProperty(globalThis.crypto, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      const zip = await JSZip.loadAsync(await buildSample());
+      const opf = await zip.file("OEBPS/package.opf")!.async("string");
+      // The fallback always sets the version/variant nibbles ("4" and one of
+      // 8/9/a/b) even though the rest is random, matching the real
+      // crypto.randomUUID()'s v4 shape.
+      expect(opf).toMatch(
+        /<dc:identifier id="uid">urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}<\/dc:identifier>/
+      );
+    } finally {
+      delete (globalThis.crypto as { randomUUID?: unknown }).randomUUID;
+    }
+  });
+
   it("has container.xml pointing at the OPF", async () => {
     const zip = await JSZip.loadAsync(await buildSample());
     const xml = await zip.file("META-INF/container.xml")!.async("string");

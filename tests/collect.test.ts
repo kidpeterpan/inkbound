@@ -11,6 +11,20 @@ describe("orderChapters", () => {
       "appendix",
     ]);
   });
+
+  it("swaps a reversed pair of non-numbered basenames into alphabetical order", () => {
+    // Exercises the comparator's a > b branch: with input already alphabetical
+    // (as in the case above), a sort may never need to compare a pair where
+    // the first arg sorts after the second.
+    expect(orderChapters(["zebra", "apple"])).toEqual(["apple", "zebra"]);
+  });
+
+  it("keeps a duplicate non-numbered basename's relative position (comparator's equal branch)", () => {
+    // orderChapters doesn't dedupe its input, so two identical basenames are
+    // a real (if unusual) input, exercising the comparator's a === b -> 0
+    // branch.
+    expect(orderChapters(["repeat", "repeat", "apple"])).toEqual(["apple", "repeat", "repeat"]);
+  });
 });
 
 describe("pickIndexNote", () => {
@@ -48,5 +62,14 @@ describe("bfsLinked", () => {
   it("depth 0 or missing start yields just the start", () => {
     expect(bfsLinked(links, "z.md", 3)).toEqual(["z.md"]);
     expect(bfsLinked(links, "a.md", 0)).toEqual(["a.md"]);
+  });
+
+  it("sorts a ring whose links appear in non-alphabetical key order (comparator's a > b branch)", () => {
+    // Every ring in the describe block's shared `links` fixture happens to
+    // already be alphabetical before its sort, which a sort may special-case
+    // and never actually compare a pair needing a swap. "start"'s own links
+    // are declared zebra-before-apple, forcing a real out-of-order compare.
+    const reversedLinks = { "start.md": { "zebra.md": 1, "apple.md": 1 } };
+    expect(bfsLinked(reversedLinks, "start.md", 1)).toEqual(["start.md", "apple.md", "zebra.md"]);
   });
 });

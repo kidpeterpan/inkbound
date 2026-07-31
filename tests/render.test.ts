@@ -216,6 +216,23 @@ describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", 
     expect(el.querySelector("p")).toBeNull(); // the wrapper-only <p> itself is gone
   });
 
+  it("replaces just the wrapper (not the enclosing <p>) when the embed has a real inline text sibling", () => {
+    // The onlyChild check in embedReplaceTarget's false branch: an embed
+    // wrapper sharing its <p> with real surrounding text can't have that
+    // whole <p> replaced without losing the text, so only the wrapper itself
+    // is swapped out — accepting the (rare) resulting block-inside-<p> shape
+    // as a known trade-off over destroying sibling content.
+    const el = document.createElement("div");
+    const p = document.createElement("p");
+    p.appendChild(document.createTextNode("See also: "));
+    p.appendChild(realEmbedWrapper({ src: "Other Note", ourHtml: "<h2>Section</h2>", tag: "span" }));
+    el.appendChild(p);
+    flattenEmbeds(el);
+    expect(el.querySelector("p")).not.toBeNull();
+    expect(el.textContent).toContain("See also:");
+    expect(el.querySelector("h2")?.textContent).toBe("Section");
+  });
+
   it("replaces an unresolved loaded embed (file-embed mod-empty) with the placeholder — no leaked 'Click to create.' text", () => {
     const el = document.createElement("div");
     const wrapper = document.createElement("span");
@@ -342,6 +359,21 @@ describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", 
       const warnings = flattenEmbeds(el);
       expect(el.textContent).toContain("[embedded content omitted: drawing.excalidraw]");
       expect(warnings).toEqual(["missing embed: drawing.excalidraw"]);
+    });
+
+    it("leaves a title with no next sibling at all alone (malformed/unexpected shape)", () => {
+      const el = div('<div class="embed-title markdown-embed-title">Alone</div>');
+      expect(flattenEmbeds(el)).toEqual([]);
+      expect(el.querySelector(".markdown-embed-title")).not.toBeNull();
+    });
+
+    it("leaves a title alone when its next sibling isn't a markdown-embed-content div", () => {
+      const el = div(
+        '<div class="embed-title markdown-embed-title">Not Paired</div><p>unrelated content</p>'
+      );
+      expect(flattenEmbeds(el)).toEqual([]);
+      expect(el.querySelector(".markdown-embed-title")).not.toBeNull();
+      expect(el.querySelector("p")?.textContent).toBe("unrelated content");
     });
   });
 });
@@ -802,6 +834,18 @@ describe("rasterizeMermaidDiagrams", () => {
     expect(root.querySelector("pre.language-mermaid")?.textContent).toBe("graph LR");
     expect(r.warnings).toHaveLength(1);
     expect(r.warnings[0]).toContain("click Allow on the diagram, then re-export");
+  });
+
+  it("removes a guarded Mermaid wrapper outright if it's missing the expected source fence", async () => {
+    // Defensive branch: every real guarded wrapper has a
+    // .mermaid-guard-source pre (asserted in the fixture-based test above);
+    // this covers the else-remove path for a malformed/future-Obsidian shape
+    // that doesn't.
+    const root = div('<div><div class="mermaid-wrapper is-guarded"><p>no source fence here</p></div></div>');
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(root.querySelector(".mermaid-wrapper")).toBeNull();
+    expect(root.textContent).not.toContain("no source fence here");
+    expect(r.warnings).toHaveLength(1);
   });
 
   it("falls back (with a warning) when the svg has no usable width/height", async () => {
