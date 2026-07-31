@@ -18,6 +18,24 @@ through, and so do Mermaid diagrams — as pictures rather than live diagrams,
 since most e-ink readers cannot draw them otherwise. Any language works,
 including Thai.
 
+## From note to e-reader
+
+A book's index note in Obsidian, with its chapters as linked notes:
+
+![A book index note in Obsidian with frontmatter and a linked chapter list](docs/images/note-in-obsidian.png)
+
+Right-click it and export the note plus everything it links to:
+
+![The file context menu with "Export note + linked notes to EPUB" highlighted](docs/images/export-menu.png)
+
+With **Push after export** turned on, the finished book lands straight in the
+Boox library over Wi-Fi and reads like any other EPUB — Thai text, tables and
+all:
+
+| On the shelf                                                           | Open on the device                                                                     |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| ![The exported book in the Boox library](docs/images/boox-library.jpg) | ![A chapter with a Thai/English table rendered on e-ink](docs/images/boox-reading.jpg) |
+
 ## Requirements
 
 - Obsidian **1.5.0** or newer.
@@ -66,6 +84,8 @@ the same notice reports whether the send to your Boox device succeeded.
 ## Settings
 
 Found under **Settings → Community plugins → Inkbound**:
+
+![The Inkbound settings tab, including the BooxDrop device URL and push toggle](docs/images/settings.png)
 
 | Setting                  | Default                      | Purpose                                                                                                                                                                               |
 | ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -179,10 +199,13 @@ export — it just stays in your output folder.
   writes the `.epub` file directly to a folder on disk (the one you choose
   in Settings) and reads note images through your vault — both of which
   need filesystem access that mobile does not offer.
-- **Display math (`$$` blocks) and note transclusion (`![[note]]` embeds)**
-  have not been verified against a real Obsidian render or a real device
-  yet. They may work, but treat exports containing them with a bit of extra
-  scrutiny until you've checked the result by eye.
+- **Display math (`$$` blocks)** has not been verified against a real
+  Obsidian render or a real device yet. It may work, but treat exports
+  containing it with a bit of extra scrutiny until you've checked the result
+  by eye.
+- **Heading- and block-scoped embeds (`![[Note#Heading]]`, `![[Note^block]]`)**
+  are not rendered — they degrade to a clear inline placeholder plus an export
+  warning. Whole-note embeds (`![[note]]`) work fully, including nested ones.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.
