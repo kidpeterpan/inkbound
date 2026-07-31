@@ -3,6 +3,23 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.1.0
+
+Chapters now carry a backlink trail: a "Linked from:" line listing every other
+chapter in the same book that links to them, so a knowledge graph of
+interconnected notes can be navigated backwards on an e-reader (#1).
+
+- Every export mode gets it (single note, folder, note + linked notes); a
+  chapter nothing links to shows no line at all, and a single-note book never
+  shows one.
+- Entries appear in the book's own chapter order, once per linking chapter,
+  no matter how many times or in which form (alias, heading, block link,
+  embed) it links.
+- A new **Backlink listing position** setting controls placement: start of
+  chapter (default), end, both, or none — none restores the previous
+  behavior exactly.
+- Works with any content language; the label itself is fixed English.
+
 ## 1.0.8
 
 Heading- and block-scoped note embeds (`![[Note#Heading]]`, `![[Note^blockid]]`)
