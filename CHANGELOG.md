@@ -3,6 +3,32 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.0.7
+
+Note embeds (`![[note]]`) now actually work in exported books.
+
+- Embedded notes render their real content into the chapter, exactly once,
+  where the embed appears. Previously an embed could come out as a bare note
+  name with no content, or duplicated — Obsidian fills embeds in asynchronously
+  on its own schedule, and the export raced it. The exporter now renders its
+  own copy of each embedded note and ignores whatever Obsidian's loader did or
+  didn't produce in the meantime, so the result no longer depends on timing.
+- Nested embeds render recursively; circular embeds are cut off safely with a
+  warning instead of hanging the export.
+- A broken embed (renamed or deleted note) degrades to a readable
+  `[embedded content omitted: ...]` placeholder plus an export warning —
+  Obsidian's "is not created yet. Click to create." text no longer leaks into
+  the book. Heading- and block-scoped embeds (`![[Note#Heading]]`) degrade the
+  same way with an "unsupported embed scope" warning; rendering just the
+  referenced section is not supported yet.
+- Image embeds (`![[figure.png]]`) are unwrapped to a plain image tag with the
+  caption as its alt text — the wrapper markup Obsidian emits is not valid in
+  EPUB XHTML and was failing epubcheck.
+- If the vault hasn't allowed Mermaid rendering (Obsidian's per-vault trust
+  prompt), the export keeps the diagram's source as a code block and warns,
+  instead of shipping the trust prompt's UI — including its inert "Allow"
+  button — into the book.
+
 ## 1.0.6
 
 - Added a worked example to the README: a real folder layout, the index note's
