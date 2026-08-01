@@ -363,15 +363,126 @@ export interface SectionInfo {
   endLine: number;
 }
 
-// Finds the block matching `blockId`, supporting only the block types
-// spec.md's Clarifications settled on (paragraphs and headings) — a block ID
-// that resolves to any other section type (or to no section at all, e.g. one
-// attached to a list item rather than a root-level section) is treated
-// identically to a genuinely nonexistent block ID: both return `null`, and
-// render-adapter.ts degrades them the same way (FR-006).
-export function findSupportedBlock(sections: SectionInfo[], blockId: string): HeadingSection | null {
-  const match = sections.find((s) => s.id === blockId && (s.type === "paragraph" || s.type === "heading"));
-  return match ? { startLine: match.startLine, endLine: match.endLine } : null;
+// One entry per list item, mirroring Obsidian's ListItemCache. `parent` is the
+// mechanism its own docs point at for reconstructing hierarchy, which is what
+// an embedded item's descendant range needs (spec 002 FR-006).
+export interface ListItemInfo {
+  id: string | undefined;
+  /**
+   * Start line of this item's parent item. NEGATIVE for a root-level item,
+   * where its magnitude is the list's first line (Obsidian's own convention).
+   */
+  parent: number;
+  /** 0-based, inclusive. */
+  startLine: number;
+  /** 0-based, inclusive. */
+  endLine: number;
+}
+
+export interface BlockRange extends HeadingSection {
+  /**
+   * True when this range came from a list item rather than a root-level
+   * section. The caller dedents ONLY these: a root-level section either starts
+   * at column 0 (dedent is a no-op) or is an indented-style code block, whose
+   * leading whitespace IS what makes it code — dedenting that would silently
+   * demote it to a paragraph (spec 002 research R3a).
+   */
+  fromListItem: boolean;
+}
+
+// Finds the block matching `blockId` across BOTH structures Obsidian exposes
+// at block granularity: root-level `sections` (any type — table, code,
+// blockquote, callout, list, html, paragraph, heading, or one Obsidian adds
+// later) and per-item `listItems`. There is deliberately no type allowlist:
+// SectionCache["type"] is documented as non-exhaustive, so absence of a
+// resolvable RANGE — not absence from a hand-maintained list — is the
+// rejection criterion. An ID in neither structure returns null and
+// render-adapter.ts degrades it exactly as before (spec 002 FR-009).
+//
+// Sections are checked first so an ID on a whole list can never be mistaken
+// for one on an item inside it.
+export function findBlockRange(
+  sections: SectionInfo[],
+  listItems: ListItemInfo[],
+  blockId: string
+): BlockRange | null {
+  const section = sections.find((s) => s.id === blockId);
+  if (section) {
+    return { startLine: section.startLine, endLine: section.endLine, fromListItem: false };
+  }
+  const item = listItems.find((i) => i.id === blockId);
+  if (!item) return null;
+  return { ...listItemRange(listItems, item), fromListItem: true };
+}
+
+// Widens a list item's own range to cover its nested descendants (spec 002
+// FR-006 — Obsidian shows a block reference to an item together with what's
+// under it). Descendants come from `parent`, which Obsidian's own docs point
+// at for exactly this: an item's `parent` is its parent's start line (negative
+// for a root-level item), so a sibling's `parent` is the seed's parent, never
+// the seed's start line — which is what keeps siblings out (FR-005).
+//
+// `seen` guards against malformed input (a self-parenting or cyclic chain)
+// making this loop forever.
+export function listItemRange(listItems: ListItemInfo[], seed: ListItemInfo): HeadingSection {
+  const descendantStarts = new Set<number>([seed.startLine]);
+  const seen = new Set<ListItemInfo>([seed]);
+  let endLine = seed.endLine;
+
+  // Repeat until no further item joins: a child may appear before its parent
+  // in the array, so a single pass could miss part of the chain.
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const candidate of listItems) {
+      if (seen.has(candidate) || !descendantStarts.has(candidate.parent)) continue;
+      seen.add(candidate);
+      descendantStarts.add(candidate.startLine);
+      if (candidate.endLine > endLine) endLine = candidate.endLine;
+      grew = true;
+    }
+  }
+  return { startLine: seed.startLine, endLine };
+}
+
+// Removes the block's own leading indentation so it re-renders as the kind of
+// thing it is. Without this a sliced nested item (`    - child`) begins with
+// four spaces, which CommonMark reads as an INDENTED CODE BLOCK — the reader
+// would get a grey box of literal text instead of a bullet (spec 002 FR-007).
+//
+// Only the first line's exact prefix is removed, so relative nesting survives
+// (FR-006). Callers apply this to LIST-ITEM ranges only: a root-level section
+// either starts at column 0 or is an indented-style code block whose
+// indentation is its meaning (research R3a).
+export function dedentBlock(md: string): string {
+  const lines = md.split("\n");
+  const prefix = /^[ \t]*/.exec(lines[0])![0];
+  if (prefix === "") return md;
+  return lines.map((l) => (l.startsWith(prefix) ? l.slice(prefix.length) : l)).join("\n");
+}
+
+// Removes the `^id` marker the author wrote to label this block, so it can't
+// surface as stray text in the finished book (spec 002 FR-013). Whether real
+// Obsidian's renderer would have hidden it is exactly the kind of behavior the
+// stub can't model (docs/DEVELOPMENT.md), so this makes it unconditional.
+//
+// Scoped to the ONE resolved id, never a generic caret pattern: an embedded
+// code block can legitimately contain `^` tokens (regex, exponent, Vim
+// notation) and silently editing a reader's code would be a worse defect than
+// the stray marker being fixed.
+export function stripBlockMarker(md: string, blockId: string): string {
+  const escaped = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    md
+      .split("\n")
+      // A marker sitting alone on its line (how Obsidian labels tables, lists
+      // and code blocks) takes the line with it — leaving a blank would split
+      // the block it belongs to.
+      .filter((l) => !new RegExp(`^[ \\t]*\\^${escaped}[ \\t]*$`).test(l))
+      // Otherwise it trails the block's own last line (paragraphs, headings).
+      .map((l) => l.replace(new RegExp(`[ \\t]*\\^${escaped}[ \\t]*$`), ""))
+      .join("\n")
+  );
 }
 
 // Maps a populateEmbeds-stamped data-embed-reason to its warning message.

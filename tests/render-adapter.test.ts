@@ -26,13 +26,24 @@ function appWith(dest: TFile | null) {
 // computed directly from a test's own registered markdown, so a heading/
 // block-scoped embed test's expectations stay in sync with the fixture text
 // by construction, never a hand-maintained, separately-drifting line-number
-// map. Deliberately narrower than a full CommonMark parser: paragraphs are
-// "one or more non-blank, non-fence, non-heading, non-list lines", which is
-// all specs/002-scoped-note-embeds's tests need (list lines are recognized
-// only so a block ID attached to one is correctly classified as unsupported,
-// per that feature's Clarifications — this is not a general list parser).
+// map.
+//
+// specs/002-extend-block-embeds widened this from "paragraphs, headings and
+// one throwaway list line" to the block shapes Obsidian actually reports,
+// because that feature makes EVERY block type embeddable and tests asserting
+// against a fiction would prove nothing:
+//   - a run of list lines is ONE `list` section (not one per line, which is
+//     what this fixture used to emit and real Obsidian never does), plus a
+//     `listItems` entry per item carrying `parent` for hierarchy;
+//   - fenced code, tables and blockquote/callouts get their own section
+//     spanning the whole run;
+//   - a `^id` alone on a line attaches to the block ABOVE it, which is how
+//     Obsidian labels tables, lists and code blocks.
+// Still deliberately narrower than CommonMark — it models what these tests
+// exercise, not every markdown construct.
 const BLOCK_ID_RE = /\^([A-Za-z0-9-]+)\s*$/;
 const LIST_LINE_RE = /^\s*([-*+]|\d+\.)\s+/;
+const MARKER_ONLY_RE = /^\s*\^([A-Za-z0-9-]+)\s*$/;
 
 interface StubHeadingCache {
   heading: string;
@@ -44,60 +55,105 @@ interface StubSectionCache {
   type: string;
   position: { start: { line: number }; end: { line: number } };
 }
+interface StubListItemCache {
+  id: string | undefined;
+  parent: number;
+  position: { start: { line: number }; end: { line: number } };
+}
 
 function pos(startLine: number, endLine: number): StubHeadingCache["position"] {
   return { start: { line: startLine }, end: { line: endLine } };
 }
 
-function parseFileCache(content: string): { headings: StubHeadingCache[]; sections: StubSectionCache[] } {
+function parseFileCache(content: string): {
+  headings: StubHeadingCache[];
+  sections: StubSectionCache[];
+  listItems: StubListItemCache[];
+} {
   const lines = content.split(/\r?\n/);
   const headings: StubHeadingCache[] = [];
   const sections: StubSectionCache[] = [];
-  let inFence = false;
-  let paraStart: number | null = null;
+  const listItems: StubListItemCache[] = [];
 
-  const flushParagraph = (endLine: number): void => {
-    if (paraStart === null || endLine < paraStart) return;
-    const m = BLOCK_ID_RE.exec(lines[endLine]);
-    sections.push({ id: m?.[1], type: "paragraph", position: pos(paraStart, endLine) });
-    paraStart = null;
+  // Classifies a line so contiguous lines of the same kind group into one
+  // section, matching Obsidian's root-level-block granularity.
+  const kindOf = (line: string): string | null => {
+    if (line.trim() === "") return null;
+    if (LIST_LINE_RE.test(line)) return "list";
+    if (/^\s*\|/.test(line)) return "table";
+    if (/^\s*>/.test(line)) return "blockquote";
+    if (/^ {4,}\S/.test(line)) return "code"; // indented-style code block
+    return "paragraph";
   };
 
-  lines.forEach((line, i) => {
-    if (/^\s*```/.test(line)) {
-      flushParagraph(i - 1);
-      inFence = !inFence;
-      return;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === "") {
+      i++;
+      continue;
     }
-    if (inFence) return;
+
+    // A standalone ^id labels the block above it (Obsidian's convention for
+    // tables, lists and code blocks).
+    const markerOnly = MARKER_ONLY_RE.exec(line);
+    if (markerOnly) {
+      const last = sections[sections.length - 1];
+      if (last) last.id = markerOnly[1];
+      i++;
+      continue;
+    }
+
+    // Fenced code block: spans to its closing fence.
+    if (/^\s*```/.test(line)) {
+      let end = i + 1;
+      while (end < lines.length && !/^\s*```/.test(lines[end])) end++;
+      if (end < lines.length) end++; // include the closing fence
+      sections.push({ id: undefined, type: "code", position: pos(i, end - 1) });
+      i = end;
+      continue;
+    }
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
-      flushParagraph(i - 1);
       const text = heading[2].trim();
       const idMatch = BLOCK_ID_RE.exec(text);
       const headingText = idMatch ? text.slice(0, idMatch.index).trim() : text;
       headings.push({ heading: headingText, level: heading[1].length, position: pos(i, i) });
       sections.push({ id: idMatch?.[1], type: "heading", position: pos(i, i) });
-      return;
+      i++;
+      continue;
     }
 
-    if (LIST_LINE_RE.test(line)) {
-      flushParagraph(i - 1);
-      const m = BLOCK_ID_RE.exec(line);
-      sections.push({ id: m?.[1], type: "list", position: pos(i, i) });
-      return;
-    }
+    // A run of same-kind lines becomes one section.
+    const kind = kindOf(line)!;
+    let end = i;
+    while (end + 1 < lines.length && kindOf(lines[end + 1]) === kind) end++;
 
-    if (line.trim() === "") {
-      flushParagraph(i - 1);
-      return;
+    if (kind === "list") {
+      // One section for the whole list, plus per-item entries. `parent` is the
+      // start line of the nearest preceding item with less indentation, or the
+      // negated list start for a root-level item (Obsidian's own convention).
+      const indentOf = (l: string) => /^[ \t]*/.exec(l)![0].length;
+      const stack: { indent: number; line: number }[] = [];
+      for (let n = i; n <= end; n++) {
+        const indent = indentOf(lines[n]);
+        while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+        const parent = stack.length ? stack[stack.length - 1].line : -i;
+        const m = BLOCK_ID_RE.exec(lines[n]);
+        listItems.push({ id: m?.[1], parent, position: pos(n, n) });
+        stack.push({ indent, line: n });
+      }
+      sections.push({ id: undefined, type: "list", position: pos(i, end) });
+    } else {
+      const m = BLOCK_ID_RE.exec(lines[end]);
+      sections.push({ id: m?.[1], type: kind, position: pos(i, end) });
     }
-    if (paraStart === null) paraStart = i;
-  });
-  flushParagraph(lines.length - 1);
+    i = end + 1;
+  }
 
-  return { headings, sections };
+  return { headings, sections, listItems };
 }
 
 // Builds an app whose vault.cachedRead resolves note content from a plain
@@ -557,9 +613,17 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).not.toContain("Body content");
   });
 
-  it("degrades a block ID attached to an unsupported type (a list item) the same way a nonexistent block does (US2 acceptance scenario 3)", async () => {
+  // ── specs/002-extend-block-embeds ────────────────────────────────────────
+  //
+  // This case is the INVERSION of the previous feature's behavior: a block ID
+  // on a list item used to degrade to a placeholder. It rendering real content
+  // is the primary evidence 002 took effect (that feature's research R6).
+  it("US2/FR-005: renders just the referenced list item, not its siblings", async () => {
     const dest = new TFile("/vault", "Other Note.md");
-    const app = appWithNotes({ "Other Note.md": "- A list item. ^listblock\n- Another item." }, () => dest);
+    const app = appWithNotes(
+      { "Other Note.md": "- First item.\n- A list item. ^listblock\n- Another item." },
+      () => dest
+    );
     const r = await renderUnitToChapter(
       app,
       newComponent(),
@@ -569,8 +633,203 @@ describe("renderUnitToChapter", () => {
       "/vault",
       0
     );
-    expect(r.xhtmlBody).toContain("[embedded content omitted: Other Note^listblock]");
-    expect(r.warnings).toEqual(["block not found: Other Note^listblock (referenced by note.md)"]);
+    expect(r.xhtmlBody).toContain("A list item.");
+    expect(r.xhtmlBody).not.toContain("[embedded content omitted");
+    expect(r.xhtmlBody).not.toContain("First item.");
+    expect(r.xhtmlBody).not.toContain("Another item.");
+    expect(r.xhtmlBody).not.toContain("^listblock");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("US2/FR-006: an embedded list item brings its nested sub-items with it", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      {
+        "Other Note.md": [
+          "- Untouched sibling.",
+          "- Parent item ^parent",
+          "    - First child",
+          "    - Second child",
+          "- Later sibling.",
+        ].join("\n"),
+      },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^parent]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Parent item");
+    expect(r.xhtmlBody).toContain("First child");
+    expect(r.xhtmlBody).toContain("Second child");
+    expect(r.xhtmlBody).not.toContain("Untouched sibling");
+    expect(r.xhtmlBody).not.toContain("Later sibling");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("US1/FR-001: renders a whole table referenced by a block ID on its own line", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      {
+        "Other Note.md": ["| Feature | State |", "| ------- | ----- |", "| Tables  | works |", "^tbl"].join(
+          "\n"
+        ),
+      },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^tbl]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("<table");
+    expect(r.xhtmlBody).toContain("works");
+    expect(r.xhtmlBody).not.toContain("[embedded content omitted");
+    expect(r.xhtmlBody).not.toContain("^tbl");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("US1/FR-002: renders a fenced code block, leaving a caret inside the code intact", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": ["```js", "const re = /^start/;", "```", "^code"].join("\n") },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^code]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("<code");
+    // The marker is gone but the regex's own caret survives — the reason
+    // stripBlockMarker is scoped to the resolved ID (002 research R5).
+    expect(r.xhtmlBody).not.toContain("^code");
+    expect(r.xhtmlBody).toContain("/^start/");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("US1/FR-003: renders a blockquote referenced by block ID", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": ["> Quoted wisdom.", "> Second line.", "^quoteblock"].join("\n") },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^quoteblock]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("<blockquote");
+    expect(r.xhtmlBody).toContain("Quoted wisdom.");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("FR-014: an embedded numbered-list item keeps its original number", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": ["1. Step one", "2. Step two", "3. Step three ^step3"].join("\n") },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^step3]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain('start="3"');
+    expect(r.xhtmlBody).toContain("Step three");
+    expect(r.xhtmlBody).not.toContain("Step one");
+  });
+
+  it("US3/FR-007: an indented list item renders as a list item, not as a code block", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": ["- Parent", "    - Nested child ^deep", "- Sibling"].join("\n") },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^deep]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    // Without dedenting, the 4-space slice would parse as an indented code
+    // block and the reader would get a grey box instead of a bullet.
+    expect(r.xhtmlBody).toContain("Nested child");
+    expect(r.xhtmlBody).toContain("<li>");
+    expect(r.xhtmlBody).not.toContain("<pre>");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  // The mirror image of the case above (002 research R3a): an indented-style
+  // code block's leading spaces ARE its meaning, so the dedent must NOT run
+  // for a section-sourced range or the block silently becomes a paragraph.
+  it("FR-002/R3a: an indented-style code block keeps its indentation and stays code", async () => {
+    const dest = new TFile("/vault", "Other Note.md");
+    const app = appWithNotes(
+      { "Other Note.md": ["    indented code line", "    second code line", "^indented"].join("\n") },
+      () => dest
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Other Note^indented]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("<pre>");
+    expect(r.xhtmlBody).toContain("indented code line");
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("FR-010: a nested embed inside block-extracted content still resolves", async () => {
+    const outer = new TFile("/vault", "Outer.md");
+    const inner = new TFile("/vault", "Inner.md");
+    const app = appWithNotes(
+      {
+        "Outer.md": "Intro.\n\nHosts an embed: ![[Inner]] ^host\n\nOutro.",
+        "Inner.md": "Content pulled in from the inner note.",
+      },
+      (linkpath: string) => (linkpath === "Inner" ? inner : outer)
+    );
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Outer^host]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("Content pulled in from the inner note.");
+    expect(r.xhtmlBody).not.toContain("Intro.");
+    expect(r.xhtmlBody).not.toContain("Outro.");
+    expect(r.xhtmlBody).not.toContain("^host");
   });
 
   it("degrades a block-scoped embed to the placeholder with a distinct 'block not found' warning when the note resolves but the block doesn't (US3)", async () => {

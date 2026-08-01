@@ -204,12 +204,14 @@ export — it just stays in your output folder.
   Obsidian render or a real device yet. It may work, but treat exports
   containing it with a bit of extra scrutiny until you've checked the result
   by eye.
-- **Block-scoped embeds (`![[Note^block]]`) only support a paragraph or a
-  heading line** — a block ID on a list item, table row, or other block type
-  degrades to a placeholder plus an export warning rather than being
-  extracted. Whole-note embeds and heading-scoped embeds
-  (`![[Note#Heading]]`) work fully, including nested embeds inside an
-  extracted section.
+- **Individual table rows cannot be embedded.** Block-scoped embeds
+  (`![[Note^block]]`) now work for every kind of block Obsidian lets you
+  label — paragraphs, headings, tables, code blocks, callouts and
+  blockquotes, whole lists, and single list items (which bring their
+  sub-items with them). A table _row_, though, is not something Obsidian can
+  address: a `^id` typed inside a cell is just cell text, so an embed
+  pointing at it degrades to a placeholder plus an export warning, same as
+  any block ID that doesn't exist.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.

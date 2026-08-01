@@ -9,7 +9,10 @@ import {
   splitEmbedTarget,
   isImageEmbedSrc,
   findHeadingSection,
-  findSupportedBlock,
+  findBlockRange,
+  listItemRange,
+  dedentBlock,
+  stripBlockMarker,
   EMBED_RENDERED_ATTR,
   normalizeMermaidSvg,
   rewriteLinks,
@@ -477,28 +480,249 @@ describe("findHeadingSection", () => {
   });
 });
 
-describe("findSupportedBlock", () => {
+describe("findBlockRange", () => {
+  const section = (id: string | undefined, type: string, startLine: number, endLine: number) => ({
+    id,
+    type,
+    startLine,
+    endLine,
+  });
+  const item = (id: string | undefined, parent: number, startLine: number, endLine = startLine) => ({
+    id,
+    parent,
+    startLine,
+    endLine,
+  });
+
   it("finds a block ID attached to a paragraph", () => {
-    const sections = [{ id: "abc123", type: "paragraph", startLine: 2, endLine: 3 }];
-    expect(findSupportedBlock(sections, "abc123")).toEqual({ startLine: 2, endLine: 3 });
+    const sections = [section("abc123", "paragraph", 2, 3)];
+    expect(findBlockRange(sections, [], "abc123")).toEqual({
+      startLine: 2,
+      endLine: 3,
+      fromListItem: false,
+    });
   });
 
   it("finds a block ID attached to a heading (single line, not its section)", () => {
-    const sections = [
-      { id: "abc123", type: "heading", startLine: 4, endLine: 4 },
-      { id: undefined, type: "paragraph", startLine: 5, endLine: 6 },
-    ];
-    expect(findSupportedBlock(sections, "abc123")).toEqual({ startLine: 4, endLine: 4 });
+    const sections = [section("abc123", "heading", 4, 4), section(undefined, "paragraph", 5, 6)];
+    expect(findBlockRange(sections, [], "abc123")).toEqual({
+      startLine: 4,
+      endLine: 4,
+      fromListItem: false,
+    });
   });
 
-  it("returns null for a block ID attached to an unsupported type (e.g. a list item)", () => {
-    const sections = [{ id: "abc123", type: "list", startLine: 2, endLine: 2 }];
-    expect(findSupportedBlock(sections, "abc123")).toBeNull();
+  // US1/FR-001..FR-004: this is the inversion of the previous behavior — every
+  // one of these types used to return null and degrade to a placeholder.
+  it.each([
+    ["table", 2, 5],
+    ["code", 7, 11],
+    ["blockquote", 13, 15],
+    ["callout", 17, 20],
+    ["list", 22, 26],
+    ["html", 28, 30],
+  ])("resolves a block ID attached to a %s section, which previously degraded", (type, s, e) => {
+    const sections = [section("abc123", type, s, e)];
+    expect(findBlockRange(sections, [], "abc123")).toEqual({
+      startLine: s,
+      endLine: e,
+      fromListItem: false,
+    });
+  });
+
+  it("resolves a section type Obsidian has not documented (the type list is non-exhaustive)", () => {
+    const sections = [section("abc123", "someFutureType", 1, 2)];
+    expect(findBlockRange(sections, [], "abc123")).toEqual({
+      startLine: 1,
+      endLine: 2,
+      fromListItem: false,
+    });
   });
 
   it("returns null for a block ID that doesn't exist in the note", () => {
-    const sections = [{ id: "other", type: "paragraph", startLine: 0, endLine: 1 }];
-    expect(findSupportedBlock(sections, "abc123")).toBeNull();
+    const sections = [section("other", "paragraph", 0, 1)];
+    expect(findBlockRange(sections, [], "abc123")).toBeNull();
+  });
+
+  it("returns null (rather than throwing) for empty inputs", () => {
+    expect(findBlockRange([], [], "abc123")).toBeNull();
+  });
+
+  it("does not mutate its inputs", () => {
+    const sections = [section("abc123", "list", 0, 4)];
+    const listItems = [item("deep", 0, 2)];
+    const sectionsSnapshot = JSON.parse(JSON.stringify(sections));
+    const listItemsSnapshot = JSON.parse(JSON.stringify(listItems));
+    findBlockRange(sections, listItems, "abc123");
+    findBlockRange(sections, listItems, "deep");
+    expect(sections).toEqual(sectionsSnapshot);
+    expect(listItems).toEqual(listItemsSnapshot);
+  });
+
+  // US2/FR-005: an ID present only in listItems.
+  it("finds a block ID attached to a list item, flagged as coming from a list item", () => {
+    const listItems = [item(undefined, -0, 0), item("abc123", -0, 1), item(undefined, -0, 2)];
+    expect(findBlockRange([], listItems, "abc123")).toEqual({
+      startLine: 1,
+      endLine: 1,
+      fromListItem: true,
+    });
+  });
+
+  // Contract guarantee 2: sections are consulted first, so an ID on the list
+  // as a whole can never be mistaken for an item inside it.
+  it("prefers a matching section over a matching list item for the same ID", () => {
+    const sections = [section("abc123", "list", 0, 9)];
+    const listItems = [item("abc123", -0, 4)];
+    expect(findBlockRange(sections, listItems, "abc123")).toEqual({
+      startLine: 0,
+      endLine: 9,
+      fromListItem: false,
+    });
+  });
+});
+
+describe("listItemRange", () => {
+  const item = (id: string | undefined, parent: number, startLine: number, endLine = startLine) => ({
+    id,
+    parent,
+    startLine,
+    endLine,
+  });
+
+  it("spans only itself when the item has no children", () => {
+    const seed = item("x", -0, 3);
+    expect(listItemRange([item(undefined, -0, 2), seed, item(undefined, -0, 4)], seed)).toEqual({
+      startLine: 3,
+      endLine: 3,
+    });
+  });
+
+  // FR-006
+  it("extends through the item's nested children", () => {
+    const seed = item("x", -0, 1);
+    const listItems = [item(undefined, -0, 0), seed, item(undefined, 1, 2), item(undefined, 1, 3)];
+    expect(listItemRange(listItems, seed)).toEqual({ startLine: 1, endLine: 3 });
+  });
+
+  it("extends through transitive grandchildren", () => {
+    const seed = item("x", -0, 1);
+    const child = item(undefined, 1, 2);
+    const grandchild = item(undefined, 2, 3);
+    expect(listItemRange([seed, child, grandchild], seed)).toEqual({ startLine: 1, endLine: 3 });
+  });
+
+  // FR-005: a sibling's parent is the seed's PARENT, never the seed's own
+  // start line, so widening must not swallow it.
+  it("excludes sibling items that follow the seed", () => {
+    const seed = item("x", -0, 1);
+    const child = item(undefined, 1, 2);
+    const sibling = item(undefined, -0, 3);
+    expect(listItemRange([seed, child, sibling], seed)).toEqual({ startLine: 1, endLine: 2 });
+  });
+
+  it("uses the maximum descendant endLine, not document order", () => {
+    const seed = item("x", -0, 1);
+    const laterButShorter = item(undefined, 1, 5, 5);
+    const earlierButLonger = item(undefined, 1, 2, 8);
+    expect(listItemRange([seed, earlierButLonger, laterButShorter], seed)).toEqual({
+      startLine: 1,
+      endLine: 8,
+    });
+  });
+
+  it("respects a multi-line item's own endLine", () => {
+    const seed = item("x", -0, 1, 4);
+    expect(listItemRange([seed], seed)).toEqual({ startLine: 1, endLine: 4 });
+  });
+
+  it("terminates on a self-parenting item rather than looping forever", () => {
+    const seed = item("x", -0, 1);
+    const selfParent = { id: undefined, parent: 2, startLine: 2, endLine: 2 };
+    expect(listItemRange([seed, selfParent], seed)).toEqual({ startLine: 1, endLine: 1 });
+  });
+
+  it("terminates on a cyclic parent chain", () => {
+    const seed = item("x", -0, 1);
+    const a = { id: undefined, parent: 1, startLine: 2, endLine: 2 };
+    const b = { id: undefined, parent: 2, startLine: 3, endLine: 3 };
+    const cyclic = { id: undefined, parent: 3, startLine: 2, endLine: 9 };
+    expect(listItemRange([seed, a, b, cyclic], seed).endLine).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("dedentBlock", () => {
+  // FR-007: without this, a sliced nested item starts with 4+ spaces and
+  // CommonMark reads it as an INDENTED CODE BLOCK — the reader gets a grey box
+  // instead of a bullet.
+  it("removes the first line's indentation so a nested item renders as a list item", () => {
+    expect(dedentBlock("    - child item")).toBe("- child item");
+  });
+
+  // FR-006: sub-items must stay nested relative to their parent.
+  it("preserves relative nesting of deeper lines", () => {
+    const md = ["    - parent", "        - child", "            - grandchild"].join("\n");
+    expect(dedentBlock(md)).toBe(["- parent", "    - child", "        - grandchild"].join("\n"));
+  });
+
+  it("returns input unchanged when the first line has no indentation", () => {
+    const md = ["- root item", "    - child"].join("\n");
+    expect(dedentBlock(md)).toBe(md);
+  });
+
+  it("leaves lines that do not start with the prefix untouched, including blanks", () => {
+    const md = ["    - parent", "", "  stray", "    - sibling"].join("\n");
+    expect(dedentBlock(md)).toBe(["- parent", "", "  stray", "- sibling"].join("\n"));
+  });
+
+  it("handles tab indentation the same way, since the literal prefix is removed", () => {
+    expect(dedentBlock("\t- tabbed\n\t\t- deeper")).toBe("- tabbed\n\t- deeper");
+  });
+
+  it("returns an empty string unchanged", () => {
+    expect(dedentBlock("")).toBe("");
+  });
+});
+
+describe("stripBlockMarker", () => {
+  it("removes a trailing marker and the whitespace before it", () => {
+    expect(stripBlockMarker("Some paragraph text. ^abc123", "abc123")).toBe("Some paragraph text.");
+  });
+
+  it("removes a marker-only line entirely, leaving no blank artifact", () => {
+    const md = ["| a | b |", "| - | - |", "^tbl"].join("\n");
+    expect(stripBlockMarker(md, "tbl")).toBe(["| a | b |", "| - | - |"].join("\n"));
+  });
+
+  it("removes an indented marker-only line", () => {
+    expect(stripBlockMarker("- item\n  ^myid", "myid")).toBe("- item");
+  });
+
+  // Contract guarantee 3 — the reason the strip is scoped to the resolved ID
+  // rather than a generic caret pattern: silently editing a reader's code
+  // would be a worse defect than the stray marker this fixes.
+  it("leaves a DIFFERENT caret token untouched, e.g. a regex inside embedded code", () => {
+    const md = ["```js", "const re = /^start/;", "```", "^code"].join("\n");
+    expect(stripBlockMarker(md, "code")).toBe(["```js", "const re = /^start/;", "```"].join("\n"));
+  });
+
+  it("does not strip a marker belonging to a different block", () => {
+    expect(stripBlockMarker("Text ^other", "abc123")).toBe("Text ^other");
+  });
+
+  it("escapes regex-special characters in the block ID rather than corrupting the pattern", () => {
+    expect(stripBlockMarker("Text ^a.c", "a.c")).toBe("Text");
+    // A literal "a.c" ID must not match "abc" via an unescaped dot.
+    expect(stripBlockMarker("Text ^abc", "a.c")).toBe("Text ^abc");
+  });
+
+  it("returns markdown without the marker unchanged", () => {
+    const md = "Just a paragraph.\n\nAnd another.";
+    expect(stripBlockMarker(md, "abc123")).toBe(md);
+  });
+
+  it("does not strip a caret token that merely starts with the block ID", () => {
+    expect(stripBlockMarker("Text ^abc123456", "abc123")).toBe("Text ^abc123456");
   });
 });
 

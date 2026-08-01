@@ -19,7 +19,9 @@ import {
   splitEmbedTarget,
   isImageEmbedSrc,
   findHeadingSection,
-  findSupportedBlock,
+  findBlockRange,
+  dedentBlock,
+  stripBlockMarker,
   rewriteLinks,
   rewriteImages,
   rasterizeMermaidDiagrams,
@@ -28,6 +30,7 @@ import {
   EMBED_WRAPPER_CLASS,
   type HeadingInfo,
   type SectionInfo,
+  type ListItemInfo,
 } from "./render";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
@@ -43,6 +46,14 @@ function toSectionInfo(sections: CachedMetadata["sections"]): SectionInfo[] {
     type: s.type,
     startLine: s.position.start.line,
     endLine: s.position.end.line,
+  }));
+}
+function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] {
+  return (listItems ?? []).map((i) => ({
+    id: i.id,
+    parent: i.parent,
+    startLine: i.position.start.line,
+    endLine: i.position.end.line,
   }));
 }
 
@@ -145,7 +156,7 @@ async function populateEmbeds(
       const cache = app.metadataCache.getFileCache(dest);
       const loc = target.heading
         ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
-        : findSupportedBlock(toSectionInfo(cache?.sections), target.block!);
+        : findBlockRange(toSectionInfo(cache?.sections), toListItemInfo(cache?.listItems), target.block!);
       if (!loc) {
         wrapper.setAttribute("data-embed-reason", target.heading ? "heading-not-found" : "block-not-found");
         continue;
@@ -155,7 +166,16 @@ async function populateEmbeds(
       // included) line array — matching how the cache's own line numbers are
       // computed — naturally excludes it without a separate strip step (see
       // research.md's Unknown 2).
-      sectionMd = stripDynamicBlocks(mdLines.slice(loc.startLine, loc.endLine + 1).join("\n"));
+      let sliced = mdLines.slice(loc.startLine, loc.endLine + 1).join("\n");
+      if (target.block) {
+        // Dedent ONLY a list-item range. A root-level section either starts at
+        // column 0 (no-op) or is an indented-style code block, whose leading
+        // whitespace is what makes it code — dedenting that would silently
+        // demote it to a paragraph (002 research R3a).
+        if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
+        sliced = stripBlockMarker(sliced, target.block);
+      }
+      sectionMd = stripDynamicBlocks(sliced);
     } else {
       sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
     }

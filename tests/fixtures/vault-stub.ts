@@ -31,6 +31,7 @@ export interface FileCache {
   frontmatter: Record<string, unknown>;
   headings: { heading: string; level: number; position: StubPos }[];
   sections: { id?: string; type: string; position: StubPos }[];
+  listItems: { id?: string; parent: number; position: StubPos }[];
 }
 
 function stripQuotes(s: string): string {
@@ -85,14 +86,17 @@ function parseFrontmatter(content: string): Record<string, unknown> {
 // real Obsidian's own line numbers are relative to the whole file, and
 // render-adapter.ts's scoped-embed slicing reads raw `cachedRead()` content
 // the same way (see specs/002-scoped-note-embeds/research.md's Unknown 2).
-// Deliberately narrower than a full CommonMark parser: paragraphs are "one
-// or more non-blank, non-fence, non-heading, non-list lines" — enough to
-// exercise heading-scoped and paragraph/heading block-scoped embeds via
-// `npm run local-export`; list-item block IDs are recognized only so
-// they're correctly classified as unsupported, not extracted as if they
-// were a paragraph.
+// specs/002-extend-block-embeds widened this to the block shapes Obsidian
+// actually reports, since that feature makes every block type embeddable:
+// a run of list lines is ONE `list` section plus per-item `listItems`
+// carrying `parent`; fenced code, tables and blockquotes get their own
+// spanning section; and a `^id` alone on a line labels the block above it.
+// Kept in sync with the equivalent parser in tests/render-adapter.test.ts.
+// Still deliberately narrower than CommonMark — enough to exercise scoped
+// embeds via `npm run local-export`.
 const BLOCK_ID_RE = /\^([A-Za-z0-9-]+)\s*$/;
 const LIST_LINE_RE = /^\s*([-*+]|\d+\.)\s+/;
+const MARKER_ONLY_RE = /^\s*\^([A-Za-z0-9-]+)\s*$/;
 
 function pos(startLine: number, endLine: number): StubPos {
   return { start: { line: startLine }, end: { line: endLine } };
@@ -101,55 +105,83 @@ function pos(startLine: number, endLine: number): StubPos {
 function parseHeadingsAndSections(content: string): {
   headings: FileCache["headings"];
   sections: FileCache["sections"];
+  listItems: FileCache["listItems"];
 } {
   const lines = content.split(/\r?\n/);
   const headings: FileCache["headings"] = [];
   const sections: FileCache["sections"] = [];
-  let inFence = false;
-  let paraStart: number | null = null;
+  const listItems: FileCache["listItems"] = [];
 
-  const flushParagraph = (endLine: number): void => {
-    if (paraStart === null || endLine < paraStart) return;
-    const m = BLOCK_ID_RE.exec(lines[endLine]);
-    sections.push({ id: m?.[1], type: "paragraph", position: pos(paraStart, endLine) });
-    paraStart = null;
+  const kindOf = (line: string): string | null => {
+    if (line.trim() === "") return null;
+    if (LIST_LINE_RE.test(line)) return "list";
+    if (/^\s*\|/.test(line)) return "table";
+    if (/^\s*>/.test(line)) return "blockquote";
+    if (/^ {4,}\S/.test(line)) return "code";
+    return "paragraph";
   };
 
-  lines.forEach((line, i) => {
-    if (/^\s*```/.test(line)) {
-      flushParagraph(i - 1);
-      inFence = !inFence;
-      return;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (line.trim() === "") {
+      i++;
+      continue;
     }
-    if (inFence) return;
+
+    const markerOnly = MARKER_ONLY_RE.exec(line);
+    if (markerOnly) {
+      const last = sections[sections.length - 1];
+      if (last) last.id = markerOnly[1];
+      i++;
+      continue;
+    }
+
+    if (/^\s*```/.test(line)) {
+      let end = i + 1;
+      while (end < lines.length && !/^\s*```/.test(lines[end])) end++;
+      if (end < lines.length) end++;
+      sections.push({ id: undefined, type: "code", position: pos(i, end - 1) });
+      i = end;
+      continue;
+    }
 
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
-      flushParagraph(i - 1);
       const text = heading[2].trim();
       const idMatch = BLOCK_ID_RE.exec(text);
       const headingText = idMatch ? text.slice(0, idMatch.index).trim() : text;
       headings.push({ heading: headingText, level: heading[1].length, position: pos(i, i) });
       sections.push({ id: idMatch?.[1], type: "heading", position: pos(i, i) });
-      return;
+      i++;
+      continue;
     }
 
-    if (LIST_LINE_RE.test(line)) {
-      flushParagraph(i - 1);
-      const m = BLOCK_ID_RE.exec(line);
-      sections.push({ id: m?.[1], type: "list", position: pos(i, i) });
-      return;
-    }
+    const kind = kindOf(line)!;
+    let end = i;
+    while (end + 1 < lines.length && kindOf(lines[end + 1]) === kind) end++;
 
-    if (line.trim() === "") {
-      flushParagraph(i - 1);
-      return;
+    if (kind === "list") {
+      const indentOf = (l: string) => /^[ \t]*/.exec(l)![0].length;
+      const stack: { indent: number; line: number }[] = [];
+      for (let n = i; n <= end; n++) {
+        const indent = indentOf(lines[n]);
+        while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+        const parent = stack.length ? stack[stack.length - 1].line : -i;
+        const m = BLOCK_ID_RE.exec(lines[n]);
+        listItems.push({ id: m?.[1], parent, position: pos(n, n) });
+        stack.push({ indent, line: n });
+      }
+      sections.push({ id: undefined, type: "list", position: pos(i, end) });
+    } else {
+      const m = BLOCK_ID_RE.exec(lines[end]);
+      sections.push({ id: m?.[1], type: kind, position: pos(i, end) });
     }
-    if (paraStart === null) paraStart = i;
-  });
-  flushParagraph(lines.length - 1);
+    i = end + 1;
+  }
 
-  return { headings, sections };
+  return { headings, sections, listItems };
 }
 
 function normalizeRel(p: string): string {
@@ -260,8 +292,8 @@ export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultSt
       } catch {
         return null;
       }
-      const { headings, sections } = parseHeadingsAndSections(content);
-      return { frontmatter: parseFrontmatter(content), headings, sections };
+      const { headings, sections, listItems } = parseHeadingsAndSections(content);
+      return { frontmatter: parseFrontmatter(content), headings, sections, listItems };
     },
     getFirstLinkpathDest,
     get resolvedLinks(): Record<string, Record<string, number>> {
