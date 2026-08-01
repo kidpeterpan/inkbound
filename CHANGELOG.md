@@ -3,6 +3,31 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.2.0
+
+Block-scoped embeds (`![[Note^blockid]]`) now work for every kind of block
+Obsidian lets you label, instead of only paragraphs and headings.
+
+- Tables, code blocks, callouts and blockquotes, and whole lists render their
+  real content where they used to degrade to an "[embedded content omitted]"
+  placeholder.
+- A block ID on a single **list item** now works too, and brings that item's
+  nested sub-items along with it — matching how Obsidian itself displays a
+  block reference to a list item. Sibling items are not included, and an
+  embedded numbered item keeps its original number (embedding step 3 shows
+  "3.", not "1.").
+- An indented block renders as the kind of thing it is: a nested bullet comes
+  out as a bullet rather than a grey code box, while an indented-style code
+  block keeps the indentation that makes it code.
+- The `^blockid` marker itself is now guaranteed never to appear as stray text
+  in an exported book, for every block type — including the paragraph and
+  heading embeds that already worked. A caret inside embedded code (a regex, an
+  exponent) is left untouched.
+- Individual table _rows_ remain un-embeddable: Obsidian exposes a table as one
+  whole block, so a `^id` typed inside a cell is ordinary cell text. Such a
+  reference degrades with the same "block not found" warning as any other
+  unresolvable block ID.
+
 ## 1.1.0
 
 Chapters now carry a backlink trail: a "Linked from:" line listing every other
