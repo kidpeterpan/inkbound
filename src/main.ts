@@ -19,6 +19,7 @@ import {
 } from "./settings";
 import type { ExportMeta } from "./types";
 import { resolveMeta, MetaDefaults } from "./metadata";
+import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "./cover";
 
 interface Job {
   meta: ExportMeta;
@@ -110,9 +111,12 @@ export default class EpubExportPlugin extends Plugin {
     };
   }
 
-  // Resolves EPUB metadata from a note's own frontmatter, then downloads the
-  // cover if one is declared. A cover failure degrades to a coverless export
-  // (spec: never fail an export over artwork).
+  // Resolves EPUB metadata from a note's own frontmatter, then attaches a
+  // cover if one can be found. Resolution order (FR-007, research R5):
+  // explicit `cover:` field → legacy `coverUrl:` field → first image embed
+  // in the metadata note's source (fallback, FR-003). Every failure mode
+  // degrades to a coverless export with a warning — never fails an export
+  // over artwork (spec + constitution II).
   private async metaFromNote(file: TFile | null, fallbackBasename: string): Promise<ExportMeta> {
     const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
     const resolved = resolveMeta(fm, file ? file.basename : fallbackBasename, this.metaDefaults());
@@ -121,21 +125,88 @@ export default class EpubExportPlugin extends Plugin {
       author: resolved.author,
       language: resolved.language,
     };
-    if (resolved.coverUrl) {
-      try {
-        const res = await requestUrl({ url: resolved.coverUrl, throw: false });
-        if (res.status === 200) {
-          const isPng = (res.headers["content-type"] ?? "").includes("png");
-          meta.coverBytes = new Uint8Array(res.arrayBuffer);
-          meta.coverExt = isPng ? "png" : "jpg";
-        } else {
-          console.warn("[inkbound] cover download failed", resolved.coverUrl, `status ${res.status}`);
+
+    const coverValue = parseCoverValue(fm?.cover);
+    if (coverValue?.kind === "url") {
+      await this.downloadCover(meta, coverValue.url);
+    } else if (coverValue?.kind === "path") {
+      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`);
+    } else if (resolved.coverUrl) {
+      await this.downloadCover(meta, resolved.coverUrl);
+    } else if (file) {
+      // No cover frontmatter at all — fall back to the first image embed of
+      // the metadata note itself (code-fence-aware scan in cover.ts). Keep
+      // scanning: an embed that is missing or unsupported is skipped in
+      // favor of the next one (spec edge case).
+      const md = await this.app.vault.cachedRead(file).catch(() => null);
+      if (md !== null) {
+        for (const target of findImageEmbeds(md)) {
+          // Fallback candidates are skipped SILENTLY: a note whose first
+          // embed is a gif or a stale link but whose second is a fine png
+          // gets a cover with no noise. Warnings are reserved for the
+          // explicitly declared `cover:` (US4).
+          if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, true)) break;
         }
-      } catch (e) {
-        console.warn("[inkbound] cover download failed", resolved.coverUrl, e);
       }
     }
     return meta;
+  }
+
+  // Remote cover: fetch and sniff png/webp from the content-type; anything
+  // else is treated as jpeg (existing coverUrl behavior, extended with webp).
+  private async downloadCover(meta: ExportMeta, url: string): Promise<void> {
+    try {
+      const res = await requestUrl({ url, throw: false });
+      if (res.status === 200) {
+        const contentType = res.headers["content-type"] ?? "";
+        meta.coverBytes = new Uint8Array(res.arrayBuffer);
+        meta.coverExt = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+      } else {
+        console.warn("[inkbound] cover download failed", url, `status ${res.status}`);
+      }
+    } catch (e) {
+      console.warn("[inkbound] cover download failed", url, e);
+    }
+  }
+
+  // Local cover: resolve like any body image (vault path first, then
+  // Obsidian's link resolver for bare filenames / note-relative paths),
+  // accept only the cover allowlist, and read the bytes. Returns whether a
+  // cover was attached, so the fallback loop can stop at the first usable
+  // image. Warnings name the reference for every failure mode (FR-006).
+  private async embedLocalCover(
+    meta: ExportMeta,
+    target: string,
+    sourceFile: TFile | null,
+    ref: string,
+    silent = false
+  ): Promise<boolean> {
+    let af: TAbstractFile | null = null;
+    if (sourceFile) {
+      af = this.app.vault.getAbstractFileByPath(target);
+      if (!(af instanceof TFile)) {
+        af = this.app.metadataCache.getFirstLinkpathDest(target, sourceFile.path);
+      }
+    }
+    if (!(af instanceof TFile)) {
+      if (!silent) console.warn(`[inkbound] cover not found: ${target} (${ref})`);
+      return false;
+    }
+    const ext = af.extension.toLowerCase();
+    if (!isSupportedCoverExt(ext)) {
+      if (!silent) console.warn(`[inkbound] unsupported cover type: ${target} (${ref})`);
+      return false;
+    }
+    try {
+      meta.coverBytes = new Uint8Array(await this.app.vault.readBinary(af));
+      // Builder maps jpeg→image/jpeg via the "jpg" key; keep coverExt in its
+      // canonical three-value shape ("jpg" | "png" | "webp").
+      meta.coverExt = ext === "jpeg" ? "jpg" : (ext as "jpg" | "png" | "webp");
+      return true;
+    } catch (e) {
+      if (!silent) console.warn("[inkbound] cover read failed", target, e);
+      return false;
+    }
   }
 
   async exportSingle(file: TFile) {

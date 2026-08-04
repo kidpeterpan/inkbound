@@ -600,6 +600,270 @@ describe("cover art", () => {
   });
 });
 
+describe("cover: frontmatter (local cover)", () => {
+  it("resolves a vault-relative path from the cover: field", async () => {
+    const { app, root } = await buildVault({
+      "cover_note.md": ["---", "cover: assets/cover.png", "---", "", "Body text.", ""].join("\n"),
+      "assets/cover.png": new Uint8Array([137, 80, 78, 71, 1, 2, 3]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "cover_note.md"));
+    const epub = await readEpub("cover_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.opf).toContain('properties="cover-image"');
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("resolves a bare-filename wikilink from the cover: field", async () => {
+    const { app, root } = await buildVault({
+      "cover_note.md": ["---", 'cover: "[[cover.png]]"', "---", "", "Body.", ""].join("\n"),
+      "cover.png": new Uint8Array([137, 80, 78, 71, 9, 9, 9]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "cover_note.md"));
+    const epub = await readEpub("cover_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.opf).toContain('properties="cover-image"');
+  });
+
+  it("downloads a remote URL from the cover: field", async () => {
+    const { app, root } = await buildVault({
+      "cover_note.md": ["---", 'cover: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(async () => ({
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+      arrayBuffer: new Uint8Array([255, 216, 255, 217]).buffer,
+      text: "",
+      json: null,
+    }));
+    await makePlugin(app).exportSingle(tfile(root, "cover_note.md"));
+    const epub = await readEpub("cover_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.jpg");
+    expect(epub.opf).toContain('properties="cover-image"');
+  });
+
+  it("cover: takes precedence over the legacy coverUrl: without touching the network", async () => {
+    // No setRequestUrlImpl: the beforeEach default THROWS on any request, so
+    // if the coverUrl branch ran, a warning would appear and the cover would
+    // be missing. A clean cover proves cover: won and no network was tried.
+    const { app, root } = await buildVault({
+      "cover_note.md": [
+        "---",
+        "cover: cover.png",
+        'coverUrl: "https://example.com/remote.jpg"',
+        "---",
+        "",
+        "Body.",
+        "",
+      ].join("\n"),
+      "cover.png": new Uint8Array([137, 80, 78, 71, 4, 4, 4]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "cover_note.md"));
+    const epub = await readEpub("cover_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.names).not.toContain("OEBPS/images/cover.jpg");
+    expect(epub.opf).toContain('properties="cover-image"');
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("embeds a webp cover from the cover: field", async () => {
+    const { app, root } = await buildVault({
+      "cover_note.md": ["---", "cover: cover.webp", "---", "", "Body.", ""].join("\n"),
+      "cover.webp": new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "cover_note.md"));
+    const epub = await readEpub("cover_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.webp");
+    expect(epub.opf).toContain('properties="cover-image"');
+  });
+});
+
+describe("cover fallback (first image in note)", () => {
+  it("uses the first image embed of a note with no cover frontmatter", async () => {
+    const { app, root } = await buildVault({
+      "fallback_note.md": "![[diagram.png]]\n\nSome text.\n",
+      "diagram.png": new Uint8Array([137, 80, 78, 71, 1, 1, 1]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "fallback_note.md"));
+    const epub = await readEpub("fallback_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.opf).toContain('properties="cover-image"');
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("ignores images inside fenced code blocks when picking the fallback cover", async () => {
+    const { app, root } = await buildVault({
+      "code_note.md": "```md\n![[inside.png]]\n```\n\nText.\n",
+      "inside.png": new Uint8Array([137, 80, 78, 71, 2, 2, 2]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "code_note.md"));
+    const epub = await readEpub("code_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.png");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("skips an unsupported-format first embed and uses the next supported one", async () => {
+    const { app, root } = await buildVault({
+      "mixed_note.md": "![[anim.gif]]\n\n![[real.png]]\n",
+      "anim.gif": new Uint8Array([71, 73, 70, 56, 9, 97]),
+      "real.png": new Uint8Array([137, 80, 78, 71, 3, 3, 3]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "mixed_note.md"));
+    const epub = await readEpub("mixed_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("skips a missing first embed and uses the next resolvable one", async () => {
+    const { app, root } = await buildVault({
+      "missing_note.md": "![[gone.png]]\n\n![[here.png]]\n",
+      "here.png": new Uint8Array([137, 80, 78, 71, 5, 5, 5]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "missing_note.md"));
+    const epub = await readEpub("missing_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    // The cover SCAN skips the broken embed silently — no cover-related
+    // warning, no matter what the chapter-body pipeline itself reports for
+    // the embed that remains in the rendered text.
+    expect(warnings.filter((w) => w.includes("cover"))).toHaveLength(0);
+  });
+
+  it("produces a coverless book with no warning when the note has no images", async () => {
+    const { app, root } = await buildVault({
+      "plain_note.md": "# Title\n\nJust words.\n",
+    });
+    await makePlugin(app).exportSingle(tfile(root, "plain_note.md"));
+    const epub = await readEpub("plain_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.png");
+    expect(warnings).toHaveLength(0);
+  });
+});
+
+describe("cover degradation (declared cover: failures)", () => {
+  it("warns and exports coverless when cover: points at a missing file", async () => {
+    const { app, root } = await buildVault({
+      "broken_note.md": ["---", "cover: missing.png", "---", "", "Body.", ""].join("\n"),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "broken_note.md"));
+    const epub = await readEpub("broken_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.png");
+    expect(epub.opf).not.toContain('properties="cover-image"');
+    expect(warnings.some((w) => w.includes("cover not found") && w.includes("missing.png"))).toBe(true);
+  });
+
+  it("warns and exports coverless when cover: points at an unsupported format", async () => {
+    const { app, root } = await buildVault({
+      "bmp_note.md": ["---", "cover: cover.bmp", "---", "", "Body.", ""].join("\n"),
+      "cover.bmp": new Uint8Array([66, 77, 1, 2]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "bmp_note.md"));
+    const epub = await readEpub("bmp_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.bmp");
+    expect(epub.opf).not.toContain('properties="cover-image"');
+    expect(warnings.some((w) => w.includes("unsupported cover type") && w.includes("cover.bmp"))).toBe(true);
+  });
+
+  it("warns and exports coverless when a remote cover: URL fails", async () => {
+    const { app, root } = await buildVault({
+      "remote_note.md": ["---", 'cover: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(async () => ({
+      status: 500,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    }));
+    await makePlugin(app).exportSingle(tfile(root, "remote_note.md"));
+    const epub = await readEpub("remote_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.jpg");
+    expect(epub.opf).not.toContain('properties="cover-image"');
+    expect(warnings.some((w) => w.includes("cover download failed"))).toBe(true);
+  });
+
+  it("normalizes a .jpeg cover: reference to the canonical jpg asset name", async () => {
+    const { app, root } = await buildVault({
+      "jpeg_note.md": ["---", "cover: cover.jpeg", "---", "", "Body.", ""].join("\n"),
+      "cover.jpeg": new Uint8Array([255, 216, 255, 217]),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "jpeg_note.md"));
+    const epub = await readEpub("jpeg_note.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.jpg");
+    expect(epub.opf).toContain('properties="cover-image"');
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("warns and exports coverless when reading the declared cover file fails", async () => {
+    const { app, root } = await buildVault({
+      "unreadable_note.md": ["---", "cover: cover.png", "---", "", "Body.", ""].join("\n"),
+      "cover.png": new Uint8Array([137, 80, 78, 71, 7, 7, 7]),
+    });
+    failFor(app.vault, "readBinary", "cover.png", new Error("disk error"));
+    await makePlugin(app).exportSingle(tfile(root, "unreadable_note.md"));
+    const epub = await readEpub("unreadable_note.epub");
+    expect(epub.names).not.toContain("OEBPS/images/cover.png");
+    expect(warnings.some((w) => w.includes("cover read failed") && w.includes("cover.png"))).toBe(true);
+  });
+});
+
+describe("cover across export scopes", () => {
+  it("folder export takes the cover from the picked index note", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": ["---", "tags: [book, main]", "cover: cover.png", "---", "", "# Book", ""].join("\n"),
+      "book/01_intro.md": "# Intro\n",
+      "book/02_deep.md": "# Deep\n",
+      "book/cover.png": new Uint8Array([137, 80, 78, 71, 6, 6, 6]),
+    });
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.opf).toContain('properties="cover-image"');
+  });
+
+  it("linked export takes the cover from the root note", async () => {
+    const { app, root } = await buildVault({
+      "root.md": ["---", "cover: cover.png", "---", "", "See [[leaf]].", ""].join("\n"),
+      "leaf.md": "# Leaf\n",
+      "cover.png": new Uint8Array([137, 80, 78, 71, 8, 8, 8]),
+    });
+    await makePlugin(app).exportLinked(tfile(root, "root.md"));
+    const epub = await readEpub("root.epub");
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+    expect(epub.opf).toContain('properties="cover-image"');
+  });
+
+  it("single, folder, and linked exports of the same note all carry the same cover", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "cover: assets/c.png",
+        "---",
+        "",
+        "# Book",
+        "",
+        "See [[leaf]].",
+        "",
+      ].join("\n"),
+      "book/leaf.md": "# Leaf\n",
+      "book/assets/c.png": new Uint8Array([137, 80, 78, 71, 1, 2, 3]),
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "book/book.md"));
+    const single = await readEpub("book.epub");
+    await plugin.exportFolder(tfolder(root, "book"));
+    const folder = await readEpub("book.epub");
+    await plugin.exportLinked(tfile(root, "book/book.md"));
+    const linked = await readEpub("book.epub");
+
+    for (const epub of [single, folder, linked]) {
+      expect(epub.names).toContain("OEBPS/images/cover.png");
+      expect(epub.opf).toContain('properties="cover-image"');
+      expect(epub.names).toContain("OEBPS/text/cover.xhtml");
+    }
+  });
+});
+
 describe("images", () => {
   it("case 7: embeds an image referenced by a relative markdown path", async () => {
     const { app, root } = await buildVault({

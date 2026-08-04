@@ -67,9 +67,19 @@ export class EpubBuilder {
     zip.file("OEBPS/package.opf", this.opf());
     zip.file("OEBPS/nav.xhtml", this.nav());
     zip.file("OEBPS/style/epub.css", EPUB_CSS);
+    // Cover page: a real first spine document (not a chapter) so readers
+    // open onto the artwork. Only when cover art exists — coverless books
+    // keep today's exact structure (FR-004).
+    if (this.hasCover()) {
+      zip.file("OEBPS/text/cover.xhtml", this.coverDoc());
+    }
     for (const ch of this.chapters) zip.file(`OEBPS/${ch.href}`, this.chapterDoc(ch));
     for (const a of this.assets) zip.file(`OEBPS/${a.href}`, a.bytes);
     return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
+  }
+
+  private hasCover(): boolean {
+    return !!this.meta.coverBytes && !!this.meta.coverExt;
   }
 
   private containerXml(): string {
@@ -84,11 +94,14 @@ export class EpubBuilder {
   private opf(): string {
     const m = this.meta;
     const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const coverItem =
-      m.coverBytes && m.coverExt
-        ? `<item id="cover-image" href="images/cover.${m.coverExt}" media-type="image/${m.coverExt === "jpg" ? "jpeg" : "png"}" properties="cover-image"/>`
-        : "";
-    const coverMeta = coverItem ? `<meta name="cover" content="cover-image"/>` : "";
+    const hasCover = this.hasCover();
+    const coverItem = hasCover
+      ? `<item id="cover-image" href="images/cover.${m.coverExt}" media-type="image/${m.coverExt === "jpg" ? "jpeg" : m.coverExt}" properties="cover-image"/>`
+      : "";
+    const coverPageItem = hasCover
+      ? `<item id="cover-page" href="text/cover.xhtml" media-type="application/xhtml+xml"/>`
+      : "";
+    const coverMeta = hasCover ? `<meta name="cover" content="cover-image"/>` : "";
     const items = this.chapters
       .map(
         (c) =>
@@ -98,7 +111,9 @@ export class EpubBuilder {
         this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`)
       )
       .join("\n    ");
-    const spine = this.chapters.map((c) => `<itemref idref="${c.id}"/>`).join("\n    ");
+    const spine = (hasCover ? [`<itemref idref="cover-page"/>`] : [])
+      .concat(this.chapters.map((c) => `<itemref idref="${c.id}"/>`))
+      .join("\n    ");
     return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
@@ -113,6 +128,7 @@ export class EpubBuilder {
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="css" href="style/epub.css" media-type="text/css"/>
     ${coverItem}
+    ${coverPageItem}
     ${items}
   </manifest>
   <spine>
@@ -125,6 +141,13 @@ export class EpubBuilder {
     const lis = this.chapters
       .map((c) => `<li><a href="${c.href}">${escapeXml(c.title)}</a></li>`)
       .join("\n        ");
+    // Landmarks: the cover page must stay OUT of the TOC (it is not a
+    // chapter, FR-005), but a spine document must be reachable from a
+    // hyperlink for epubcheck's OPF-096 check (research R1). A landmarks
+    // entry satisfies that and lets readers jump to the cover.
+    const landmarks = this.hasCover()
+      ? `\n    <nav epub:type="landmarks">\n      <ol>\n        <li><a epub:type="cover" href="text/cover.xhtml">Cover</a></li>\n      </ol>\n    </nav>`
+      : "";
     return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
@@ -135,7 +158,22 @@ export class EpubBuilder {
       <ol>
         ${lis}
       </ol>
-    </nav>
+    </nav>${landmarks}
+  </body>
+</html>`;
+  }
+
+  private coverDoc(): string {
+    const ext = this.meta.coverExt!;
+    return `<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Cover</title>
+    <link rel="stylesheet" type="text/css" href="../style/epub.css"/>
+  </head>
+  <body class="cover-page">
+    <img src="../images/cover.${ext}" alt="Cover"/>
   </body>
 </html>`;
   }

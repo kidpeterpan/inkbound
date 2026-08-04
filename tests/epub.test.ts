@@ -97,6 +97,62 @@ describe("EpubBuilder container", () => {
     expect(opf).toContain('<meta name="cover" content="cover-image"/>');
   });
 
+  it("adds a cover page as the first spine item when a cover exists", async () => {
+    const b = new EpubBuilder({ ...META, coverBytes: new Uint8Array([137, 80, 78, 71]), coverExt: "png" });
+    b.addChapter("One", "<p>x</p>");
+    b.addChapter("Two", "<p>y</p>");
+    const zip = await JSZip.loadAsync(await b.build());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    const coverDoc = await zip.file("OEBPS/text/cover.xhtml")!.async("string");
+
+    // Document exists and displays the image full-page (CSS class applied).
+    expect(zip.file("OEBPS/text/cover.xhtml")).not.toBeNull();
+    expect(coverDoc).toContain('class="cover-page"');
+    expect(coverDoc).toContain('src="../images/cover.png"');
+
+    // Manifest declares the page; the spine starts with it, before ch_001.
+    expect(opf).toContain(
+      '<item id="cover-page" href="text/cover.xhtml" media-type="application/xhtml+xml"/>'
+    );
+    const spine = opf.slice(opf.indexOf("<spine"));
+    expect(spine.indexOf("cover-page")).toBeLessThan(spine.indexOf("ch_001"));
+
+    // Not in the TOC, but reachable via a landmarks entry (epubcheck OPF-096).
+    const toc = nav.match(/<nav epub:type="toc">([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    expect(toc).not.toContain("text/cover.xhtml");
+    expect(toc).toContain("text/chapter_001.xhtml");
+    const landmarks = nav.match(/<nav epub:type="landmarks">([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    // epubcheck RSC-005: in a landmarks nav the epub:type belongs on the
+    // ANCHOR, not the li (EPUB 3.3 §nav-landmarks).
+    expect(landmarks).toContain('<a epub:type="cover" href="text/cover.xhtml">Cover</a>');
+  });
+
+  it("never adds a cover page, landmarks, or cover-page item without a cover", async () => {
+    const zip = await JSZip.loadAsync(await buildSample());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    expect(zip.file("OEBPS/text/cover.xhtml")).toBeNull();
+    expect(opf).not.toContain('id="cover-page"');
+    expect(nav).not.toContain('epub:type="landmarks"');
+  });
+
+  it("declares image/webp for a webp cover in the manifest", async () => {
+    const b = new EpubBuilder({ ...META, coverBytes: new Uint8Array([82, 73, 70, 70]), coverExt: "webp" });
+    b.addChapter("One", "<p>x</p>");
+    const zip = await JSZip.loadAsync(await b.build());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    expect(zip.file("OEBPS/images/cover.webp")).not.toBeNull();
+    expect(opf).toContain('href="images/cover.webp" media-type="image/webp"');
+    expect(opf).toContain('properties="cover-image"');
+  });
+
+  it("ships .cover-page CSS rules in the embedded stylesheet", async () => {
+    const { EPUB_CSS } = await import("../src/epub-css");
+    expect(EPUB_CSS).toContain(".cover-page");
+    expect(EPUB_CSS).toMatch(/\.cover-page\s*\{[^}]*text-align:\s*center/);
+  });
+
   it('declares properties="svg" on the manifest item for a chapter containing inline SVG', async () => {
     const b = new EpubBuilder(META);
     b.addChapter(

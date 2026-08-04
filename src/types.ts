@@ -3,5 +3,5 @@ export interface ExportMeta {
   author: string;
   language: string;
   coverBytes?: Uint8Array;
-  coverExt?: "jpg" | "png";
+  coverExt?: "jpg" | "png" | "webp";
 }

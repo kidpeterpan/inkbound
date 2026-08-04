@@ -17,5 +17,9 @@ th, td { border: 1px solid #888; padding: 0.25em 0.5em; }
    hairline separator, slightly smaller, roomy line height for tap targets. */
 .backlinks { border-top: 1px solid #888; border-bottom: 1px solid #888; margin: 0.8em 0; padding: 0.3em 0; }
 .backlinks p { font-size: 0.85em; line-height: 1.9; margin: 0.2em 0; }
+/* Cover page: the first spine document when a book has cover art — the image
+   fills the page, centered, with no surrounding chrome. */
+.cover-page { margin: 0; text-align: center; }
+.cover-page img { max-width: 100%; max-height: 100%; }
 /* ── PAN (Task 11): tune the reading experience for your Boox below ── */
 `;

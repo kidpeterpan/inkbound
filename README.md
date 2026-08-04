@@ -18,6 +18,12 @@ through, and so do Mermaid diagrams — as pictures rather than live diagrams,
 since most e-ink readers cannot draw them otherwise. Any language works,
 including Thai.
 
+**Books get covers.** Set `cover:` in a note's frontmatter (a vault path, a
+`[[wikilink]]`, or a URL) and the finished book carries that artwork: it shows
+on your e-reader's library shelf, and the book opens on a full-page cover
+before the first chapter. No `cover:`? The first image of the note becomes
+the cover automatically.
+
 ## From note to e-reader
 
 A book's index note in Obsidian, with its chapters as linked notes:
@@ -121,6 +127,7 @@ aliases:
   - Grokking Algorithms
 author: Aditya Y. Bhargava
 language: english
+cover: assets/grokking-cover.png
 coverUrl: https://example.com/grokking-cover.jpg
 tags:
   - book

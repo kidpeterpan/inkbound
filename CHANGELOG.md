@@ -3,6 +3,29 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.3.0
+
+Books can now carry cover art, and they show it off properly on an e-reader.
+
+- **`cover:` frontmatter field** — point it at an image in the vault (a
+  path, a bare filename, a `[[wikilink]]`, or an `![[embed]]`) or at a remote
+  URL, and the export embeds it as the EPUB 3 cover (`properties="cover-image"`
+  - `<meta name="cover">`), so the Boox library shelf shows the artwork
+    instead of a placeholder.
+- **First-image fallback** — no `cover:` (or legacy `coverUrl:`) at all? The
+  first image embed in the metadata note (outside code fences) becomes the
+  cover, so existing vaults gain covers with zero frontmatter changes.
+- **Cover page** — books with a cover open on a full-page, centered cover
+  document as the first spine item. The cover page never appears in the table
+  of contents; a `landmarks` entry keeps it reachable (epubcheck-clean under
+  EPUB 3.3 rules, verified with epubcheck 5.3.0).
+- **Formats** — `png`, `jpg`/`jpeg`, and `webp` are accepted as covers (all
+  EPUB 3.3 core media types); anything else degrades with a warning, and a
+  broken `cover:` reference never fails an export — the book still builds,
+  coverless, with a warning naming the file.
+- `cover:` takes precedence over the legacy `coverUrl:` when both are
+  present; `coverUrl:` alone keeps working exactly as before.
+
 ## 1.2.0
 
 Block-scoped embeds (`![[Note^blockid]]`) now work for every kind of block
