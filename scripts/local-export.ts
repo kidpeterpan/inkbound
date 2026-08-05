@@ -343,7 +343,7 @@ async function main(): Promise<void> {
     return;
   }
   const afterPrefix = savedNotice.slice("EPUB saved to ".length);
-  const outPath = afterPrefix.split("\n")[0].trim();
+  const outPath = afterPrefix.split("\n")[0].split(" and pushed to Boox")[0].trim();
 
   const size = statSync(outPath).size;
   console.log(`\n--- Output ---`);
