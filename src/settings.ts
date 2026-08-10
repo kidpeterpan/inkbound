@@ -4,12 +4,13 @@ import type EpubExportPlugin from "./main";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 
-import { coerceBacklinkPosition } from "./settings-core";
+import { coerceBacklinkPosition, coerceTocHeadingDepth } from "./settings-core";
 
 export type { BacklinkPosition, EpubExportSettings } from "./settings-core";
 export {
   DEFAULT_SETTINGS,
   coerceBacklinkPosition,
+  coerceTocHeadingDepth,
   resolveOutputPath,
   summarizeWarnings,
 } from "./settings-core";
@@ -21,6 +22,17 @@ const BACKLINK_POSITION_OPTIONS: Record<string, string> = {
   end: "End of chapter",
   both: "Both",
   none: "None (no backlink list)",
+};
+
+// Dropdown values are strings, hence the string keys for 0-6.
+const TOC_DEPTH_OPTIONS: Record<string, string> = {
+  "0": "Off — flat TOC",
+  "1": "Level 1",
+  "2": "Level 2",
+  "3": "Level 3",
+  "4": "Level 4",
+  "5": "Level 5",
+  "6": "Level 6",
 };
 
 export class EpubExportSettingTab extends PluginSettingTab {
@@ -74,6 +86,11 @@ export class EpubExportSettingTab extends PluginSettingTab {
         name: "Backlink listing position",
         desc: 'Where each chapter shows the "Linked from:" list of chapters that link to it.',
         control: { type: "dropdown", key: "backlinkPosition", options: BACKLINK_POSITION_OPTIONS },
+      },
+      {
+        name: "TOC heading depth",
+        desc: "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC.",
+        control: { type: "dropdown", key: "tocHeadingDepth", options: TOC_DEPTH_OPTIONS },
       },
       {
         name: "Language (dc:language)",
@@ -152,6 +169,21 @@ export class EpubExportSettingTab extends PluginSettingTab {
           .setValue(s.backlinkPosition)
           .onChange((v) => {
             s.backlinkPosition = coerceBacklinkPosition(v);
+            void save();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("TOC heading depth")
+      .setDesc(
+        "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC."
+      )
+      .addDropdown((d) =>
+        d
+          .addOptions(TOC_DEPTH_OPTIONS)
+          .setValue(String(s.tocHeadingDepth))
+          .onChange((v) => {
+            s.tocHeadingDepth = coerceTocHeadingDepth(Number(v));
             void save();
           })
       );

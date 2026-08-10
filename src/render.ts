@@ -944,3 +944,73 @@ export async function rasterizeMermaidDiagrams(
 
   return { images, warnings };
 }
+
+// ── Heading-level TOC collection (004-heading-toc) ────────────────────────
+//
+// The EPUB nav (OEBPS/nav.xhtml) lists chapters; this feature adds each
+// chapter's headings as nested sub-entries with fragment links. Anchors are
+// generated HERE, in the pure layer, rather than read from the renderer:
+// the vitest stub renders via `marked`, which emits bare `<h2>Text</h2>`
+// with no id attributes, while real Obsidian adds its own ids with different
+// slug rules — relying on either would make stub and production output
+// diverge (research R1). Ids are stamped onto the heading elements so the
+// serialized chapter body carries the targets nav links into; the entries
+// themselves flow to EpubBuilder via ChapterRender.toc.
+//
+// Depth-0 identity (FR-006): when maxDepth is 0 this function must not even
+// be CALLED by the adapter (see render-adapter.ts) — but it is also a safe
+// no-op here (returns [] and stamps nothing), so a forgotten call can't
+// silently alter chapter bodies.
+
+export interface TocEntry {
+  level: number;
+  text: string;
+  id: string;
+}
+
+// Sanitizes heading text into an XML NCName (epubcheck RSC-012 resolves nav
+// fragment links; ids must be well-formed XML names and unique per
+// document). ASCII letters/digits/underscore/hyphen survive; whitespace
+// collapses to "-"; ASCII punctuation is stripped; Unicode letters (e.g.
+// Thai) are preserved — they are valid NCNames. The "h-" prefix guards
+// against ids that would start with a digit, hyphen, or nothing.
+export function sanitizeHeadingId(text: string): string {
+  const cleaned = text
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    // XML NameChar keeps [a-z0-9_-] plus the U+00A0–U+D7FF Unicode range
+    // (Thai and other letters/ideographs); everything else — ASCII
+    // punctuation like . , ! ? & < > — is stripped. The hyphen sits at the
+    // END of the class: anywhere else (e.g. `_-\u00A0`) JS parses it as a
+    // range from "_" and silently drops the Unicode range.
+    .replace(/[^a-z0-9\u00A0-\uFFFF_-]/g, "")
+    // Removed punctuation often leaves hyphen runs behind ("-&-" -> "--").
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  // XML NCName cannot START with a digit or hyphen.
+  return /^[a-z\u00A0-\uFFFF_]/.test(cleaned) ? cleaned : `h-${cleaned}`;
+}
+
+export function collectHeadingToc(root: HTMLElement, maxDepth: number): TocEntry[] {
+  const entries: TocEntry[] = [];
+  const used = new Set<string>();
+  if (maxDepth <= 0) return entries;
+  const headings = Array.from(root.querySelectorAll("h1,h2,h3,h4,h5,h6"));
+  headings.forEach((el, i) => {
+    const level = parseInt(el.tagName.slice(1), 10);
+    if (level > maxDepth) return;
+    // The chapter's first heading, when it is an H1, is its title — the
+    // nav already lists the chapter itself, so the H1 would be a duplicate
+    // entry (FR-004).
+    if (i === 0 && level === 1) return;
+    const text = (el.textContent ?? "").trim();
+    if (text === "") return;
+    let id = sanitizeHeadingId(text);
+    let n = 2;
+    while (used.has(id)) id = `${sanitizeHeadingId(text)}-${n++}`;
+    used.add(id);
+    el.setAttribute("id", id);
+    entries.push({ level, text, id });
+  });
+  return entries;
+}

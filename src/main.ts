@@ -310,7 +310,8 @@ export default class EpubExportPlugin extends Plugin {
             file.path,
             hrefByPath,
             basePath,
-            imageCount
+            imageCount,
+            this.settings.tocHeadingDepth
           );
           warnings.push(...r.warnings);
           // Bump immediately, before the asset loop below: these numbers are
@@ -357,7 +358,7 @@ export default class EpubExportPlugin extends Plugin {
               warnings.push(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
             }
           }
-          builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody));
+          builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody), r.toc);
         } catch (e) {
           warnings.push(`chapter skipped: ${file.path} — ${String(e)}`);
           // Placeholder keeps builder's chapter count == job.files.length, so

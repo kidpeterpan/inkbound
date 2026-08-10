@@ -118,6 +118,7 @@ function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): E
     booxUrl: "",
     pushAfterExport: false,
     backlinkPosition: "start",
+    tocHeadingDepth: 3,
     ...settings,
   };
   return plugin;
@@ -1081,6 +1082,7 @@ describe("settings persistence", () => {
       booxUrl: "",
       pushAfterExport: false,
       backlinkPosition: "start",
+      tocHeadingDepth: 3,
     });
 
     plugin.settings.outputFolder = outDir;
@@ -1095,6 +1097,7 @@ describe("settings persistence", () => {
       booxUrl: "",
       pushAfterExport: true,
       backlinkPosition: "start",
+      tocHeadingDepth: 3,
     });
   });
 
@@ -1117,6 +1120,7 @@ describe("settings persistence", () => {
       booxUrl: "",
       pushAfterExport: false,
       backlinkPosition: "start",
+      tocHeadingDepth: 3,
     });
   });
 });
@@ -1464,5 +1468,33 @@ describe("mermaid rasterization (Round 3)", () => {
     const notices = successNotices();
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("Exported with 1 warning");
+  });
+});
+
+describe("heading TOC through the orchestrator (004-heading-toc)", () => {
+  it("passes tocHeadingDepth into rendering and feeds toc entries into the nav", async () => {
+    const { app, root } = await buildVault({
+      "headed/1_first.md": "# First\n\n## Part A\n\n### Detail\n",
+    });
+    const plugin = makePlugin(app, { tocHeadingDepth: 3 });
+    await plugin.exportFolder(tfolder(root, "headed"));
+
+    const epub = await readEpub("headed.epub");
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml#part-a">Part A</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml#detail">Detail</a>');
+    // The anchor stamped into the chapter body is what nav links resolve to.
+    expect(await epub.chapter(1)).toContain('<h2 id="part-a">Part A</h2>');
+  });
+
+  it("tocHeadingDepth 0 keeps the flat nav and unstamped chapter bodies", async () => {
+    const { app, root } = await buildVault({
+      "headed/1_first.md": "# First\n\n## Part A\n",
+    });
+    const plugin = makePlugin(app, { tocHeadingDepth: 0 });
+    await plugin.exportFolder(tfolder(root, "headed"));
+
+    const epub = await readEpub("headed.epub");
+    expect(epub.nav).not.toContain("#part-a");
+    expect(await epub.chapter(1)).not.toContain('id="part-a"');
   });
 });

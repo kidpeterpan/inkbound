@@ -25,9 +25,11 @@ import {
   rewriteLinks,
   rewriteImages,
   rasterizeMermaidDiagrams,
+  collectHeadingToc,
   serializeBody,
   EMBED_RENDERED_ATTR,
   EMBED_WRAPPER_CLASS,
+  type TocEntry,
   type HeadingInfo,
   type SectionInfo,
   type ListItemInfo,
@@ -240,6 +242,10 @@ export interface ChapterRender {
     sourcePath?: string;
   }[];
   warnings: string[];
+  // Heading-level TOC entries (004-heading-toc): collected from the final
+  // rendered DOM when tocDepth > 0; [] at depth 0, where no ids are stamped
+  // either (depth-0 output identity, FR-006).
+  toc: TocEntry[];
 }
 
 export async function renderUnitToChapter(
@@ -249,7 +255,8 @@ export async function renderUnitToChapter(
   sourcePath: string,
   hrefByPath: Map<string, string>,
   basePath: string,
-  startImageIndex: number
+  startImageIndex: number,
+  tocDepth = 0
 ): Promise<ChapterRender> {
   const warnings: string[] = [];
   const md = stripDynamicBlocks(stripFrontmatter(markdown));
@@ -292,11 +299,18 @@ export async function renderUnitToChapter(
       startImageIndex + embedRewrite.images.length + images.length
     );
     warnings.push(...mermaid.warnings);
+    // Depth-0 identity (FR-006): collectHeadingToc is NOT called at all when
+    // tocDepth is 0, so no ids are stamped and the serialized body is
+    // byte-identical to pre-feature output. It runs after embeds are
+    // flattened (flattenEmbeds inside cleanupDom), so headings from inlined
+    // note embeds are legitimately part of this chapter's toc (research R5).
+    const toc = tocDepth > 0 ? collectHeadingToc(el, tocDepth) : [];
     const xhtmlBody = serializeBody(el);
     return {
       xhtmlBody,
       images: [...embedRewrite.images, ...images, ...mermaid.images],
       warnings,
+      toc,
     };
   } finally {
     el.remove();

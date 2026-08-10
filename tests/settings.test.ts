@@ -10,6 +10,7 @@ import {
   summarizeWarnings,
   DEFAULT_SETTINGS,
   coerceBacklinkPosition,
+  coerceTocHeadingDepth,
 } from "../src/settings-core";
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
@@ -74,6 +75,7 @@ describe("DEFAULT_SETTINGS", () => {
       booxUrl: "",
       pushAfterExport: false,
       backlinkPosition: "start",
+      tocHeadingDepth: 3,
     });
   });
 });
@@ -133,12 +135,13 @@ describe("EpubExportSettingTab", () => {
     resetRequestUrlImpl();
   });
 
-  it("case 1: renders a setting for each of the seven fields plus the BooxDrop heading and Test-connection button", () => {
+  it("case 1: renders a setting for each of the eight fields plus the BooxDrop heading and Test-connection button", () => {
     makeTab();
     expect(SETTINGS.map((s) => s.nameEl.textContent)).toEqual([
       "Output folder",
       "Default link depth",
       "Backlink listing position",
+      "TOC heading depth",
       "Language (dc:language)",
       "Fallback author",
       "BooxDrop",
@@ -274,6 +277,7 @@ describe("EpubExportSettingTab", () => {
       "Output folder",
       "Default link depth",
       "Backlink listing position",
+      "TOC heading depth",
       "Language (dc:language)",
       "Fallback author",
       "Device URL",
@@ -323,6 +327,46 @@ describe("EpubExportSettingTab", () => {
     expect(group.type).toBe("group");
   });
 
+  it("case 6e: the TOC depth dropdown offers 0-6, defaults to 3, writes the field and saves", () => {
+    const { plugin } = makeTab();
+    const control = controlFor("TOC heading depth");
+    expect(control.options).toEqual({
+      "0": "Off — flat TOC",
+      "1": "Level 1",
+      "2": "Level 2",
+      "3": "Level 3",
+      "4": "Level 4",
+      "5": "Level 5",
+      "6": "Level 6",
+    });
+    expect(control.value).toBe("3");
+    control.onChangeFn?.("0");
+    expect(plugin.settings.tocHeadingDepth).toBe(0);
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6f: an out-of-range dropdown value is coerced to the default 3 before being stored", () => {
+    const { plugin } = makeTab({ tocHeadingDepth: 4 });
+    controlFor("TOC heading depth").onChangeFn?.("99");
+    expect(plugin.settings.tocHeadingDepth).toBe(3);
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 12c: the TOC depth definition is a dropdown keyed to tocHeadingDepth with the same options as display()", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const def = flat.find((d) => d.name === "TOC heading depth") as SettingDefinitionControl;
+    expect(def.control).toMatchObject({
+      type: "dropdown",
+      key: "tocHeadingDepth",
+      options: {
+        "0": "Off — flat TOC",
+        "3": "Level 3",
+        "6": "Level 6",
+      },
+    });
+  });
+
   it("case 14: the declarative Test-connection action reaches the same code path as the display() button (reachable case)", async () => {
     setRequestUrlImpl(async () => ({
       status: 200,
@@ -344,5 +388,26 @@ describe("EpubExportSettingTab", () => {
     const testAction = flat.find((d) => d.name === "Test connection") as SettingDefinitionAction;
     await testAction.action(document.createElement("div"), 0);
     expect(NOTICES).toEqual(["Set the device URL first."]);
+  });
+});
+
+describe("tocHeadingDepth (004-heading-toc)", () => {
+  it("defaults to 3", () => {
+    expect(DEFAULT_SETTINGS.tocHeadingDepth).toBe(3);
+  });
+
+  it("coerce: accepts integers 0-6", () => {
+    expect(coerceTocHeadingDepth(0)).toBe(0);
+    expect(coerceTocHeadingDepth(3)).toBe(3);
+    expect(coerceTocHeadingDepth(6)).toBe(6);
+  });
+
+  it("coerce: out-of-range and non-integer values degrade to the default 3", () => {
+    expect(coerceTocHeadingDepth(7)).toBe(3);
+    expect(coerceTocHeadingDepth(-1)).toBe(3);
+    expect(coerceTocHeadingDepth(2.5)).toBe(3);
+    expect(coerceTocHeadingDepth("2" as unknown as number)).toBe(3);
+    expect(coerceTocHeadingDepth(null as unknown as number)).toBe(3);
+    expect(coerceTocHeadingDepth(undefined as unknown as number)).toBe(3);
   });
 });

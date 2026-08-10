@@ -177,3 +177,104 @@ describe("EpubBuilder container", () => {
     expect(escapeXml(`<a b="c">&'`)).toBe("&lt;a b=&quot;c&quot;&gt;&amp;&apos;");
   });
 });
+
+describe("heading sub-entries in nav.xhtml", () => {
+  const TOC = [
+    { level: 2, text: "Part A", id: "part-a" },
+    { level: 3, text: "Detail 1", id: "detail-1" },
+    { level: 2, text: "Part B", id: "part-b" },
+  ];
+
+  async function navFor(chapters: { title: string; body: string; toc?: typeof TOC }[]): Promise<string> {
+    const b = new EpubBuilder(META);
+    for (const c of chapters) b.addChapter(c.title, c.body, c.toc ?? []);
+    const zip = await JSZip.loadAsync(await b.build());
+    return zip.file("OEBPS/nav.xhtml")!.async("string");
+  }
+
+  it("lists headings as nested sub-entries under the chapter li", async () => {
+    const nav = await navFor([{ title: "Ch", body: "<p>x</p>", toc: TOC }]);
+    expect(nav).toContain('<a href="text/chapter_001.xhtml">Ch</a>');
+    expect(nav).toContain('<a href="text/chapter_001.xhtml#part-a">Part A</a>');
+    expect(nav).toContain('<a href="text/chapter_001.xhtml#detail-1">Detail 1</a>');
+    expect(nav).toContain('<a href="text/chapter_001.xhtml#part-b">Part B</a>');
+  });
+
+  it("escapes heading text and does not escape the id in the href", async () => {
+    const nav = await navFor([
+      { title: "Ch", body: "<p>x</p>", toc: [{ level: 2, text: 'A "Q" & <B>', id: "a-q-b" }] },
+    ]);
+    expect(nav).toContain('<a href="text/chapter_001.xhtml#a-q-b">A &quot;Q&quot; &amp; &lt;B&gt;</a>');
+  });
+
+  it("keeps the exact flat chapter li when toc is empty", async () => {
+    const nav = await navFor([{ title: "Plain", body: "<p>x</p>", toc: [] }]);
+    expect(nav).toContain('<li><a href="text/chapter_001.xhtml">Plain</a></li>');
+  });
+
+  it("nests sub-entries inside the chapter's own li, not globally", async () => {
+    const nav = await navFor([
+      { title: "A", body: "<p>x</p>", toc: TOC },
+      { title: "B", body: "<p>y</p>", toc: [] },
+    ]);
+    const toc = nav.match(/<nav epub:type="toc">([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    const firstLi = toc.slice(toc.indexOf("<li>"), toc.indexOf("</li>") + 5);
+    expect(firstLi).toContain("chapter_001.xhtml");
+    expect(firstLi).toContain("<ol>");
+    expect(firstLi).toContain("chapter_001.xhtml#part-a");
+    // The second chapter's flat li sits after the first chapter's li (and its
+    // nested ol) — its entry must not be swallowed into the nested list.
+    expect(toc.indexOf("chapter_002.xhtml")).toBeGreaterThan(toc.indexOf("</li>") + 1);
+  });
+});
+
+describe("TOC nesting mirrors heading hierarchy (004-heading-toc US3)", () => {
+  async function navTocFor(entries: { level: number; text: string; id: string }[]): Promise<string> {
+    const b = new EpubBuilder(META);
+    b.addChapter("Ch", "<p>x</p>", entries);
+    const zip = await JSZip.loadAsync(await b.build());
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    return nav.match(/<nav epub:type="toc">([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  }
+
+  it("groups interleaved H3s under the H2 that precedes them", async () => {
+    const toc = await navTocFor([
+      { level: 2, text: "Part A", id: "part-a" },
+      { level: 3, text: "Detail 1", id: "detail-1" },
+      { level: 3, text: "Detail 2", id: "detail-2" },
+      { level: 2, text: "Part B", id: "part-b" },
+    ]);
+    const partA = toc.slice(toc.indexOf("Part A"), toc.indexOf("Part B"));
+    expect(partA).toContain("Detail 1");
+    expect(partA).toContain("Detail 2");
+    // Detail entries live inside Part A's nested ol — they appear AFTER the
+    // Part A anchor and BEFORE Part B's anchor, in document order.
+    expect(partA.indexOf("Detail 1")).toBeLessThan(partA.indexOf("Detail 2"));
+    expect(partA.indexOf("detail-1")).toBeGreaterThan(partA.indexOf("Part A"));
+  });
+
+  it("skips level gaps without injecting empty levels (H2 then H4)", async () => {
+    const toc = await navTocFor([
+      { level: 2, text: "Part A", id: "part-a" },
+      { level: 4, text: "Deep", id: "deep" },
+      { level: 2, text: "Part B", id: "part-b" },
+    ]);
+    const partA = toc.slice(toc.indexOf("Part A"), toc.indexOf("Part B"));
+    expect(partA).toContain("#deep");
+    expect(partA).toContain("Deep");
+    // No empty intermediate level: nav root <ol> + Part A's <ol> only.
+    expect((toc.match(/<ol>/g) ?? []).length).toBe(3);
+  });
+
+  it("nests three-level H2/H3/H4 chains recursively", async () => {
+    const toc = await navTocFor([
+      { level: 2, text: "A", id: "a" },
+      { level: 3, text: "B", id: "b" },
+      { level: 4, text: "C", id: "c" },
+    ]);
+    expect(toc.indexOf("#a")).toBeLessThan(toc.indexOf("#b"));
+    expect(toc.indexOf("#b")).toBeLessThan(toc.indexOf("#c"));
+    // nav root <ol> + one nested <ol> per parent heading (A and B).
+    expect((toc.match(/<ol>/g) ?? []).length).toBe(4);
+  });
+});

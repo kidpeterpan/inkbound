@@ -14,6 +14,9 @@ export interface EpubExportSettings {
   booxUrl: string;
   pushAfterExport: boolean;
   backlinkPosition: BacklinkPosition;
+  // Deepest heading level included in the nav TOC sub-entries (0 = off,
+  // flat TOC — 004-heading-toc FR-005).
+  tocHeadingDepth: number;
 }
 
 export const DEFAULT_SETTINGS: EpubExportSettings = {
@@ -24,6 +27,7 @@ export const DEFAULT_SETTINGS: EpubExportSettings = {
   booxUrl: "",
   pushAfterExport: false,
   backlinkPosition: "start",
+  tocHeadingDepth: 3,
 };
 
 // Persisted data.json can hold anything (hand-edits, downgrades) — an
@@ -31,6 +35,15 @@ export const DEFAULT_SETTINGS: EpubExportSettings = {
 // the listing (spec FR-006/FR-008).
 export function coerceBacklinkPosition(value: unknown): BacklinkPosition {
   return value === "end" || value === "both" || value === "none" ? value : "start";
+}
+
+// Persisted data.json can hold anything — an out-of-range or non-integer
+// tocHeadingDepth degrades to the default (3), never crashes the settings
+// tab (same rationale as coerceBacklinkPosition).
+export function coerceTocHeadingDepth(value: unknown): number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6
+    ? value
+    : DEFAULT_SETTINGS.tocHeadingDepth;
 }
 
 export function resolveOutputPath(outputFolder: string, slug: string, homedir: string): string {

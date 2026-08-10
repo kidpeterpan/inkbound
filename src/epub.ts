@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { EPUB_CSS } from "./epub-css";
+import type { TocEntry } from "./render";
 import type { ExportMeta } from "./types";
 
 export function escapeXml(s: string): string {
@@ -21,11 +22,59 @@ interface Chapter {
   title: string;
   body: string;
   hasSvg: boolean;
+  toc: TocEntry[];
 }
 interface Asset {
   href: string;
   bytes: Uint8Array;
   mediaType: string;
+}
+
+// ── Heading sub-entries (004-heading-toc) ─────────────────────────────────
+//
+// Each chapter's toc entries (collected in render.ts and stamped as ids on
+// the chapter's heading elements) render as nested <ol> sub-entries inside
+// the chapter's own <li>. Nesting mirrors the document hierarchy: every
+// heading nests under the nearest PRECEDING heading of a shallower level,
+// and level gaps (H2 followed directly by H4) nest without injecting empty
+// levels (FR-003). When toc is empty this returns "" and the chapter <li>
+// stays byte-identical to the pre-feature flat entry (FR-006/FR-010).
+interface TocNode {
+  entry: TocEntry;
+  children: TocNode[];
+}
+
+function buildTocTree(entries: TocEntry[]): TocNode[] {
+  const roots: TocNode[] = [];
+  const stack: TocNode[] = [];
+  for (const entry of entries) {
+    const node: TocNode = { entry, children: [] };
+    while (stack.length > 0 && stack[stack.length - 1].entry.level >= entry.level) stack.pop();
+    if (stack.length > 0) stack[stack.length - 1].children.push(node);
+    else roots.push(node);
+    stack.push(node);
+  }
+  return roots;
+}
+
+function renderTocNodes(nodes: TocNode[], href: string): string {
+  if (nodes.length === 0) return "";
+  const lis = nodes
+    .map((n) => {
+      // children already carries its own <ol> wrapper (or "" when leaf) —
+      // wrapping it again would nest two <ol>s at the same level.
+      const children = renderTocNodes(n.children, href);
+      // Ids are sanitized by render.ts to XML NCName chars — no escaping
+      // needed in the href; the display text gets the same escapeXml the
+      // chapter titles already get (FR-009).
+      return `<li><a href="${href}#${n.entry.id}">${escapeXml(n.entry.text)}</a>${children}</li>`;
+    })
+    .join("\n        ");
+  return `<ol>\n          ${lis}\n        </ol>`;
+}
+
+export function renderTocSubEntries(entries: TocEntry[], href: string): string {
+  return renderTocNodes(buildTocTree(entries), href);
 }
 
 export class EpubBuilder {
@@ -34,7 +83,7 @@ export class EpubBuilder {
 
   constructor(private meta: ExportMeta) {}
 
-  addChapter(title: string, xhtmlBody: string): string {
+  addChapter(title: string, xhtmlBody: string, toc: TocEntry[] = []): string {
     const index = this.chapters.length;
     const href = chapterHref(index);
     // EPUB 3 (OPF-014) requires the manifest item for any XHTML document
@@ -48,6 +97,7 @@ export class EpubBuilder {
       title,
       body: xhtmlBody,
       hasSvg,
+      toc,
     });
     return href;
   }
@@ -139,7 +189,9 @@ export class EpubBuilder {
 
   private nav(): string {
     const lis = this.chapters
-      .map((c) => `<li><a href="${c.href}">${escapeXml(c.title)}</a></li>`)
+      .map(
+        (c) => `<li><a href="${c.href}">${escapeXml(c.title)}</a>${renderTocSubEntries(c.toc, c.href)}</li>`
+      )
       .join("\n        ");
     // Landmarks: the cover page must stay OUT of the TOC (it is not a
     // chapter, FR-005), but a spine document must be reachable from a

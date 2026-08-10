@@ -22,6 +22,7 @@ import Module from "module";
 import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
+import { DEFAULT_SETTINGS } from "../src/settings-core";
 
 // Defaults to the author's vault location without hardcoding a machine-specific
 // absolute path; override with VAULT_ROOT=/path/to/vault.
@@ -295,7 +296,12 @@ async function main(): Promise<void> {
     isDesktopOnly: true,
   };
   const plugin = new PluginClass(app, manifest);
+  // Spread DEFAULT_SETTINGS so a new setting added in settings-core.ts is
+  // picked up here automatically (this harness used to hand-list every
+  // field, silently dropping any setting added after the last edit —
+  // tocHeadingDepth was undefined until it spread the defaults).
   plugin.settings = {
+    ...DEFAULT_SETTINGS,
     outputFolder: OUTPUT_DIR,
     linkDepth: 1,
     language: "th",

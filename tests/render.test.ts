@@ -20,6 +20,7 @@ import {
   rasterizeMermaidDiagrams,
   setSvgRasterizer,
   serializeBody,
+  collectHeadingToc,
 } from "../src/render";
 
 function div(html: string): HTMLElement {
@@ -1332,5 +1333,91 @@ describe("rasterizeMermaidDiagrams", () => {
       expect(r.images).toHaveLength(0);
       expect(r.warnings).toHaveLength(1);
     });
+  });
+});
+
+describe("collectHeadingToc", () => {
+  const HEADED = "<h1>Title</h1><h2>Part A</h2><h3>Detail</h3><h2>Part B</h2>";
+
+  it("collects h2/h3 in document order, skipping a leading h1 (the chapter title)", () => {
+    const root = div(HEADED);
+    const toc = collectHeadingToc(root, 3);
+    expect(toc).toEqual([
+      { level: 2, text: "Part A", id: "part-a" },
+      { level: 3, text: "Detail", id: "detail" },
+      { level: 2, text: "Part B", id: "part-b" },
+    ]);
+  });
+
+  it("stamps the id onto each eligible heading element (anchors nav links into the body)", () => {
+    const root = div(HEADED);
+    collectHeadingToc(root, 3);
+    expect(root.querySelector("h1")!.hasAttribute("id")).toBe(false);
+    const h2s = root.querySelectorAll("h2");
+    expect(h2s[0].id).toBe("part-a");
+    expect(h2s[1].id).toBe("part-b");
+    expect(root.querySelector("h3")!.id).toBe("detail");
+  });
+
+  it("excludes levels above maxDepth and does not stamp them", () => {
+    const root = div(HEADED);
+    const toc = collectHeadingToc(root, 2);
+    expect(toc).toEqual([
+      { level: 2, text: "Part A", id: "part-a" },
+      { level: 2, text: "Part B", id: "part-b" },
+    ]);
+    expect(root.querySelector("h3")!.hasAttribute("id")).toBe(false);
+  });
+
+  it("collects normally when the first heading is not an h1", () => {
+    const root = div("<h2>A</h2><h3>B</h3>");
+    const toc = collectHeadingToc(root, 3);
+    expect(toc).toEqual([
+      { level: 2, text: "A", id: "a" },
+      { level: 3, text: "B", id: "b" },
+    ]);
+  });
+
+  it("skips empty or whitespace-only heading text", () => {
+    const root = div("<h2></h2><h2>   </h2><h2>Real</h2>");
+    const toc = collectHeadingToc(root, 3);
+    expect(toc).toEqual([{ level: 2, text: "Real", id: "real" }]);
+  });
+
+  it("maxDepth 0 collects nothing and stamps nothing (depth-0 identity)", () => {
+    const root = div(HEADED);
+    const toc = collectHeadingToc(root, 0);
+    expect(toc).toEqual([]);
+    root.querySelectorAll("h1,h2,h3").forEach((h) => expect(h.hasAttribute("id")).toBe(false));
+  });
+});
+
+describe("collectHeadingToc validity hardening (004-heading-toc US4)", () => {
+  it("dedupes duplicate heading text with -2, -3 suffixes in document order", () => {
+    const root = div("<h2>Usage</h2><p>x</p><h2>Usage</h2><p>y</p><h2>Usage</h2>");
+    const toc = collectHeadingToc(root, 3);
+    expect(toc.map((t) => t.id)).toEqual(["usage", "usage-2", "usage-3"]);
+    expect(toc.map((t) => t.text)).toEqual(["Usage", "Usage", "Usage"]);
+  });
+
+  it("prefixes h- when the sanitized id would start with an illegal character", () => {
+    const root = div("<h2>123 ABC</h2><h2>-dash</h2>");
+    const toc = collectHeadingToc(root, 3);
+    expect(toc.map((t) => t.id)).toEqual(["h-123-abc", "dash"]);
+  });
+
+  it("keeps Unicode (Thai) heading text as a valid id", () => {
+    const root = div("<h2>บทที่ 1</h2><h2>สรุป</h2>");
+    const toc = collectHeadingToc(root, 3);
+    expect(toc.map((t) => t.id)).toEqual(["บทที่-1", "สรุป"]);
+    // Stamped ids round-trip through serialization.
+    expect(serializeBody(root)).toContain('id="บทที่-1"');
+  });
+
+  it("strips ASCII punctuation from ids but keeps the display text intact", () => {
+    const root = div('<h2>What? "Really" &amp; Such!</h2>');
+    const toc = collectHeadingToc(root, 3);
+    expect(toc[0].id).toBe("what-really-such");
+    expect(toc[0].text).toBe('What? "Really" & Such!');
   });
 });

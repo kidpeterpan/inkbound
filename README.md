@@ -24,6 +24,12 @@ on your e-reader's library shelf, and the book opens on a full-page cover
 before the first chapter. No `cover:`? The first image of the note becomes
 the cover automatically.
 
+**The table of contents navigates to the section.** Every chapter's headings
+appear as sub-entries in the book's TOC, so on an e-ink reader you can jump
+straight to a section instead of scrolling a long chapter. The setting
+**TOC heading depth** (default level 3) controls how deep the sub-entries go;
+set it to _Off_ for the plain chapter-only TOC.
+
 ## From note to e-reader
 
 A book's index note in Obsidian, with its chapters as linked notes:
@@ -98,6 +104,7 @@ Found under **Settings → Community plugins → Inkbound**:
 | Output folder             | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                                                        |
 | Default link depth        | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
 | Backlink listing position | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
+| TOC heading depth         | `3` (Level 3)                | Deepest heading level listed under each chapter in the book's table of contents (0–6, via a dropdown). `Off` restores the flat chapter-only TOC.                                                                              |
 | Language (`dc:language`)  | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                                                                |
 | Fallback author           | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                                                              |
 | Device URL                | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                                                            |
@@ -157,6 +164,11 @@ name becomes the title and every note is treated as a chapter.
 
 Chapter titles come from filenames, so `03_recursion` appears in the table of
 contents as written. Rename the files if you want prettier chapter names.
+
+The table of contents also lists each chapter's own headings underneath it —
+the `##` and `###` sections inside a long chapter — as links that jump
+straight to that section when tapped. Use the **TOC heading depth** setting
+to include deeper levels, or turn it off for the plain chapter list.
 
 ## Frontmatter fields
 

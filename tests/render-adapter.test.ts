@@ -1055,3 +1055,58 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).toContain("Level 3");
   });
 });
+
+describe("renderUnitToChapter heading TOC (004-heading-toc)", () => {
+  const HEADED = "# Title\n\n## Part A\n\n### Detail\n\n## Part B\n";
+
+  it("returns toc entries and stamps matching ids into the serialized body", async () => {
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      HEADED,
+      "note.md",
+      new Map(),
+      "/vault",
+      0,
+      3
+    );
+    expect(r.toc).toEqual([
+      { level: 2, text: "Part A", id: "part-a" },
+      { level: 3, text: "Detail", id: "detail" },
+      { level: 2, text: "Part B", id: "part-b" },
+    ]);
+    expect(r.xhtmlBody).toContain('<h2 id="part-a">Part A</h2>');
+    expect(r.xhtmlBody).toContain('<h3 id="detail">Detail</h3>');
+    expect(r.xhtmlBody).toContain('<h2 id="part-b">Part B</h2>');
+  });
+
+  it("tocDepth 0 returns an empty toc and a body with no id stamps (depth-0 identity)", async () => {
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      HEADED,
+      "note.md",
+      new Map(),
+      "/vault",
+      0,
+      0
+    );
+    expect(r.toc).toEqual([]);
+    expect(r.xhtmlBody).not.toContain('id="');
+    expect(r.xhtmlBody).toContain("<h2>Part A</h2>");
+  });
+
+  it("omitting tocDepth behaves like 0 (default off)", async () => {
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      HEADED,
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.toc).toEqual([]);
+    expect(r.xhtmlBody).not.toContain('id="');
+  });
+});
