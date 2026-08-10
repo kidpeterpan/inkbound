@@ -3,6 +3,26 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.4.0
+
+The table of contents now reaches inside chapters, so long notes are
+navigable on an e-ink reader without scrolling.
+
+- **Heading sub-entries** — every chapter's headings appear as nested links
+  under its title in the EPUB's TOC (`nav.xhtml`), mirroring the document's
+  heading hierarchy. Tapping one jumps straight to that section in the
+  chapter.
+- **`TOC heading depth` setting** — a dropdown (default level 3) controls how
+  deep the sub-entries go, from level 1 through level 6; `Off` restores the
+  plain chapter-only TOC byte-for-byte.
+- **First-heading rules** — a chapter's leading `#` heading is its title and
+  is not duplicated as a sub-entry; duplicate heading texts get unique
+  anchors (`-2`, `-3`), and heading text with quotes, ampersands, or Thai
+  characters displays correctly with valid, resolvable anchors.
+- Sub-entries link to anchors stamped into the chapter documents, keeping
+  every book epubcheck-clean under EPUB 3.3 rules (verified with epubcheck
+  5.3.0), including on books with duplicate or exotic heading text.
+
 ## 1.3.0
 
 Books can now carry cover art, and they show it off properly on an e-reader.
