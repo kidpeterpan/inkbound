@@ -23,6 +23,20 @@ properly on e-ink.
   enforced by tests; the epubcheck sample now includes real MathJax SVG
   chapters.
 
+Thai books now carry their own font, so Thai renders consistently on e-ink
+regardless of the device's font coverage.
+
+- **Noto Sans Thai embedded automatically** — books whose chapters contain
+  Thai get Regular + Bold (static instances, SIL OFL 1.1) written into the
+  EPUB with `@font-face` rules and a `font-family` chain that keeps Latin in
+  the reader's default font. The OFL license ships inside the book.
+- **`Embed Thai font` setting** (default ON) — OFF keeps every book
+  fontless; books without Thai are structurally identical to pre-feature
+  exports.
+- Fonts are bundled in the plugin (offline); a broken bundle degrades to a
+  valid fontless book with a warning, never a failed export. epubcheck
+  validates the font-bearing sample every CI run.
+
 ## 1.4.0
 
 The table of contents now reaches inside chapters, so long notes are

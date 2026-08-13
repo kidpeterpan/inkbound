@@ -47,6 +47,15 @@ b.addChapter(
   `<p>inline: ${inlineMath.svg} in prose</p><p class="math-block">${displayMath.svg}</p>` +
     `<p>broken: ${errorMath.svg}</p>`
 );
+// Thai font (006-thai-font): fixture bytes (the real TTFs are esbuild-binary
+// inlined; this sample only needs non-empty font/ttf assets so epubcheck
+// validates the manifest media types, @font-face rules, and the OFL
+// text/plain asset the pipeline ships).
+b.setThaiFont({
+  regular: new Uint8Array([0x00, 0x01, 0x02]),
+  bold: new Uint8Array([0x00, 0x01, 0x02]),
+  license: "SIL OPEN FONT LICENSE Version 1.1 — fixture",
+});
 b.build().then((bytes) => {
   writeFileSync("sample.epub", bytes);
   console.log("wrote sample.epub", bytes.length, "bytes");

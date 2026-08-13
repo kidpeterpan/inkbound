@@ -97,11 +97,33 @@ this writing:
   and verified to pass through the marked stub; a live-Obsidian export should
   confirm the real renderer preserves them (the pipeline's missing-placeholder
   guard degrades gracefully with a warning if it ever doesn't).
+- Thai font rendering on the actual Boox (006-thai-font): the embedded Noto
+  Sans Thai is valid per epubcheck and NeoReader is documented to support
+  `@font-face` embedded fonts, but the compound-vowel rendering has not been
+  eye-checked on the device yet.
 
 Treat exports that exercise any of the above with extra scrutiny until they
 have been checked by hand. (The user-facing subset of this list — the parts
 that affect whether an export will look right on a device — is summarized in
 the README's "Known limitations" section.)
+
+## Bundled fonts (.ttf loader trio)
+
+`src/fonts/NotoSansThai-{Regular,Bold}.ttf` are static wght 400/700 instances
+instantiated from the official Noto Sans Thai variable font (google/fonts
+`ofl/notosansthai/NotoSansThai[wdth,wght].ttf`) via
+`fontTools.varLib.instancer.instantiateVariableFont(f, {"wght": w, "wdth": 100})`.
+The trio that keeps them working in all three environments:
+
+1. `esbuild.config.mjs` + `scripts/local-export.ts` set `loader: { ".ttf": "binary" }`
+   → the bytes are inlined as base64 `Uint8Array` default exports.
+2. `src/fonts/fonts.d.ts` declares `module "*.ttf"` for `tsc`.
+3. `vitest.config.ts` aliases the exact `.ttf` paths to
+   `tests/fixtures/font-bytes.ts` (vitest has no binary loader).
+
+The binary imports live ONLY in `src/font-assets.ts` (plus the injectable
+`setThaiFontLoader` seam), so pure modules and tsx-run scripts
+(`build-sample.ts`) never have to load a `.ttf`.
 
 ## The CLI harness
 
@@ -129,7 +151,7 @@ repeatedly, before a manual device test.
 `src/` splits into two kinds of modules:
 
 - **Pure modules** — `metadata.ts`, `collect.ts`, `naming.ts`, `epub.ts`,
-  `epub-css.ts`, `media-types.ts`, `settings-core.ts`, `math.ts` — have zero imports of
+  `epub-css.ts`, `media-types.ts`, `settings-core.ts`, `math.ts`, `fonts.ts` — have zero imports of
   the `obsidian` package, so vitest loads and unit-tests them directly.
 - **Obsidian adapters** — `main.ts`, `settings.ts`, `render-adapter.ts`,
   `http.ts` — import `obsidian` for its types and runtime globals (`Plugin`,

@@ -11,6 +11,7 @@ import {
   DEFAULT_SETTINGS,
   coerceBacklinkPosition,
   coerceTocHeadingDepth,
+  coerceEmbedThaiFont,
 } from "../src/settings-core";
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
@@ -76,6 +77,7 @@ describe("DEFAULT_SETTINGS", () => {
       pushAfterExport: false,
       backlinkPosition: "start",
       tocHeadingDepth: 3,
+      embedThaiFont: true,
     });
   });
 });
@@ -135,13 +137,14 @@ describe("EpubExportSettingTab", () => {
     resetRequestUrlImpl();
   });
 
-  it("case 1: renders a setting for each of the eight fields plus the BooxDrop heading and Test-connection button", () => {
+  it("case 1: renders a setting for each of the nine fields plus the BooxDrop heading and Test-connection button", () => {
     makeTab();
     expect(SETTINGS.map((s) => s.nameEl.textContent)).toEqual([
       "Output folder",
       "Default link depth",
       "Backlink listing position",
       "TOC heading depth",
+      "Embed Thai font",
       "Language (dc:language)",
       "Fallback author",
       "BooxDrop",
@@ -278,6 +281,7 @@ describe("EpubExportSettingTab", () => {
       "Default link depth",
       "Backlink listing position",
       "TOC heading depth",
+      "Embed Thai font",
       "Language (dc:language)",
       "Fallback author",
       "Device URL",
@@ -409,5 +413,22 @@ describe("tocHeadingDepth (004-heading-toc)", () => {
     expect(coerceTocHeadingDepth("2" as unknown as number)).toBe(3);
     expect(coerceTocHeadingDepth(null as unknown as number)).toBe(3);
     expect(coerceTocHeadingDepth(undefined as unknown as number)).toBe(3);
+  });
+});
+
+describe("embedThaiFont (006-thai-font FR-009)", () => {
+  it("defaults to true", () => {
+    expect(DEFAULT_SETTINGS.embedThaiFont).toBe(true);
+  });
+
+  it("coerce: booleans pass through", () => {
+    expect(coerceEmbedThaiFont(true)).toBe(true);
+    expect(coerceEmbedThaiFont(false)).toBe(false);
+  });
+
+  it("coerce: non-boolean persisted values degrade to the default true", () => {
+    expect(coerceEmbedThaiFont(undefined)).toBe(true);
+    expect(coerceEmbedThaiFont("yes" as unknown as boolean)).toBe(true);
+    expect(coerceEmbedThaiFont(1 as unknown as boolean)).toBe(true);
   });
 });

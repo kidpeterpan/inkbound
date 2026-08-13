@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/render-adapter";
+import { setThaiFontLoader } from "../src/font-assets";
 import { EpubBuilder } from "../src/epub";
 import {
   TFile,
@@ -67,6 +68,7 @@ afterEach(async () => {
   console.error = originalError;
   resetRequestUrlImpl();
   setSvgRasterizer(null); // module state discipline, same reason as resetRequestUrlImpl above
+  setThaiFontLoader(null); // same discipline (006-thai-font FR-008 seam)
   await fs.rm(outDir, { recursive: true, force: true });
   await Promise.all(vaultDirs.map((d) => fs.rm(d, { recursive: true, force: true })));
 });
@@ -119,6 +121,7 @@ function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): E
     pushAfterExport: false,
     backlinkPosition: "start",
     tocHeadingDepth: 3,
+    embedThaiFont: true,
     ...settings,
   };
   return plugin;
@@ -295,6 +298,70 @@ describe("exportSingle", () => {
     // into the EPUB — an implementation emitting perfect metadata over an
     // empty chapter would still pass every assertion above.
     expect(await epub.chapter(1)).toContain("Writing clean code matters.");
+  });
+
+  it("embeds the Thai font in a book whose chapter contains Thai (006-thai-font)", async () => {
+    const { app, root } = await buildVault({
+      "thai_note.md": "# บันทึก\n\nภาษาไทยอ่านง่ายขึ้นบน e-ink\n",
+    });
+    const plugin = makePlugin(app); // embedThaiFont defaults ON
+
+    await plugin.exportSingle(tfile(root, "thai_note.md"));
+
+    const epub = await readEpub("thai_note.epub");
+    expect(epub.names).toContain("OEBPS/fonts/NotoSansThai-Regular.ttf");
+    expect(epub.names).toContain("OEBPS/fonts/NotoSansThai-Bold.ttf");
+    expect(epub.names).toContain("OEBPS/fonts/OFL.txt");
+    expect(epub.opf).toContain('id="font-regular"');
+    expect(epub.opf).toContain('media-type="font/ttf"');
+    const css = await epub.zip.file("OEBPS/style/epub.css")!.async("string");
+    expect(css).toContain("@font-face");
+    expect(css).toContain('font-family: "Noto Sans Thai"');
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("keeps an English-only book fontless (006-thai-font FR-003)", async () => {
+    const { app, root } = await buildVault({
+      "eng_note.md": "# English\n\nNo Thai here.\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "eng_note.md"));
+
+    const epub = await readEpub("eng_note.epub");
+    expect(epub.names.some((n) => n.includes("fonts/"))).toBe(false);
+    expect(epub.opf).not.toContain("font/ttf");
+    const css = await epub.zip.file("OEBPS/style/epub.css")!.async("string");
+    expect(css).not.toContain("@font-face");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("keeps a Thai book fontless when the Embed Thai font setting is OFF (FR-009)", async () => {
+    const { app, root } = await buildVault({
+      "thai_note.md": "ภาษาไทย\n",
+    });
+    const plugin = makePlugin(app, { embedThaiFont: false });
+
+    await plugin.exportSingle(tfile(root, "thai_note.md"));
+
+    const epub = await readEpub("thai_note.epub");
+    expect(epub.names.some((n) => n.includes("fonts/"))).toBe(false);
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("degrades to a valid fontless book with a warning when the font asset is unavailable (FR-008)", async () => {
+    const { app, root } = await buildVault({
+      "thai_note.md": "ภาษาไทย\n",
+    });
+    const plugin = makePlugin(app);
+    setThaiFontLoader(() => null);
+
+    await plugin.exportSingle(tfile(root, "thai_note.md"));
+
+    const epub = await readEpub("thai_note.epub");
+    expect(epub.names.some((n) => n.includes("fonts/"))).toBe(false);
+    expect(warnings.some((w) => w.includes("Thai font"))).toBe(true);
+    expect(await epub.chapter(1)).toContain("ภาษาไทย");
   });
 
   it("case 2: falls back to fallbackAuthor/settings language/basename when frontmatter is absent", async () => {
@@ -1083,6 +1150,7 @@ describe("settings persistence", () => {
       pushAfterExport: false,
       backlinkPosition: "start",
       tocHeadingDepth: 3,
+      embedThaiFont: true,
     });
 
     plugin.settings.outputFolder = outDir;
@@ -1098,6 +1166,7 @@ describe("settings persistence", () => {
       pushAfterExport: true,
       backlinkPosition: "start",
       tocHeadingDepth: 3,
+      embedThaiFont: true,
     });
   });
 
@@ -1121,6 +1190,7 @@ describe("settings persistence", () => {
       pushAfterExport: false,
       backlinkPosition: "start",
       tocHeadingDepth: 3,
+      embedThaiFont: true,
     });
   });
 });

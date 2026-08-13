@@ -278,3 +278,60 @@ describe("TOC nesting mirrors heading hierarchy (004-heading-toc US3)", () => {
     expect((toc.match(/<ol>/g) ?? []).length).toBe(4);
   });
 });
+
+// ── 006-thai-font ─────────────────────────────────────────────────────────
+
+const THAI_FONT = {
+  regular: new Uint8Array([0x52, 0x45, 0x47]), // "REG" stand-in bytes
+  bold: new Uint8Array([0x42, 0x4f, 0x4c]), // "BOL" stand-in bytes
+  license: "SIL OPEN FONT LICENSE Version 1.1",
+};
+
+describe("EpubBuilder Thai font embedding", () => {
+  it("writes font files, license, manifest entries, and @font-face rules when setThaiFont is called", async () => {
+    const b = new EpubBuilder(META);
+    b.addChapter("บท", "<p>สวัสดี</p>");
+    b.setThaiFont(THAI_FONT);
+    const zip = await JSZip.loadAsync(await b.build());
+
+    expect(zip.file("OEBPS/fonts/NotoSansThai-Regular.ttf")).toBeTruthy();
+    expect(zip.file("OEBPS/fonts/NotoSansThai-Bold.ttf")).toBeTruthy();
+    expect(zip.file("OEBPS/fonts/OFL.txt")).toBeTruthy();
+
+    const bytes = await zip.file("OEBPS/fonts/NotoSansThai-Regular.ttf")!.async("uint8array");
+    expect(bytes).toEqual(THAI_FONT.regular);
+
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    expect(opf).toContain('id="font-regular"');
+    expect(opf).toContain('media-type="font/ttf"');
+    expect(opf).toContain('id="font-license"');
+    expect(opf).toContain('media-type="text/plain"');
+
+    const css = await zip.file("OEBPS/style/epub.css")!.async("string");
+    expect((css.match(/@font-face/g) ?? []).length).toBe(2);
+    expect(css).toContain('font-family: "Noto Sans Thai"');
+    expect(css).toContain('body { font-family: "Noto Sans Thai", serif; }');
+    // Base stylesheet is preserved, not replaced.
+    expect(css).toContain("line-height: 1.7");
+  });
+
+  it("keeps the pre-feature structure when setThaiFont is never called", async () => {
+    const zip = await JSZip.loadAsync(await buildSample());
+    const names = Object.keys(zip.files);
+    expect(names.some((n) => n.includes("fonts/"))).toBe(false);
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    expect(opf).not.toContain("font/ttf");
+    expect(opf).not.toContain("font-license");
+    const css = await zip.file("OEBPS/style/epub.css")!.async("string");
+    expect(css).not.toContain("@font-face");
+  });
+
+  it("ships the OFL license text inside the book", async () => {
+    const b = new EpubBuilder(META);
+    b.addChapter("บท", "<p>สวัสดี</p>");
+    b.setThaiFont(THAI_FONT);
+    const zip = await JSZip.loadAsync(await b.build());
+    const ofl = await zip.file("OEBPS/fonts/OFL.txt")!.async("string");
+    expect(ofl).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  });
+});

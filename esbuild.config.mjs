@@ -29,6 +29,9 @@ const buildOptions = {
   // inside the shipped plugin). Defining PACKAGE_VERSION makes it take the
   // static branch instead. Keep in sync with package.json's mathjax-full.
   define: { PACKAGE_VERSION: JSON.stringify("3.2.1") },
+  // 006-thai-font: inline the bundled TTFs as Uint8Array default exports
+  // (base64 inside main.js) so the plugin ships its fonts offline.
+  loader: { ".ttf": "binary" },
   sourcemap: prod ? false : "inline",
   logLevel: "info",
 };

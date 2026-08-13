@@ -20,6 +20,8 @@ import {
 import type { ExportMeta } from "./types";
 import { resolveMeta, MetaDefaults } from "./metadata";
 import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "./cover";
+import { containsThai } from "./fonts";
+import { getThaiFontLoader } from "./font-assets";
 
 interface Job {
   meta: ExportMeta;
@@ -299,6 +301,11 @@ export default class EpubExportPlugin extends Plugin {
       // missing/failed image would let a later chapter reissue an href
       // that's already sitting in an earlier chapter's HTML.
       let imageCount = 0;
+      // 006-thai-font FR-001: Thai anywhere in any chapter body (including
+      // linked/embedded content, which flows through xhtmlBody) marks the
+      // book for font embedding — decided AFTER the loop, when the setting
+      // is consulted, so detection alone never changes output.
+      let hasThai = false;
 
       for (const file of job.files) {
         try {
@@ -314,6 +321,7 @@ export default class EpubExportPlugin extends Plugin {
             this.settings.tocHeadingDepth
           );
           warnings.push(...r.warnings);
+          hasThai = hasThai || containsThai(r.xhtmlBody);
           // Bump immediately, before the asset loop below: these numbers are
           // already burned into r.xhtmlBody regardless of what happens next.
           imageCount += r.images.length;
@@ -373,6 +381,22 @@ export default class EpubExportPlugin extends Plugin {
             this.titleFor(file),
             withBacklinks(file, `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`)
           );
+        }
+      }
+
+      // 006-thai-font FR-002/FR-008/FR-009: embed only when the setting is
+      // ON and Thai was detected; an unusable font asset degrades to a valid
+      // fontless book with a warning — never a failure (constitution II).
+      if (this.settings.embedThaiFont && hasThai) {
+        try {
+          const asset = getThaiFontLoader()();
+          if (asset) {
+            builder.setThaiFont(asset);
+          } else {
+            warnings.push("Thai font unavailable — exporting without embedded font");
+          }
+        } catch (e) {
+          warnings.push(`Thai font embedding skipped: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 

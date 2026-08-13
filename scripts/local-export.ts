@@ -95,6 +95,9 @@ async function buildBundle(): Promise<void> {
     // walks out of the repo and crashes. Static define — keep in sync with
     // package.json's mathjax-full (same trick as esbuild.config.mjs).
     define: { PACKAGE_VERSION: JSON.stringify("3.2.1") },
+    // 006-thai-font: same binary loader as the production build, so the
+    // harness exports real font bytes too (and catches bundling breaks).
+    loader: { ".ttf": "binary" },
     logLevel: "warning",
   });
 }

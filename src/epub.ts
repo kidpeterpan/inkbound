@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { EPUB_CSS } from "./epub-css";
+import { thaiFontCss, THAI_FONT_META, OFL_LICENSE_HREF, type ThaiFontAsset } from "./fonts";
 import type { TocEntry } from "./render";
 import type { ExportMeta } from "./types";
 
@@ -80,8 +81,16 @@ export function renderTocSubEntries(entries: TocEntry[], href: string): string {
 export class EpubBuilder {
   private chapters: Chapter[] = [];
   private assets: Asset[] = [];
+  // 006-thai-font: set only when the exporter detected Thai AND the setting
+  // is ON. Absent = this feature's code paths are all no-ops and the built
+  // book keeps today's exact structure (FR-003/SC-002).
+  private thaiFont: ThaiFontAsset | null = null;
 
   constructor(private meta: ExportMeta) {}
+
+  setThaiFont(asset: ThaiFontAsset): void {
+    this.thaiFont = asset;
+  }
 
   addChapter(title: string, xhtmlBody: string, toc: TocEntry[] = []): string {
     const index = this.chapters.length;
@@ -116,7 +125,16 @@ export class EpubBuilder {
     }
     zip.file("OEBPS/package.opf", this.opf());
     zip.file("OEBPS/nav.xhtml", this.nav());
-    zip.file("OEBPS/style/epub.css", EPUB_CSS);
+    // 006-thai-font: the stylesheet only gains @font-face + body chain when
+    // the font is actually embedded — non-Thai books stay byte-stable.
+    zip.file("OEBPS/style/epub.css", this.thaiFont ? `${EPUB_CSS}\n${thaiFontCss()}` : EPUB_CSS);
+    if (this.thaiFont) {
+      // Font binaries + the OFL license that must travel with them (FR-005).
+      for (const f of THAI_FONT_META) {
+        zip.file(`OEBPS/${f.href}`, f.weight === 400 ? this.thaiFont.regular : this.thaiFont.bold);
+      }
+      zip.file(`OEBPS/${OFL_LICENSE_HREF}`, this.thaiFont.license);
+    }
     // Cover page: a real first spine document (not a chapter) so readers
     // open onto the artwork. Only when cover art exists — coverless books
     // keep today's exact structure (FR-004).
@@ -159,6 +177,15 @@ export class EpubBuilder {
       )
       .concat(
         this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`)
+      )
+      // 006-thai-font: stable manifest ids (font-regular/font-bold/
+      // font-license), only present when the font was embedded.
+      .concat(
+        this.thaiFont
+          ? THAI_FONT_META.map(
+              (f) => `<item id="${f.manifestId}" href="${f.href}" media-type="${f.mediaType}"/>`
+            ).concat([`<item id="font-license" href="${OFL_LICENSE_HREF}" media-type="text/plain"/>`])
+          : []
       )
       .join("\n    ");
     const spine = (hasCover ? [`<itemref idref="cover-page"/>`] : [])

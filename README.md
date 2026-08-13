@@ -39,6 +39,14 @@ that cannot render (broken LaTeX, or non-Latin text such as Thai inside the
 delimiters) degrade to a readable fallback with an export warning instead of
 failing the book — write prose outside the delimiters for Thai text.
 
+**Thai books carry their own font.** Any book whose chapters contain Thai
+gets **Noto Sans Thai** (Regular + Bold, SIL OFL 1.1) embedded automatically,
+so Thai renders consistently on e-ink readers even when the device has no
+Thai font of its own — correct compound vowels included. The license text
+ships inside the book; Latin text keeps the reader's normal reading font.
+Books without Thai stay fontless and byte-stable, and the **Embed Thai font**
+setting turns the whole behavior off if you ever want it.
+
 ## From note to e-reader
 
 A book's index note in Obsidian, with its chapters as linked notes:
@@ -114,6 +122,7 @@ Found under **Settings → Community plugins → Inkbound**:
 | Default link depth        | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
 | Backlink listing position | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
 | TOC heading depth         | `3` (Level 3)                | Deepest heading level listed under each chapter in the book's table of contents (0–6, via a dropdown). `Off` restores the flat chapter-only TOC.                                                                              |
+| Embed Thai font           | `true`                       | When ON, books whose chapters contain Thai text get Noto Sans Thai embedded (Regular + Bold, with its OFL license file inside the book). OFF keeps every book fontless.                                                       |
 | Language (`dc:language`)  | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                                                                |
 | Fallback author           | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                                                              |
 | Device URL                | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                                                            |

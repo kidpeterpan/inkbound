@@ -18,6 +18,15 @@ export default defineConfig({
       // instead of the real (dead-weight) polyfills.
       immediate: fileURLToPath(new URL("./shims/immediate.cjs", import.meta.url)),
       setimmediate: fileURLToPath(new URL("./shims/setimmediate.cjs", import.meta.url)),
+      // 006-thai-font: vitest treats .ttf imports as URL assets, not bytes —
+      // the production bundles (esbuild.config.mjs + local-export harness)
+      // inline the real binaries via the "binary" loader. Alias the exact
+      // import paths to a fixture so unit tests exercise the same module
+      // shape with tiny dummy bytes (mirrors the obsidian-alias discipline).
+      [fileURLToPath(new URL("./src/fonts/NotoSansThai-Regular.ttf", import.meta.url))]:
+        fileURLToPath(new URL("./tests/fixtures/font-bytes.ts", import.meta.url)),
+      [fileURLToPath(new URL("./src/fonts/NotoSansThai-Bold.ttf", import.meta.url))]:
+        fileURLToPath(new URL("./tests/fixtures/font-bytes.ts", import.meta.url)),
     },
   },
   test: {

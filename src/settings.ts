@@ -4,7 +4,7 @@ import type EpubExportPlugin from "./main";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 
-import { coerceBacklinkPosition, coerceTocHeadingDepth } from "./settings-core";
+import { coerceBacklinkPosition, coerceTocHeadingDepth, coerceEmbedThaiFont } from "./settings-core";
 
 export type { BacklinkPosition, EpubExportSettings } from "./settings-core";
 export {
@@ -91,6 +91,11 @@ export class EpubExportSettingTab extends PluginSettingTab {
         name: "TOC heading depth",
         desc: "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC.",
         control: { type: "dropdown", key: "tocHeadingDepth", options: TOC_DEPTH_OPTIONS },
+      },
+      {
+        name: "Embed Thai font",
+        desc: "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present.",
+        control: { type: "toggle", key: "embedThaiFont" },
       },
       {
         name: "Language (dc:language)",
@@ -186,6 +191,20 @@ export class EpubExportSettingTab extends PluginSettingTab {
             s.tocHeadingDepth = coerceTocHeadingDepth(Number(v));
             void save();
           })
+      );
+
+    // 006-thai-font FR-009: default ON — books containing Thai get Noto
+    // Sans Thai (SIL OFL 1.1) embedded so e-ink renders it consistently.
+    new Setting(containerEl)
+      .setName("Embed Thai font")
+      .setDesc(
+        "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present."
+      )
+      .addToggle((t) =>
+        t.setValue(s.embedThaiFont).onChange((v) => {
+          s.embedThaiFont = coerceEmbedThaiFont(v);
+          void save();
+        })
       );
 
     new Setting(containerEl).setName("Language (dc:language)").addText((t) =>

@@ -17,6 +17,9 @@ export interface EpubExportSettings {
   // Deepest heading level included in the nav TOC sub-entries (0 = off,
   // flat TOC — 004-heading-toc FR-005).
   tocHeadingDepth: number;
+  // 006-thai-font FR-009: when ON (default), books whose chapters contain
+  // Thai text get Noto Sans Thai embedded; OFF never embeds.
+  embedThaiFont: boolean;
 }
 
 export const DEFAULT_SETTINGS: EpubExportSettings = {
@@ -28,6 +31,7 @@ export const DEFAULT_SETTINGS: EpubExportSettings = {
   pushAfterExport: false,
   backlinkPosition: "start",
   tocHeadingDepth: 3,
+  embedThaiFont: true,
 };
 
 // Persisted data.json can hold anything (hand-edits, downgrades) — an
@@ -44,6 +48,12 @@ export function coerceTocHeadingDepth(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 6
     ? value
     : DEFAULT_SETTINGS.tocHeadingDepth;
+}
+
+// 006-thai-font: booleans pass through; anything else (hand-edited data.json,
+// older plugin versions) degrades to the default ON.
+export function coerceEmbedThaiFont(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.embedThaiFont;
 }
 
 export function resolveOutputPath(outputFolder: string, slug: string, homedir: string): string {
