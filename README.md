@@ -30,6 +30,15 @@ straight to a section instead of scrolling a long chapter. The setting
 **TOC heading depth** (default level 3) controls how deep the sub-entries go;
 set it to _Off_ for the plain chapter-only TOC.
 
+**Math typesets as pictures.** Inline `$...$` and display `$$...$$` LaTeX in
+your notes renders at export time (MathJax) and embeds as plain images — the
+same strategy as Mermaid — so it displays identically on every reader,
+including e-ink devices that cannot draw inline SVG. Display math sits
+centered on its own line; inline math rides the text baseline. Expressions
+that cannot render (broken LaTeX, or non-Latin text such as Thai inside the
+delimiters) degrade to a readable fallback with an export warning instead of
+failing the book — write prose outside the delimiters for Thai text.
+
 ## From note to e-reader
 
 A book's index note in Obsidian, with its chapters as linked notes:
@@ -219,10 +228,11 @@ export — it just stays in your output folder.
   writes the `.epub` file directly to a folder on disk (the one you choose
   in Settings) and reads note images through your vault — both of which
   need filesystem access that mobile does not offer.
-- **Display math (`$$` blocks)** has not been verified against a real
-  Obsidian render or a real device yet. It may work, but treat exports
-  containing it with a bit of extra scrutiny until you've checked the result
-  by eye.
+- **Math typesets as images.** Expressions are rendered at export time and
+  embedded as pictures (like Mermaid diagrams), which means they are no
+  longer selectable or searchable text inside the EPUB. Math containing
+  non-Latin text (e.g. Thai inside `$...$`) cannot be rendered — it stays
+  as readable source text with a warning.
 - **Individual table rows cannot be embedded.** Block-scoped embeds
   (`![[Note^block]]`) now work for every kind of block Obsidian lets you
   label — paragraphs, headings, tables, code blocks, callouts and

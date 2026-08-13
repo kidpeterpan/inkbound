@@ -1,5 +1,6 @@
 import { writeFileSync } from "fs";
 import { EpubBuilder } from "../src/epub";
+import { renderMathToSvg } from "../src/math";
 
 // A real 1×1 transparent PNG (base64) so the sample's cover page and
 // manifest cover get validated against the EPUB 3.3 spec by epubcheck.
@@ -34,6 +35,18 @@ b.addChapter("Headings", '<h2 id="usage">Usage</h2><p>x</p><h2 id="usage-2">Usag
   { level: 2, text: "Usage", id: "usage" },
   { level: 2, text: "Usage", id: "usage-2" },
 ]);
+// Math (005-latex-math): real MathJax-rendered SVGs, exactly the shape the
+// pipeline's inline-SVG fallback ships — validates properties="svg" and the
+// MathJax markup against epubcheck. The merror expression (invalid command)
+// exercises the red error-rendering path too.
+const inlineMath = renderMathToSvg("E = mc^2", false);
+const displayMath = renderMathToSvg("\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}", true);
+const errorMath = renderMathToSvg("\\invalidcommand", false);
+b.addChapter(
+  "Math",
+  `<p>inline: ${inlineMath.svg} in prose</p><p class="math-block">${displayMath.svg}</p>` +
+    `<p>broken: ${errorMath.svg}</p>`
+);
 b.build().then((bytes) => {
   writeFileSync("sample.epub", bytes);
   console.log("wrote sample.epub", bytes.length, "bytes");

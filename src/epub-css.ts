@@ -21,5 +21,10 @@ th, td { border: 1px solid #888; padding: 0.25em 0.5em; }
    fills the page, centered, with no surrounding chrome. */
 .cover-page { margin: 0; text-align: center; }
 .cover-page img { max-width: 100%; max-height: 100%; }
+/* Math (005-latex-math): display math is a centered block on its own line;
+   inline math rides the text baseline via the vertical-align style the
+   rasterizer copies from the MathJax SVG (see renderMath in math.ts). */
+.math-block { text-align: center; margin: 1em 0; }
+.math-block img { max-width: 100%; height: auto; }
 /* ── PAN (Task 11): tune the reading experience for your Boox below ── */
 `;

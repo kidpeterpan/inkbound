@@ -23,6 +23,12 @@ const buildOptions = {
   platform: "node",
   external: ["obsidian", "electron"],
   alias,
+  // mathjax-full's version.js does `eval('require')` + __dirname to read its
+  // own package.json — a bundler-proofing trick that resolves against the
+  // bundle's location instead of the package's (and has no `require` at all
+  // inside the shipped plugin). Defining PACKAGE_VERSION makes it take the
+  // static branch instead. Keep in sync with package.json's mathjax-full.
+  define: { PACKAGE_VERSION: JSON.stringify("3.2.1") },
   sourcemap: prod ? false : "inline",
   logLevel: "info",
 };

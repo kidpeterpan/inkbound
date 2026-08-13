@@ -1109,4 +1109,64 @@ describe("renderUnitToChapter heading TOC (004-heading-toc)", () => {
     expect(r.toc).toEqual([]);
     expect(r.xhtmlBody).not.toContain('id="');
   });
+
+  it("renders inline and display math as numbered PNG images composing with a regular image", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([9]), width: 10, height: 10 }));
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "![cap](pic.png)\n\nbefore $x^2$ after\n\n$$\ny+1\n$$\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).not.toContain("$");
+    expect(r.xhtmlBody).toContain('src="../images/img_002.png"');
+    expect(r.xhtmlBody).toContain('src="../images/img_003.png"');
+    // Display math is wrapped in a block paragraph; inline math is not.
+    expect(r.xhtmlBody).toMatch(/<p class="math-block"><img[^>]*\/><\/p>/);
+    expect(r.images.map((i) => i.newHref)).toEqual([
+      "../images/img_001.png",
+      "../images/img_002.png",
+      "../images/img_003.png",
+    ]);
+    expect(r.images[1].bytes).toBeInstanceOf(Uint8Array);
+    expect(r.images[2].bytes).toBeInstanceOf(Uint8Array);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("renders math inside an embedded note, with chapter-unique placeholder indices", async () => {
+    const dest = new TFile("/vault", "Embedded.md");
+    const app = appWithNotes({ "Embedded.md": "math here: $a+b$" }, () => dest);
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([5]), width: 12, height: 12 }));
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "host math $z$\n\n![[Embedded]]\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).not.toContain("$");
+    expect(r.xhtmlBody).toContain("math here:");
+    expect(r.images.map((i) => i.newHref)).toEqual(["../images/img_001.png", "../images/img_002.png"]);
+    expect(r.warnings).toHaveLength(0);
+  });
+
+  it("restores raw source text when a note's math charset is unrenderable (embed path too)", async () => {
+    const r = await renderUnitToChapter(
+      appWith(null),
+      newComponent(),
+      "ก่อน $\\text{ไทย}$ หลัง\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.images).toHaveLength(0);
+    expect(r.xhtmlBody).toContain("$\\text{ไทย}$");
+    expect(r.warnings.some((w) => w.includes("non-Latin"))).toBe(true);
+  });
 });

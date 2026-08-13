@@ -87,12 +87,16 @@ this writing:
 
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path).
-- `$$` display-math blocks.
 - The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
   stripped from rendered HTML) — its selectors are believed correct but have
   not been confirmed against a live Obsidian render.
 - Non-Latin tags (e.g. Thai-language `#tags`), for the inline-tag-to-plain-text
   rewrite in `cleanupDom`.
+- Math placeholder survival in real Obsidian: `<span data-inkbound-math>`
+  inline-HTML placeholders are relied on by the math pipeline (005-latex-math)
+  and verified to pass through the marked stub; a live-Obsidian export should
+  confirm the real renderer preserves them (the pipeline's missing-placeholder
+  guard degrades gracefully with a warning if it ever doesn't).
 
 Treat exports that exercise any of the above with extra scrutiny until they
 have been checked by hand. (The user-facing subset of this list — the parts
@@ -125,7 +129,7 @@ repeatedly, before a manual device test.
 `src/` splits into two kinds of modules:
 
 - **Pure modules** — `metadata.ts`, `collect.ts`, `naming.ts`, `epub.ts`,
-  `epub-css.ts`, `media-types.ts`, `settings-core.ts` — have zero imports of
+  `epub-css.ts`, `media-types.ts`, `settings-core.ts`, `math.ts` — have zero imports of
   the `obsidian` package, so vitest loads and unit-tests them directly.
 - **Obsidian adapters** — `main.ts`, `settings.ts`, `render-adapter.ts`,
   `http.ts` — import `obsidian` for its types and runtime globals (`Plugin`,

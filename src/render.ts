@@ -859,6 +859,11 @@ export function setSvgRasterizer(fn: SvgRasterizer | null): void {
   svgRasterizer = fn ?? defaultRasterizeSvg;
 }
 
+/** Read the currently-installed rasterizer (used by math.ts's renderMath). */
+export function getSvgRasterizer(): SvgRasterizer {
+  return svgRasterizer;
+}
+
 export interface RasterizedMermaidImage {
   newHref: string;
   bytes: Uint8Array;

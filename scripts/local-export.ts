@@ -90,6 +90,11 @@ async function buildBundle(): Promise<void> {
       immediate: path.join(REPO_ROOT, "shims/immediate.cjs"),
       setimmediate: path.join(REPO_ROOT, "shims/setimmediate.cjs"),
     },
+    // mathjax-full's version.js resolves its own package.json via
+    // eval('require') + __dirname; inside this flattened bundle that path
+    // walks out of the repo and crashes. Static define — keep in sync with
+    // package.json's mathjax-full (same trick as esbuild.config.mjs).
+    define: { PACKAGE_VERSION: JSON.stringify("3.2.1") },
     logLevel: "warning",
   });
 }

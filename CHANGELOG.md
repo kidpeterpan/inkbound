@@ -3,6 +3,26 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## Unreleased
+
+Math in notes now exports as typeset pictures, so technical notes read
+properly on e-ink.
+
+- **Inline and display math** — `$...$` and `$$...$$` LaTeX renders at export
+  time (MathJax, bundled and offline) and embeds as PNG images, the same
+  strategy Mermaid uses, so it displays identically on readers that cannot
+  draw inline SVG (verified: Boox Neo Reader).
+- **Graceful degradation** — broken LaTeX renders as MathJax's red error
+  output with an export warning; non-Latin text inside math (e.g. Thai)
+  restores the original source text with a warning; rasterization failure
+  keeps a spec-valid inline SVG. Math never blocks an export.
+- **Code-aware detection** — `$` inside fenced code blocks, inline code
+  spans, escaped `\$`, currency (`$50`), and empty/unclosed delimiters are
+  never treated as math, matching Obsidian's own rules.
+- Deterministic rendering (identical exports from identical notes) is
+  enforced by tests; the epubcheck sample now includes real MathJax SVG
+  chapters.
+
 ## 1.4.0
 
 The table of contents now reaches inside chapters, so long notes are

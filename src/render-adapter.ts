@@ -34,6 +34,7 @@ import {
   type SectionInfo,
   type ListItemInfo,
 } from "./render";
+import { protectMath, renderMath, type MathSpan } from "./math";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
 // into the plain arrays render.ts's pure heading/block functions expect —
@@ -110,7 +111,12 @@ async function populateEmbeds(
   hrefByPath: Map<string, string>,
   basePath: string,
   startIndex: number,
-  visited: ReadonlySet<string>
+  visited: ReadonlySet<string>,
+  // 005-latex-math: chapter-wide accumulator so placeholder indices are
+  // unique across the host note and every embed it pulls in (a single
+  // renderMath pass over the final DOM resolves them all).
+  mathCounter: { next: number },
+  mathSpans: MathSpan[]
 ): Promise<{ warnings: string[]; images: { vaultPath: string; newHref: string; sourcePath: string }[] }> {
   const warnings: string[] = [];
   const images: { vaultPath: string; newHref: string; sourcePath: string }[] = [];
@@ -184,7 +190,22 @@ async function populateEmbeds(
 
     const ourDiv = wrapper.createEl("div");
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-    await MarkdownRenderer.render(app, sectionMd, ourDiv, dest.path, component);
+    // 005-latex-math: protect math in the embed's source the same way the
+    // host note is protected, with chapter-unique placeholder indices
+    // re-keyed against the shared counter (protectMath numbers from 0).
+    const protectedMd = protectMath(sectionMd);
+    let embedMd = protectedMd.md;
+    const offset = mathCounter.next;
+    if (offset > 0 && protectedMd.spans.length > 0) {
+      embedMd = embedMd.replace(/data-inkbound-math="(\d+)"/g, (_m, n: string) => {
+        return `data-inkbound-math="${Number(n) + offset}"`;
+      });
+    }
+    mathSpans.push(
+      ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
+    );
+    mathCounter.next += protectedMd.spans.length;
+    await MarkdownRenderer.render(app, embedMd, ourDiv, dest.path, component);
 
     const childVisited = new Set(visited);
     childVisited.add(dest.path);
@@ -196,7 +217,9 @@ async function populateEmbeds(
       hrefByPath,
       basePath,
       index,
-      childVisited
+      childVisited,
+      mathCounter,
+      mathSpans
     );
     warnings.push(...child.warnings);
     images.push(...child.images);
@@ -260,13 +283,20 @@ export async function renderUnitToChapter(
 ): Promise<ChapterRender> {
   const warnings: string[] = [];
   const md = stripDynamicBlocks(stripFrontmatter(markdown));
+  // 005-latex-math: swap math for placeholders BEFORE rendering, so neither
+  // the real renderer's MathJax output nor the stub's raw $...$ text leaks
+  // into the DOM. Indices stay chapter-unique via mathCounter as embeds
+  // add their own spans.
+  const protectedMd = protectMath(md);
+  const mathCounter = { next: protectedMd.spans.length };
+  const mathSpans: MathSpan[] = [...protectedMd.spans];
   // Obsidian's createEl (ambient Node.prototype augmentation installed by the
   // real app before plugin code runs — see tests/fixtures/obsidian-stub.ts's
   // polyfill of the same) both creates the element and appends it to `this`
   // in one call, replacing the createElement+appendChild pair.
   const el = document.body.createEl("div");
   try {
-    await MarkdownRenderer.render(app, md, el, sourcePath, component);
+    await MarkdownRenderer.render(app, protectedMd.md, el, sourcePath, component);
     // Render our own copy of every embedded note's content BEFORE cleanupDom's
     // flattenEmbeds replaces the embed wrappers (with our copy, or with the
     // placeholder) and that structure is lost. Obsidian's own async embed
@@ -279,7 +309,9 @@ export async function renderUnitToChapter(
       hrefByPath,
       basePath,
       startImageIndex,
-      new Set([sourcePath])
+      new Set([sourcePath]),
+      mathCounter,
+      mathSpans
     );
     warnings.push(...embedRewrite.warnings);
     warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
@@ -299,6 +331,16 @@ export async function renderUnitToChapter(
       startImageIndex + embedRewrite.images.length + images.length
     );
     warnings.push(...mermaid.warnings);
+    // 005-latex-math: math PNGs continue where mermaid's left off — all four
+    // sources (embed/regular/mermaid/math) share one href counter so no two
+    // images ever collide (see main.ts's imageCount invariant comment).
+    const math = await renderMath(
+      el,
+      mathSpans,
+      startImageIndex + embedRewrite.images.length + images.length + mermaid.images.length,
+      sourcePath
+    );
+    warnings.push(...math.warnings);
     // Depth-0 identity (FR-006): collectHeadingToc is NOT called at all when
     // tocDepth is 0, so no ids are stamped and the serialized body is
     // byte-identical to pre-feature output. It runs after embeds are
@@ -308,7 +350,7 @@ export async function renderUnitToChapter(
     const xhtmlBody = serializeBody(el);
     return {
       xhtmlBody,
-      images: [...embedRewrite.images, ...images, ...mermaid.images],
+      images: [...embedRewrite.images, ...images, ...mermaid.images, ...math.images],
       warnings,
       toc,
     };
