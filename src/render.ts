@@ -598,9 +598,9 @@ export function flattenEmbeds(root: HTMLElement): string[] {
     const ourDiv = wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`);
     const target = embedReplaceTarget(wrapper);
     if (ourDiv) {
-      const frag = document.createDocumentFragment();
-      Array.from(ourDiv.childNodes).forEach((child) => frag.appendChild(child));
-      target.replaceWith(frag);
+      // replaceWith accepts multiple nodes directly — no document fragment
+      // needed (and the plugin review flags document.createDocumentFragment).
+      target.replaceWith(...Array.from(ourDiv.childNodes));
     } else {
       const reason = wrapper.getAttribute("data-embed-reason");
       target.replaceWith(embedOmissionPlaceholder(name));
@@ -645,7 +645,7 @@ export function cleanupDom(root: HTMLElement): string[] {
     // with no data-href, so rewriteLinks's internal-link/data-href check
     // never sees them — they'd otherwise pass through as dead fragment
     // links in the EPUB (epubcheck RSC-012; dead taps on e-ink readers).
-    const span = createEl("span");
+    const span = createSpan();
     span.textContent = a.textContent ?? "";
     a.replaceWith(span);
   });
@@ -672,7 +672,7 @@ export function rewriteLinks(
       a.removeAttribute("target");
       a.removeAttribute("rel");
     } else {
-      const span = createEl("span");
+      const span = createSpan();
       span.textContent = a.textContent ?? "";
       a.replaceWith(span);
     }

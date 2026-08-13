@@ -54,6 +54,11 @@ async function installJsdomGlobals(): Promise<void> {
   g.Text = dom.window.Text;
   g.DocumentFragment = dom.window.DocumentFragment;
   g.XMLSerializer = dom.window.XMLSerializer;
+  // 005-latex-math: math.ts's svgStringToElement parses MathJax SVG strings
+  // via DOMParser + instanceof SVGSVGElement — browser globals the harness
+  // must install by hand for that path to run here too.
+  defineGlobal("DOMParser", dom.window.DOMParser);
+  defineGlobal("SVGSVGElement", dom.window.SVGSVGElement);
   g.customElements = dom.window.customElements;
   g.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type {
   SettingDefinitionItem,
   SettingDefinitionGroup,
@@ -382,8 +382,13 @@ describe("EpubExportSettingTab", () => {
     const { tab } = makeTab({ booxUrl: "http://192.168.1.42:8085" });
     const flat = flattenDefinitions(tab.getSettingDefinitions());
     const testAction = flat.find((d) => d.name === "Test connection") as SettingDefinitionAction;
-    await testAction.action(document.createElement("div"), 0);
-    expect(NOTICES.some((n) => n.includes("reachable") && !n.includes("NOT"))).toBe(true);
+    // The action returns void (the plugin-review lint forbids Promise
+    // returns on SettingDefinitionAction) and fires the check internally —
+    // wait for the resulting Notice instead of awaiting the action.
+    testAction.action(document.createElement("div"), 0);
+    await vi.waitFor(() => {
+      expect(NOTICES.some((n) => n.includes("reachable") && !n.includes("NOT"))).toBe(true);
+    });
   });
 
   it("case 15: the declarative Test-connection action shows the same no-device-URL notice as the button", async () => {

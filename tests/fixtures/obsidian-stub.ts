@@ -74,6 +74,29 @@ if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
   });
 }
 
+// createDiv()/createSpan() shortcuts on Node.prototype — same append-to-this
+// semantics as createEl (Obsidian's plugin-review lint prefers these over
+// createEl("div")/createEl("span"), so render.ts/render-adapter.ts call
+// them directly).
+if (typeof Node !== "undefined" && !("createDiv" in Node.prototype)) {
+  Object.defineProperty(Node.prototype, "createDiv", {
+    value: function (this: Node, o?: DomElementInfoLike | string): HTMLElement {
+      return (this as Node).createEl("div", o);
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+if (typeof Node !== "undefined" && !("createSpan" in Node.prototype)) {
+  Object.defineProperty(Node.prototype, "createSpan", {
+    value: function (this: Node, o?: DomElementInfoLike | string): HTMLElement {
+      return (this as Node).createEl("span", o);
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
 // ── Global `createEl` polyfill ────────────────────────────────────────────
 //
 // Distinct from the Node.prototype method above: node_modules/obsidian/
@@ -104,6 +127,24 @@ if (typeof (globalThis as { createEl?: unknown }).createEl === "undefined") {
     applyDomElementInfo(el, o);
     callback?.(el);
     return el;
+  };
+}
+
+// Bare-global createDiv/createSpan — same no-append contract as the global
+// createEl above (the real app installs both forms; render.ts calls the
+// shortcut form because the plugin-review lint prefers it).
+if (typeof (globalThis as { createDiv?: unknown }).createDiv === "undefined") {
+  (globalThis as { createDiv?: unknown }).createDiv = function createDiv(
+    o?: DomElementInfoLike | string
+  ): HTMLElement {
+    return createEl("div", o);
+  };
+}
+if (typeof (globalThis as { createSpan?: unknown }).createSpan === "undefined") {
+  (globalThis as { createSpan?: unknown }).createSpan = function createSpan(
+    o?: DomElementInfoLike | string
+  ): HTMLElement {
+    return createEl("span", o);
   };
 }
 

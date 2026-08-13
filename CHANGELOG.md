@@ -3,6 +3,29 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.5.1
+
+Fixes every finding from the Obsidian community-plugin review.
+
+- **Review blocker fixed** — MathJax SVG parsing no longer assigns
+  function-parameter strings to `innerHTML`; it parses through `DOMParser`
+  with an `instanceof SVGSVGElement` guard instead (same behavior, lint-clean).
+- **Code-masking sentinel** — the math detector's code-region sentinel is now
+  a private-use-area character instead of an ASCII control char, which the
+  review's regex lint rejects.
+- **createEl shortcuts** — `createDiv()`/`createSpan()` replace the
+  `createEl("div")`/`createEl("span")` forms the review's lint prefers; the
+  embed-flattening path drops its document fragment for multi-node
+  `replaceWith`.
+- **Typed MathJax boundary** — explicit casts over mathjax-full's
+  loosely-typed adaptor surface (no more `no-unsafe-assignment` /
+  `no-unsafe-argument` warnings).
+- **Settings action contract** — the declarative "Test connection" action
+  returns `void` as `SettingDefinitionAction` requires.
+- The local-export harness installs the `DOMParser`/`SVGSVGElement` globals
+  the new parsing path uses, so the harness keeps exercising real SVG
+  parsing.
+
 ## 1.5.0
 
 Math in notes now exports as typeset pictures, so technical notes read

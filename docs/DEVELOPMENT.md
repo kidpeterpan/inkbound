@@ -125,6 +125,26 @@ The binary imports live ONLY in `src/font-assets.ts` (plus the injectable
 `setThaiFontLoader` seam), so pure modules and tsx-run scripts
 (`build-sample.ts`) never have to load a `.ttf`.
 
+## Obsidian plugin-review lint
+
+Before (re)submitting to the community plugin registry, reproduce the
+review's lint locally:
+
+```bash
+npm i -D eslint-plugin-obsidianmd
+# config: flat config with parser @typescript-eslint/parser + parserOptions.project,
+# rule "obsidianmd/prefer-create-el" — then:
+npx eslint --config eslint.obsidian-review.mjs "src/**/*.ts"
+```
+
+Known requirements the review enforces beyond repo lint: no `innerHTML`
+assignment from function parameters (use DOMParser — see math.ts), no
+control chars in regex literals (PUA sentinel instead of `\x01`), no
+`document.createElement` for tags with Obsidian shortcuts (prefer
+`createDiv()`/`createSpan()` over `createEl("div")`/`createEl("span")`),
+no Promise-returning `SettingDefinitionAction`s (return `void`), and
+explicit casts over mathjax-full's `any`-typed adaptor surface.
+
 ## The CLI harness
 
 `npm run local-export -- <note|folder|linked> <vault-relative-path>` (via

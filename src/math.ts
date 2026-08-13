@@ -67,16 +67,25 @@ interface ScanMatch {
   display: boolean;
 }
 
-// A single "$" inside math content (but not a second delimiter).
-const DISPLAY_MATH_RE = /\$\$((?:(?!\x01)[\s\S])+?)\$\$/g;
-const INLINE_MATH_RE = /\$([^\s$\x01](?:[^$\r\n\x01]*[^\s$\x01])?)\$/g;
+// A single "$" inside math content (but not a second delimiter). The
+// sentinel is a Private-Use-Area char (U+E000): it masks code regions in
+// maskCodeRegions below, and is excluded here so a math match can never
+// span a masked fence/code-span. (An ASCII control char like \x01 works
+// identically but trips the no-control-regex lint rule Obsidian's plugin
+// review runs — PUA chars do not.)
+const MASK_SENTINEL = "\uE000";
+const DISPLAY_MATH_RE = new RegExp(`\\$\\$((?:(?!${MASK_SENTINEL})[\\s\\S])+?)\\$\\$`, "g");
+const INLINE_MATH_RE = new RegExp(
+  `\\$([^\\s$${MASK_SENTINEL}](?:[^$\\r\\n${MASK_SENTINEL}]*[^\\s$${MASK_SENTINEL}])?)\\$`,
+  "g"
+);
 const COMBINED_MATH_RE = new RegExp(`${DISPLAY_MATH_RE.source}|${INLINE_MATH_RE.source}`, "g");
 
-// Masks fenced code blocks and inline code spans with \x01 sentinels of the
-// SAME length as the original, so math-match positions in the masked copy
-// are valid positions in the source. Fences: ```/~~~ line-start openers and
-// closers (up to 3 leading spaces). Code spans: single or double backtick
-// runs (the same run closes).
+// Masks fenced code blocks and inline code spans with MASK_SENTINEL chars of
+// the SAME length as the original, so math-match positions in the masked
+// copy are valid positions in the source. Fences: ```/~~~ line-start openers
+// and closers (up to 3 leading spaces). Code spans: single or double
+// backtick runs (the same run closes).
 function maskCodeRegions(md: string): string {
   const out = md.split("");
   const lines = md.split(/\r?\n/);
@@ -104,7 +113,7 @@ function maskCodeRegions(md: string): string {
       const lineLen = line.length;
       for (let i = 0; i < lineLen; i++) {
         const abs = lineStart + i;
-        if (out[abs] !== "\n") out[abs] = "\x01";
+        if (out[abs] !== "\n") out[abs] = MASK_SENTINEL;
       }
     }
     lineStart += line.length + 1; // +1 for the \n the split consumed
@@ -115,7 +124,7 @@ function maskCodeRegions(md: string): string {
   // closes the span, so `` `$y$` `` masks the inner $y$ too).
   const masked = out.join("");
   return masked.replace(/(`+)([\s\S]*?)\1/g, (_m, ticks: string, body: string) => {
-    return ticks + "\x01".repeat(body.length) + ticks;
+    return ticks + MASK_SENTINEL.repeat(body.length) + ticks;
   });
 }
 
@@ -166,9 +175,17 @@ export interface MathRenderResult {
 export function renderMathToSvg(tex: string, display: boolean): MathRenderResult {
   if (UNRENDERABLE_CHARSET_RE.test(tex)) return { svg: "", ok: false };
   try {
-    // containerWidth huge = never line-break (single-line SVG math).
-    const node = mathDocument.convert(tex, { display, em: 16, ex: 8, containerWidth: 1_000_000 });
-    const svg = adaptor.outerHTML(node);
+    // containerWidth huge = never line-break (single-line SVG math). The
+    // explicit casts silence @typescript-eslint/no-unsafe-* on mathjax-full's
+    // loosely-typed adaptor surface (its .d.ts flows `any` through
+    // MathDocument.convert and Adaptor.outerHTML).
+    const node = mathDocument.convert(tex, {
+      display,
+      em: 16,
+      ex: 8,
+      containerWidth: 1_000_000,
+    }) as unknown;
+    const svg = adaptor.outerHTML(node as never) as string;
     // MathJax's SVG error rendering: unknown commands/broken syntax come out
     // as red text (fill="red"), not as merror markup in this version.
     return { svg, ok: !svg.includes("merror") && !svg.includes('fill="red"') };
@@ -198,15 +215,17 @@ function normalizeMathSvg(svgEl: SVGSVGElement): void {
 
 function svgStringToElement(svgString: string): SVGSVGElement | null {
   try {
-    // Template-based parsing instead of DOMParser: the local-export harness
-    // installs jsdom globals by hand and does not expose DOMParser, while
-    // a <template> works in real Obsidian, vitest, and the harness alike.
-    // The HTML parser's foreign-content rules give the inner <svg> its SVG
-    // namespace and adjust attribute case (viewBox etc.) automatically.
-    const template = document.createElement("template");
-    template.innerHTML = svgString;
-    const svg = template.content.querySelector("svg");
-    return svg ? (svg as unknown as SVGSVGElement) : null;
+    // DOMParser, not <template>.innerHTML: Obsidian's plugin review rejects
+    // assigning function-parameter strings to innerHTML. XML parsing gives
+    // the <svg> its SVG namespace directly (attribute case like viewBox
+    // preserved). The local-export harness installs the DOMParser and
+    // SVGSVGElement globals by hand (scripts/local-export.ts) so this works
+    // in vitest, the harness, and real Obsidian alike.
+    const doc = new DOMParser().parseFromString(svgString, "image/svg+xml");
+    if (doc.querySelector("parsererror")) return null;
+    const svg = doc.querySelector("svg");
+    // instanceof narrows without any cast (also rejects parse surprises).
+    return svg instanceof SVGSVGElement ? svg : null;
   } catch {
     return null;
   }

@@ -121,14 +121,12 @@ export class EpubExportSettingTab extends PluginSettingTab {
           },
           {
             name: "Test connection",
-            // Declared `void`-returning per SettingDefinitionAction, but this
-            // is an async function — TypeScript allows a Promise-returning
-            // function where `void` is expected, and returning the real
-            // promise (rather than fire-and-forget `void this.testBooxConnection()`)
-            // lets callers (and tests) `await` it deterministically instead
-            // of racing the Notice against whatever runs next.
-            action: async (): Promise<void> => {
-              await this.testBooxConnection();
+            // Returns void rather than a promise: the plugin review flags
+            // Promise-returning functions where the SettingDefinitionAction
+            // type declares void. The work still happens — testBooxConnection
+            // is fired and awaited internally.
+            action: (): void => {
+              void this.testBooxConnection();
             },
           },
         ],

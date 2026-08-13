@@ -188,7 +188,7 @@ async function populateEmbeds(
       sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
     }
 
-    const ourDiv = wrapper.createEl("div");
+    const ourDiv = wrapper.createDiv();
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
     // 005-latex-math: protect math in the embed's source the same way the
     // host note is protected, with chapter-unique placeholder indices
@@ -294,7 +294,7 @@ export async function renderUnitToChapter(
   // real app before plugin code runs — see tests/fixtures/obsidian-stub.ts's
   // polyfill of the same) both creates the element and appends it to `this`
   // in one call, replacing the createElement+appendChild pair.
-  const el = document.body.createEl("div");
+  const el = document.body.createDiv();
   try {
     await MarkdownRenderer.render(app, protectedMd.md, el, sourcePath, component);
     // Render our own copy of every embedded note's content BEFORE cleanupDom's
