@@ -3,7 +3,7 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
-## Unreleased
+## 1.5.0
 
 Math in notes now exports as typeset pictures, so technical notes read
 properly on e-ink.
