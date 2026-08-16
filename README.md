@@ -180,8 +180,12 @@ tag it, name it after the folder instead — `grokking-algorithms.md` inside
 `grokking-algorithms/` is detected the same way. Without either, the folder
 name becomes the title and every note is treated as a chapter.
 
-Chapter titles come from filenames, so `03_recursion` appears in the table of
-contents as written. Rename the files if you want prettier chapter names.
+Chapter titles come from each note's first `#` heading when there is one, so
+`03_recursion` with an `# Recursion` heading appears in the table of contents
+as _Recursion_. No heading? The note's frontmatter `aliases` are used next,
+then the filename as a last resort. One consequence: in a folder export, the
+index note's own heading (often the book title itself) becomes the first TOC
+entry — that is expected, not a bug.
 
 The table of contents also lists each chapter's own headings underneath it —
 the `##` and `###` sections inside a long chapter — as links that jump
@@ -197,7 +201,8 @@ note for folder exports). Recognised fields:
 - **`aliases`** — sets the book title (`dc:title`). The first non-empty
   string, or first non-empty string in the list if `aliases` is a list, is
   used; otherwise the note's filename is used. This is the _book_ title
-  only — chapter titles are derived separately from headings/filenames.
+  only — chapter titles come from each note's first `#` heading, falling back
+  to `aliases` and then the filename.
 - **`author`** — sets `dc:creator`. A string is used as-is; a list of
   strings is joined with `", "`; anything else falls back to the
   **Fallback author** setting, or `"Unknown"`.

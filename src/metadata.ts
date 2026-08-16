@@ -26,7 +26,10 @@ const LANGUAGE_NAMES: Record<string, string> = {
 
 const BCP47_SHAPE = /^[a-z]{2,3}(-[a-z0-9]+)*$/i;
 
-function firstNonEmptyString(raw: unknown): string | null {
+// Shared by resolveTitle (book title) and deriveChapterTitle (chapter titles,
+// 007-chapter-titles): "usable alias" must mean the same thing everywhere
+// (plain string, or first non-empty trimmed list element).
+export function firstNonEmptyString(raw: unknown): string | null {
   if (typeof raw === "string") {
     const t = raw.trim();
     return t === "" ? null : t;

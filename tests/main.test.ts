@@ -436,10 +436,13 @@ describe("exportFolder", () => {
     // the document head rather than the index chapter's actual <li>. Binding
     // title-to-href also directly encodes ordering, since hrefs are assigned
     // in job.files iteration order.
-    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">index_note</a>');
-    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">1_a</a>');
-    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">2_b</a>');
-    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">10_c</a>');
+    // 007-chapter-titles: chapter titles now come from each note's first H1
+    // (FR-001) — the index note's "# Book Index" and each chapter's own H1 —
+    // instead of the basenames the fixture notes were created under.
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">Book Index</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">Chapter A</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">Chapter B</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">Chapter C</a>');
 
     // Finding B fix: prove each chapter's actual body text (not just its
     // title) landed in the right slot — an empty-body implementation with

@@ -101,7 +101,9 @@ export default class EpubExportPlugin extends Plugin {
 
   private titleFor(f: TFile): string {
     const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
-    const aliases: string[] | undefined = Array.isArray(fm?.aliases) ? fm.aliases : undefined;
+    // Raw frontmatter value: plain-string aliases are legal (FR-002) and the
+    // pure resolver's firstNonEmptyString handles both string and list shapes.
+    const aliases: unknown = fm?.aliases;
     const h1 = this.app.metadataCache.getFileCache(f)?.headings?.find((h) => h.level === 1)?.heading;
     return deriveChapterTitle(f.basename, aliases, h1);
   }

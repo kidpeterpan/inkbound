@@ -3,6 +3,25 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.6.0
+
+Chapter titles now come from the notes themselves, so a book's table of
+contents reads like a real book instead of showing filenames.
+
+- **First-heading titles** — each chapter's title is its note's first `#`
+  heading (`03_recursion` with `# Recursion` now appears as _Recursion_),
+  everywhere a chapter title shows up: the table of contents, the navigation
+  document, and the "Linked from:" backlink trails.
+- **Alias fallback** — a note with no heading but a frontmatter `aliases`
+  entry (plain string or list) is titled by it, mirroring how the book title
+  is resolved.
+- **Filename last** — notes with neither keep the previous filename-based
+  behavior, so nothing changes for books that don't opt in.
+- Deterministic and never-failing: title resolution can never abort an export,
+  and empty or whitespace-only headings are ignored rather than producing
+  blank titles. In folder exports the index note's own heading (often the book
+  title) becomes the first TOC entry — expected behavior.
+
 ## 1.5.1
 
 Fixes every finding from the Obsidian community-plugin review.

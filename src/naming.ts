@@ -7,14 +7,17 @@ export function slugify(title: string): string {
   return cleaned.length > 0 ? cleaned : "export";
 }
 
-// Default rule: the filename is the title. Precedence among
-// basename / frontmatter alias / first H1 is a product decision —
-// revisited in Task 11 (USER CONTRIBUTION).
-// MUST never throw: main.ts calls this on the export-failure path (a throwing title aborts the whole export).
-export function deriveChapterTitle(
-  basename: string,
-  _aliases: string[] | undefined,
-  _firstH1: string | undefined
-): string {
-  return basename;
+import { firstNonEmptyString } from "./metadata";
+
+// Chapter-title precedence (007-chapter-titles, resolved from the original
+// plan's Task 11): first usable H1 → first usable frontmatter alias → basename.
+// "Usable" = non-empty after trimming (H1), or first non-empty trimmed element
+// via the same firstNonEmptyString the book-title resolver uses.
+// MUST never throw: main.ts calls this on the export-failure path (a throwing
+// title aborts the whole export). Resolution is total — every input maps to a
+// string, so the placeholder-chapter path can always produce a title.
+export function deriveChapterTitle(basename: string, aliases: unknown, firstH1: string | undefined): string {
+  const h1 = typeof firstH1 === "string" ? firstH1.trim() : "";
+  if (h1 !== "") return h1;
+  return firstNonEmptyString(aliases) ?? basename;
 }
