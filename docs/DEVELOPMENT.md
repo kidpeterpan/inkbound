@@ -44,7 +44,7 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 | `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI. |
 | `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                          |
 | `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                           |
-| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project.                                                                                                  |
+| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below. |
 | `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                        |
 | `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                  |
 | `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                          |
@@ -275,3 +275,40 @@ found this way, with no `require()` anywhere in it for a scan to notice.
 
 It is not a substitute for a real device. It proves the bundle _evaluates_; it
 says nothing about whether Obsidian mobile then behaves as expected.
+
+## Obsidian's review rules
+
+`eslint.config.mjs` runs `eslint-plugin-obsidianmd` — the same rule set Obsidian's
+reviewers run against a submitted plugin — so a review finding fails the build
+instead of arriving after a release has shipped. That is not hypothetical: 1.7.0
+went out carrying three of them.
+
+Two deliberate choices in that config, both easy to get wrong:
+
+- **Scoped by `ignores`, never by rewriting `files`.** One entry in the plugin's
+  recommended set is `{ files: ["package.json"], language: "json/json" }`.
+  Forcing a blanket `files: ["src/**/*.ts"]` onto every entry applies the JSON
+  language to TypeScript, and every file in `src/` then fails to parse at its
+  first `//`. Narrow with `ignores`.
+- **Only `src/` is linted by these rules.** It is the only thing bundled into
+  `main.js` and seen by a reviewer. `tests/` and `scripts/` are dev-only Node
+  code that legitimately imports `fs`, touches `globalThis`, and assigns
+  `innerHTML` in fixtures; including them produced ~200 findings that were all
+  correct as written.
+
+`obsidianmd/no-nodejs-modules` is promoted from warning to **error**, because at
+its default severity it does not fail `npm run lint` — and its failure mode is
+total: a top-level node import stops the plugin loading on mobile entirely. It
+overlaps `check-mobile-safe` by design; this catches the mistake in the source,
+that one catches it in the built bundle.
+
+`obsidianmd/ui/sentence-case` is **off**. It lowercases everything after the
+first word, which is wrong for every acronym and proper noun in this plugin's UI
+— it wants "Export note to epub", "Toc heading depth", "Embed thai font",
+"Booxdrop", and rewrites the example URL `http://192.168.1.42:8085` to
+`HTTP://...`. Of its 17 findings, 15 were false; the 2 real ones (capitalizing
+"Markdown") are fixed. Revisit if the rule gains an exception list.
+
+Note the Obsidian rule set is **type-aware**, which is how it catches things the
+project's own syntax-only pass structurally cannot — such as a redundant
+`as string` on an expression that is already a string.

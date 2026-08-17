@@ -185,7 +185,7 @@ export function renderMathToSvg(tex: string, display: boolean): MathRenderResult
       ex: 8,
       containerWidth: 1_000_000,
     }) as unknown;
-    const svg = adaptor.outerHTML(node as never) as string;
+    const svg: string = adaptor.outerHTML(node as never);
     // MathJax's SVG error rendering: unknown commands/broken syntax come out
     // as red text (fill="red"), not as merror markup in this version.
     return { svg, ok: !svg.includes("merror") && !svg.includes('fill="red"') };

@@ -123,7 +123,7 @@ export default class EpubExportPlugin extends Plugin {
       return;
     }
     if (f.extension !== "md") {
-      new Notice("Active file is not a markdown note.");
+      new Notice("Active file is not a Markdown note.");
       return;
     }
     fn(f);
@@ -260,7 +260,7 @@ export default class EpubExportPlugin extends Plugin {
   async exportFolder(folder: TFolder) {
     const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
     if (mdFiles.length === 0) {
-      new Notice("Folder has no markdown notes.");
+      new Notice("Folder has no Markdown notes.");
       return;
     }
 
@@ -449,10 +449,11 @@ export default class EpubExportPlugin extends Plugin {
         kind,
         this.settings,
         slugify(job.meta.title),
-        // Desktop-only input, fetched through the lazy os import. Mobile never
-        // consults it, so "" is the correct value there — and asking for it
-        // would drag a node builtin into the mobile path.
-        kind === "desktop" ? await this.desktopHomedir() : ""
+        // Desktop-only input. Called unconditionally because desktopHomedir
+        // carries the platform guard itself and answers "" on mobile — one
+        // guard, in the place that owns the node import, instead of the same
+        // condition written twice and drifting.
+        await this.desktopHomedir()
       );
       await this.writeBook(dest, bytes); // save ALWAYS precedes push (spec)
       this.lastShareTarget =
@@ -486,7 +487,11 @@ export default class EpubExportPlugin extends Plugin {
   // value, which keeps `obsidian` out of the pure modules (constitution IV) and
   // makes every placement rule unit-testable with no stub at all.
   private platformKind(): PlatformKind {
-    return Platform.isDesktopApp ? "desktop" : "mobile";
+    // Platform.isDesktop, not isDesktopApp: one flag decides both the
+    // destination shape and the write mechanism, so they cannot drift — and it
+    // is the property Obsidian's own guidance and lint recognize as the
+    // node-availability guard.
+    return Platform.isDesktop ? "desktop" : "mobile";
   }
 
   // 008-mobile-support — INVARIANT, do not "tidy" these imports to the top of
@@ -501,6 +506,13 @@ export default class EpubExportPlugin extends Plugin {
   // `npm run check-mobile-safe` fails the build if this ever regresses.
   // See specs/008-mobile-support/contracts/platform-seam.md.
   private async desktopHomedir(): Promise<string> {
+    // The guard is lexical, not just at the call site: it is what proves — to a
+    // reader and to Obsidian's plugin-review lint — that this import cannot run
+    // on mobile. "" is the right answer there, since mobile resolution never
+    // consults a home directory (see resolveDestination in output.ts).
+    if (!Platform.isDesktop) {
+      return "";
+    }
     const { homedir } = await import("os");
     return homedir();
   }
@@ -510,7 +522,11 @@ export default class EpubExportPlugin extends Plugin {
   // is no streaming write to interrupt, which is the whole of FR-011's
   // "never leave a partial or corrupt book behind" — no temp-file dance needed.
   private async writeBook(dest: ExportDestination, bytes: Uint8Array): Promise<void> {
-    if (dest.kind === "desktop") {
+    // Branches on Platform rather than dest.kind so the node import sits
+    // lexically inside its guard. The two cannot disagree: dest.kind comes from
+    // platformKind(), which reads this same flag — so the write mechanism and
+    // the shape of the path resolveDestination produced always match.
+    if (Platform.isDesktop) {
       const { promises: fs } = await import("fs"); // lazy — see the invariant above
       await fs.mkdir(dest.path.slice(0, dest.path.lastIndexOf("/")), { recursive: true });
       await fs.writeFile(dest.path, bytes);

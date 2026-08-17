@@ -1124,7 +1124,7 @@ describe("withActiveFile", () => {
       throw new Error("fn must not be called for a non-markdown active file");
     });
 
-    expect(NOTICES).toContain("Active file is not a markdown note.");
+    expect(NOTICES).toContain("Active file is not a Markdown note.");
     expect(NOTICES).not.toContain("No active note.");
     expect(await outDirEntries()).toEqual([]);
   });
