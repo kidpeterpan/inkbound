@@ -3,6 +3,26 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.7.1
+
+Fixes every finding from Obsidian's plugin review, and makes those rules part
+of the build so the next one is caught before a release rather than after.
+
+- **Node imports are guarded where reviewers can see it** — the `fs` and `os`
+  imports behind desktop-only file writing now sit inside an explicit
+  `Platform.isDesktop` check rather than relying on a guard at the call site.
+  Behavior is unchanged; the guarantee is now local and verifiable.
+- **Removed a redundant type assertion** in the math renderer.
+- **"Markdown" is capitalized** in the two notices that mention it, matching
+  Obsidian's own style.
+- **Obsidian's plugin-review lint now runs in CI** over the plugin's source,
+  with the Node-import rule promoted to a build-failing error — at its default
+  severity it would not have failed the build, which is how the findings above
+  reached a release in the first place.
+- **Manual install lists the right files** — a release ships `main.js` and
+  `manifest.json`; the instructions previously also named an empty
+  `styles.css` that is deliberately not published.
+
 ## 1.7.0
 
 Inkbound now runs on Obsidian mobile. Export a note, a folder, or a note and

@@ -85,9 +85,9 @@ That works on desktop and on mobile alike.
 
 **From a GitHub release**, if you would rather install manually:
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the
+1. Download `main.js` and `manifest.json` from the
    [latest release](https://github.com/kidpeterpan/inkbound/releases/latest).
-2. Copy all three files into
+2. Copy both files into
    `<vault>/.obsidian/plugins/inkbound/` (create the folder if it doesn't
    exist).
 3. In Obsidian, go to **Settings → Community plugins** and enable
