@@ -1323,6 +1323,11 @@ describe("rasterizeMermaidDiagrams", () => {
       expect(root.querySelector("svg")).not.toBeNull();
     });
 
+    // Expect "Not implemented: HTMLCanvasElement.prototype.getContext" plus a
+    // stack on stderr while this passes: jsdom reports a missing canvas through
+    // its virtual console instead of throwing, and vitest forwards that. It is
+    // not a failure, and silencing it would mean mocking away the exact
+    // behavior under test.
     it("falls back when the canvas has no 2d context (real jsdom behavior, left un-mocked here)", async () => {
       stubObjectUrl();
       stubImage("load");
