@@ -48,6 +48,10 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run test:coverage
       - run: npm run build
+      # Must follow build — inspects the built bundle and loads it in a
+      # mobile-like runtime. A release that fails this would install on a phone
+      # and then fail to load at all, so it gates a release as firmly as CI.
+      - run: npm run check-mobile-safe
       - run: npm run version:check
 
       # Publishes a signed statement that these exact bytes were built by this
