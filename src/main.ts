@@ -1,11 +1,21 @@
-import { FileSystemAdapter, Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, requestUrl } from "obsidian";
-import { promises as fs } from "fs";
-import { homedir } from "os";
+import {
+  FileSystemAdapter,
+  Menu,
+  Notice,
+  Platform,
+  Plugin,
+  TAbstractFile,
+  TFile,
+  TFolder,
+  requestUrl,
+} from "obsidian";
 import { EpubBuilder, chapterHref, escapeXml } from "./epub";
 import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
+import { resolveDestination, type ExportDestination, type PlatformKind } from "./output";
+import { canShareEpub, shareEpub, type ShareTarget } from "./share";
 import { mediaTypeForExt } from "./media-types";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
@@ -14,7 +24,6 @@ import {
   EpubExportSettings,
   EpubExportSettingTab,
   coerceBacklinkPosition,
-  resolveOutputPath,
   summarizeWarnings,
 } from "./settings";
 import type { ExportMeta } from "./types";
@@ -30,6 +39,12 @@ interface Job {
 
 export default class EpubExportPlugin extends Plugin {
   settings: EpubExportSettings = DEFAULT_SETTINGS;
+
+  // 008-mobile-support: the most recent successfully-written book, kept so the
+  // "Share last exported book" command has something to hand to the share
+  // sheet. Only set on mobile, and only after the file is safely on disk —
+  // sharing is a bonus layered on a completed export, never part of one.
+  private lastShareTarget: ShareTarget | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -54,6 +69,23 @@ export default class EpubExportPlugin extends Plugin {
       id: "export-linked",
       name: "Export note + linked notes to EPUB",
       callback: () => this.withActiveFile((f) => void this.exportLinked(f)),
+    });
+    // 008-mobile-support FR-016/FR-017: hand the finished book to the device's
+    // own share sheet. A COMMAND rather than something fired on export
+    // completion, for two reasons: the Web Share API requires transient user
+    // activation and rejects a share with no tap behind it, and FR-017 requires
+    // the offer to be ABSENT (not failing) where sharing is unsupported —
+    // checkCallback returning false hides the command from the palette
+    // entirely, which is exactly that.
+    this.addCommand({
+      id: "share-last-export",
+      name: "Share last exported book",
+      checkCallback: (checking: boolean) => {
+        const target = this.lastShareTarget;
+        if (!target || !canShareEpub()) return false;
+        if (!checking) void shareEpub(target);
+        return true;
+      },
     });
 
     this.registerEvent(
@@ -264,6 +296,10 @@ export default class EpubExportPlugin extends Plugin {
     try {
       notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
       const adapter = this.app.vault.adapter;
+      // "" on mobile: the mobile vault adapter is not a FileSystemAdapter and
+      // has no filesystem base path to give. rewriteImages in render.ts has an
+      // explicit empty-basePath guard because of this — see the invariant
+      // comment there before assuming "" is an impossible or harmless value.
       const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
 
       const hrefByPath = new Map(job.files.map((f, i) => [f.path, chapterHref(i)]));
@@ -309,7 +345,12 @@ export default class EpubExportPlugin extends Plugin {
       // is consulted, so detection alone never changes output.
       let hasThai = false;
 
-      for (const file of job.files) {
+      for (const [chapterIndex, file] of job.files.entries()) {
+        // 008-mobile-support FR-014/SC-006: a long export on a phone otherwise
+        // looks like a frozen app. Reuses the persistent notice the push step
+        // already updates, so this costs nothing new — and it helps desktop
+        // exports of large books just as much.
+        notice.setMessage(`Exporting "${job.meta.title}" — chapter ${chapterIndex + 1}/${job.files.length}…`);
         try {
           const md = await this.app.vault.cachedRead(file);
           const r = await renderUnitToChapter(
@@ -403,18 +444,27 @@ export default class EpubExportPlugin extends Plugin {
       }
 
       const bytes = await builder.build();
-      const outPath = resolveOutputPath(this.settings.outputFolder, slugify(job.meta.title), homedir());
-      await fs.mkdir(outPath.slice(0, outPath.lastIndexOf("/")), { recursive: true });
-      await fs.writeFile(outPath, bytes); // save ALWAYS precedes push (spec)
+      const kind = this.platformKind();
+      const dest = resolveDestination(
+        kind,
+        this.settings,
+        slugify(job.meta.title),
+        // Desktop-only input, fetched through the lazy os import. Mobile never
+        // consults it, so "" is the correct value there — and asking for it
+        // would drag a node builtin into the mobile path.
+        kind === "desktop" ? await this.desktopHomedir() : ""
+      );
+      await this.writeBook(dest, bytes); // save ALWAYS precedes push (spec)
+      this.lastShareTarget =
+        dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
 
       let pushMsg = "";
       if (this.settings.pushAfterExport && this.settings.booxUrl) {
         try {
           notice.setMessage("Pushing to Boox…");
-          await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(
-            outPath.split("/").pop()!,
-            bytes
-          );
+          // dest.fileName, not a path split at the call site: BooxDrop must
+          // upload under the same name on both platforms (FR-010).
+          await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
           pushMsg = " and pushed to Boox ✓";
         } catch (e) {
           pushMsg = ` — saved locally, push failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -422,13 +472,69 @@ export default class EpubExportPlugin extends Plugin {
       }
       warnings.forEach((w) => console.warn("[inkbound]", w));
       const warnMsg = summarizeWarnings(warnings);
-      new Notice(`EPUB saved to ${outPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`, 8000);
+      new Notice(`EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`, 8000);
     } catch (e) {
       console.error("[inkbound] export failed", e);
       new Notice(`EPUB export failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       notice?.hide();
     }
+  }
+
+  // 008-mobile-support: the ONLY place this plugin decides what platform it is
+  // on. Everything downstream takes the resulting PlatformKind as a plain
+  // value, which keeps `obsidian` out of the pure modules (constitution IV) and
+  // makes every placement rule unit-testable with no stub at all.
+  private platformKind(): PlatformKind {
+    return Platform.isDesktopApp ? "desktop" : "mobile";
+  }
+
+  // 008-mobile-support — INVARIANT, do not "tidy" these imports to the top of
+  // the file. esbuild.config.mjs sets platform: "node", so a static
+  // `import { promises as fs } from "fs"` compiles to a require("fs") at the
+  // TOP LEVEL of the bundle, which executes the moment Obsidian loads main.js.
+  // Obsidian mobile has no require(), so a top-level one does not degrade the
+  // plugin — it stops the plugin from loading at all, before onload() runs and
+  // before any Platform check could guard anything. Inside a function body the
+  // same import compiles to a require() that only executes if this function is
+  // called, which on mobile it never is.
+  // `npm run check-mobile-safe` fails the build if this ever regresses.
+  // See specs/008-mobile-support/contracts/platform-seam.md.
+  private async desktopHomedir(): Promise<string> {
+    const { homedir } = await import("os");
+    return homedir();
+  }
+
+  // One write, of a byte array that is already complete in memory
+  // (EpubBuilder.build() returns the whole book before this is called). There
+  // is no streaming write to interrupt, which is the whole of FR-011's
+  // "never leave a partial or corrupt book behind" — no temp-file dance needed.
+  private async writeBook(dest: ExportDestination, bytes: Uint8Array): Promise<void> {
+    if (dest.kind === "desktop") {
+      const { promises: fs } = await import("fs"); // lazy — see the invariant above
+      await fs.mkdir(dest.path.slice(0, dest.path.lastIndexOf("/")), { recursive: true });
+      await fs.writeFile(dest.path, bytes);
+      return;
+    }
+    // Mobile: the vault adapter is the only write surface that exists, and it
+    // takes vault-relative paths — which is what resolveDestination guarantees.
+    const adapter = this.app.vault.adapter;
+    const folder = dest.path.slice(0, dest.path.lastIndexOf("/"));
+    if (folder) {
+      // Created segment by segment rather than in one call: Obsidian's
+      // DataAdapter.mkdir is NOT documented to create intermediate parents, so
+      // a nested output folder ("Books/EPUB") could fail on a device even
+      // though a recursive test stub would happily accept it.
+      let sofar = "";
+      for (const segment of folder.split("/")) {
+        sofar = sofar === "" ? segment : `${sofar}/${segment}`;
+        if (!(await adapter.exists(sofar))) await adapter.mkdir(sofar);
+      }
+    }
+    // Copy through a standalone ArrayBuffer: `bytes.buffer` can be a larger
+    // pooled buffer with a non-zero byteOffset, which would write garbage.
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    await adapter.writeBinary(dest.path, buffer);
   }
 
   async loadSettings() {

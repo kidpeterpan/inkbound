@@ -20,6 +20,10 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run test:coverage
       - run: npm run build
+      # 008-mobile-support: must follow `build` — it inspects the built bundle
+      # and loads it in a mobile-like runtime. Guards the load-time invariant
+      # that makes the plugin work on Obsidian mobile at all.
+      - run: npm run check-mobile-safe
       - run: npm run version:check
       - uses: actions/upload-artifact@v4
         if: always()

@@ -712,7 +712,14 @@ export function rewriteImages(
         // Malformed URI (e.g., literal % in filename): skip this image.
         return;
       }
-      const at = decoded.indexOf(basePath);
+      // 008-mobile-support — INVARIANT: the empty check is NOT redundant with
+      // `at === -1`. `"anything".indexOf("")` returns 0, not -1, so an empty
+      // basePath takes the "found at position 0" branch, slices off nothing,
+      // and hands the caller the entire `app://…` URL as a vault path — the
+      // exact failure the fallback below was written to prevent. An empty
+      // basePath is not exotic: main.ts produces it whenever the vault adapter
+      // is not a FileSystemAdapter, which is EVERY export on Obsidian mobile.
+      const at = basePath === "" ? -1 : decoded.indexOf(basePath);
       if (at === -1) {
         // Path doesn't contain the given basePath (multi-vault, symlinked
         // attachment folders, path-case differences). Fall through with just

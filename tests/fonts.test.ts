@@ -1,6 +1,12 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { containsThai, thaiFontCss, THAI_FONT_FAMILY, OFL_LICENSE_TEXT, THAI_FONT_META } from "../src/fonts";
-import { buildAsset, loadThaiFontAsset, setThaiFontLoader, getThaiFontLoader } from "../src/font-assets";
+import {
+  buildAsset,
+  decodeBase64,
+  loadThaiFontAsset,
+  setThaiFontLoader,
+  getThaiFontLoader,
+} from "../src/font-assets";
 
 describe("containsThai", () => {
   it("detects Thai consonants and vowels", () => {
@@ -71,6 +77,25 @@ describe("loadThaiFontAsset", () => {
     expect(getThaiFontLoader()()).toBeNull();
     setThaiFontLoader(null);
     expect(getThaiFontLoader()()).not.toBeNull();
+  });
+
+  // 008-mobile-support: the fonts are inlined as base64 rather than raw bytes,
+  // because esbuild's "binary" loader under platform: "node" emits
+  // `Buffer.from(...)` — and Buffer is a Node global that does not exist in
+  // Obsidian mobile's WebView. It ran at module top level, so it killed the
+  // plugin at load on mobile just as surely as a top-level require("fs") did.
+  // decodeBase64 must therefore use only APIs present on BOTH platforms.
+  it("decodeBase64 decodes without Buffer (008-mobile-support)", () => {
+    expect(Array.from(decodeBase64("AAECAwQ="))).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("decodeBase64 returns empty bytes for an empty string", () => {
+    expect(decodeBase64("").length).toBe(0);
+  });
+
+  it("decodeBase64 degrades to empty bytes on malformed input, never throws (constitution II)", () => {
+    expect(() => decodeBase64("!!!not base64!!!")).not.toThrow();
+    expect(decodeBase64("!!!not base64!!!").length).toBe(0);
   });
 
   it("buildAsset degrades to null on empty regular or bold bytes (FR-008)", () => {

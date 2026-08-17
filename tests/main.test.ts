@@ -14,8 +14,16 @@ import {
   NOTICES,
   setRequestUrlImpl,
   resetRequestUrlImpl,
+  // 008-mobile-support: imported from the stub BY PATH, not from "obsidian" —
+  // tsc resolves "obsidian" to the real package's .d.ts (which has no
+  // setPlatform), while vitest resolves it to this stub. Only the path import
+  // satisfies both.
+  setPlatform,
+  resetPlatform,
 } from "./fixtures/obsidian-stub";
+import type { StubCommand } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
+import { setShareHost } from "../src/share";
 import type { EpubExportSettings } from "../src/settings";
 
 // ── fixture ─────────────────────────────────────────────────────────────
@@ -114,6 +122,9 @@ function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): E
   const plugin = new EpubExportPlugin(app as never, {} as never);
   plugin.settings = {
     outputFolder: outDir,
+    // 008-mobile-support: desktop tests never read this, but the type requires
+    // it — the two output settings are deliberately independent (FR-004).
+    mobileOutputFolder: "Exports",
     linkDepth: 1,
     language: "th",
     fallbackAuthor: "",
@@ -157,12 +168,8 @@ function successNotices(): string[] {
 /** Typed accessor for the stub Plugin's `commands` introspection field (see
  * tests/fixtures/obsidian-stub.ts) — `EpubExportPlugin` is typed through the
  * REAL "obsidian" .d.ts under tsc, which has no `commands` property. */
-function commandsOf(
-  plugin: EpubExportPlugin
-): Record<string, { id: string; name: string; callback?: () => unknown }> {
-  return (
-    plugin as unknown as { commands: Record<string, { id: string; name: string; callback?: () => unknown }> }
-  ).commands;
+function commandsOf(plugin: EpubExportPlugin): Record<string, StubCommand> {
+  return (plugin as unknown as { commands: Record<string, StubCommand> }).commands;
 }
 
 /**
@@ -984,10 +991,18 @@ describe("overwrite", () => {
 // onload() at all.
 
 describe("onload: command and menu registration", () => {
-  it("registers the three export commands under their exact ids", async () => {
+  it("registers the three export commands plus the mobile share command, under their exact ids", async () => {
     const { app } = await buildVault({ "note.md": "Body.\n" });
     const plugin = await makeOnloadedPlugin(app);
-    expect(Object.keys(commandsOf(plugin)).sort()).toEqual(["export-folder", "export-linked", "export-note"]);
+    expect(Object.keys(commandsOf(plugin)).sort()).toEqual([
+      "export-folder",
+      "export-linked",
+      "export-note",
+      // 008-mobile-support: registered on every platform, but its checkCallback
+      // hides it from the palette unless a book has been exported on mobile AND
+      // the device can share (FR-017 — absent, not failing).
+      "share-last-export",
+    ]);
   });
 
   it("each command's callback runs the corresponding export against the active file", async () => {
@@ -1146,6 +1161,7 @@ describe("settings persistence", () => {
     await plugin.loadSettings();
     expect(plugin.settings).toEqual({
       outputFolder: "",
+      mobileOutputFolder: "Exports",
       linkDepth: 1,
       language: "en",
       fallbackAuthor: "Pan",
@@ -1162,6 +1178,7 @@ describe("settings persistence", () => {
 
     expect(await plugin.loadData()).toEqual({
       outputFolder: outDir,
+      mobileOutputFolder: "Exports",
       linkDepth: 1,
       language: "en",
       fallbackAuthor: "Pan",
@@ -1186,6 +1203,7 @@ describe("settings persistence", () => {
 
     expect(plugin.settings).toEqual({
       outputFolder: "",
+      mobileOutputFolder: "Exports",
       linkDepth: 1,
       language: "th",
       fallbackAuthor: "",
@@ -1569,5 +1587,235 @@ describe("heading TOC through the orchestrator (004-heading-toc)", () => {
     const epub = await readEpub("headed.epub");
     expect(epub.nav).not.toContain("#part-a");
     expect(await epub.chapter(1)).not.toContain('id="part-a"');
+  });
+});
+
+// ── 008-mobile-support: the mobile export path ────────────────────────────
+//
+// These exercise the branch a phone actually takes. `setPlatform("mobile")`
+// flips the stub's Platform; the vault stub's adapter performs a real write
+// into the test's temp vault root, so these assert a file genuinely landing in
+// the vault rather than a spy being called.
+describe("mobile export path (008-mobile-support)", () => {
+  afterEach(() => {
+    resetPlatform();
+    setShareHost(null);
+  });
+
+  it("writes the book into the vault's configured folder, not the desktop output folder", async () => {
+    const { app, root } = await buildVault({ "clean_code.md": "# Clean Code\n\nBody.\n" });
+    const plugin = makePlugin(app, { mobileOutputFolder: "Exports" });
+    setPlatform("mobile");
+
+    await plugin.exportSingle(tfile(root, "clean_code.md"));
+
+    // Landed inside the vault…
+    const written = await fs.readFile(join(root, "Exports", "clean_code.epub"));
+    expect(written.length).toBeGreaterThan(0);
+    // …and NOT in the desktop output folder (FR-004 isolation, FR-006).
+    expect(await outDirEntries()).not.toContain("clean_code.epub");
+  });
+
+  it("creates the output folder when it does not exist yet", async () => {
+    const { app, root } = await buildVault({ "n.md": "# N\n\nBody.\n" });
+    const plugin = makePlugin(app, { mobileOutputFolder: "Books/EPUB" });
+    setPlatform("mobile");
+
+    await plugin.exportSingle(tfile(root, "n.md"));
+
+    expect((await fs.readFile(join(root, "Books", "EPUB", "n.epub"))).length).toBeGreaterThan(0);
+  });
+
+  it("degrades a folder that tries to escape the vault to the default (FR-003)", async () => {
+    const { app, root } = await buildVault({ "n.md": "# N\n\nBody.\n" });
+    const plugin = makePlugin(app, { mobileOutputFolder: "../../escape" });
+    setPlatform("mobile");
+
+    await plugin.exportSingle(tfile(root, "n.md"));
+
+    expect((await fs.readFile(join(root, "Exports", "n.epub"))).length).toBeGreaterThan(0);
+  });
+
+  it("the completion notice names the vault-relative location the user can act on (FR-005/FR-018)", async () => {
+    const { app, root } = await buildVault({ "n.md": "# N\n\nBody.\n" });
+    const plugin = makePlugin(app, { mobileOutputFolder: "Exports" });
+    setPlatform("mobile");
+
+    await plugin.exportSingle(tfile(root, "n.md"));
+
+    const notice = successNotices().find((n) => n.includes("n.epub"));
+    expect(notice).toBeDefined();
+    expect(notice).toContain("Exports/n.epub");
+    // Not an absolute desktop path — that would be meaningless on a phone.
+    expect(notice).not.toContain(outDir);
+  });
+
+  it("produces a book with the same chapters as the desktop export of the same note (FR-013)", async () => {
+    const files = { "b.md": "# B\n\n## One\n\nAlpha.\n\n## Two\n\nBeta.\n" };
+
+    const desktop = await buildVault(files);
+    await makePlugin(desktop.app).exportSingle(tfile(desktop.root, "b.md"));
+    const desktopEpub = await readEpub("b.epub");
+
+    const mobile = await buildVault(files);
+    setPlatform("mobile");
+    await makePlugin(mobile.app, { mobileOutputFolder: "Exports" }).exportSingle(tfile(mobile.root, "b.md"));
+    const mobileZip = await JSZip.loadAsync(await fs.readFile(join(mobile.root, "Exports", "b.epub")));
+
+    expect(Object.keys(mobileZip.files).sort()).toEqual(desktopEpub.names.sort());
+    expect(await mobileZip.file("OEBPS/nav.xhtml")!.async("string")).toBe(desktopEpub.nav);
+  });
+
+  it("offers the share command only after a mobile export, and only when the device can share (FR-016/FR-017)", async () => {
+    const { app, root } = await buildVault({ "n.md": "# N\n\nBody.\n" });
+    const plugin = await makeOnloadedPlugin(app);
+    plugin.settings = { ...plugin.settings, mobileOutputFolder: "Exports" };
+    const check = () =>
+      (commandsOf(plugin)["share-last-export"].checkCallback as (c: boolean) => boolean)(true);
+
+    setShareHost({ canShare: () => true, share: async () => undefined });
+    // Nothing exported yet — nothing to share.
+    expect(check()).toBe(false);
+
+    setPlatform("mobile");
+    await plugin.exportSingle(tfile(root, "n.md"));
+    expect(check()).toBe(true);
+
+    // FR-017: on a device that cannot share, the command is ABSENT rather than
+    // present-and-failing, even though a book was exported.
+    setShareHost({});
+    expect(check()).toBe(false);
+  });
+
+  it("never offers the share command after a DESKTOP export", async () => {
+    const { app, root } = await buildVault({ "n.md": "# N\n\nBody.\n" });
+    const plugin = await makeOnloadedPlugin(app);
+    setShareHost({ canShare: () => true, share: async () => undefined });
+
+    await plugin.exportSingle(tfile(root, "n.md")); // platform stays desktop
+
+    const check = (commandsOf(plugin)["share-last-export"].checkCallback as (c: boolean) => boolean)(true);
+    expect(check).toBe(false);
+  });
+
+  it("shows per-chapter progress while exporting (FR-014)", async () => {
+    const { app, root } = await buildVault({
+      "book/1_a.md": "# A\n\nAlpha.\n",
+      "book/2_b.md": "# B\n\nBeta.\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "book"));
+
+    expect(NOTICES.some((n) => n.includes("chapter 1/2"))).toBe(true);
+    expect(NOTICES.some((n) => n.includes("chapter 2/2"))).toBe(true);
+  });
+});
+
+// 008-mobile-support: documents the code path that makes the empty-basePath
+// case in render.ts's rewriteImages the NORMAL one rather than an exotic one.
+// Mobile's vault adapter is not a FileSystemAdapter, so main.ts has no base
+// path to hand the renderer.
+describe("basePath on a non-FileSystemAdapter vault (008-mobile-support)", () => {
+  afterEach(() => resetPlatform());
+
+  it("resolves an app:// image by basename when the adapter has no base path", async () => {
+    const { app, root } = await buildVault({
+      "n.md": "# N\n\n![pic](pic.png)\n",
+      "pic.png": Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    });
+    // A delegating adapter that is deliberately NOT a FileSystemAdapter, so
+    // main.ts's `instanceof` check yields basePath "" exactly as on mobile.
+    const vault = (app as { vault: { adapter: unknown } }).vault;
+    const real = vault.adapter as {
+      exists(p: string): Promise<boolean>;
+      mkdir(p: string): Promise<void>;
+      writeBinary(p: string, d: ArrayBuffer): Promise<void>;
+    };
+    vault.adapter = {
+      exists: (p: string) => real.exists(p),
+      mkdir: (p: string) => real.mkdir(p),
+      writeBinary: (p: string, d: ArrayBuffer) => real.writeBinary(p, d),
+    };
+
+    const plugin = makePlugin(app, { mobileOutputFolder: "Exports" });
+    setPlatform("mobile");
+
+    await plugin.exportSingle(tfile(root, "n.md"));
+
+    const zip = await JSZip.loadAsync(await fs.readFile(join(root, "Exports", "n.epub")));
+    // The image survived: it was resolved despite there being no base path.
+    expect(Object.keys(zip.files).some((n) => n.startsWith("OEBPS/images/"))).toBe(true);
+  });
+});
+
+// ── 008-mobile-support US3: push to a Boox from mobile ────────────────────
+//
+// The transport (src/http.ts's requestUrl) is already platform-neutral, so
+// this needs no production branch. These tests exist to PROVE that rather than
+// assume it, and to pin the two properties that mobile could plausibly break:
+// the upload name, and the write-before-push order the constitution requires.
+describe("Boox push from mobile (008-mobile-support)", () => {
+  afterEach(() => resetPlatform());
+
+  it("pushes under the same file name as the desktop export does (FR-010)", async () => {
+    const bodies: number[] = [];
+    const seenUrls: string[] = [];
+    const capture = async (req: unknown) => {
+      const r = req as { url: string; body?: ArrayBuffer | string };
+      seenUrls.push(r.url);
+      bodies.push(typeof r.body === "string" ? r.body.length : (r.body?.byteLength ?? 0));
+      return {
+        status: 200,
+        headers: {},
+        arrayBuffer: new ArrayBuffer(0),
+        text: '{"successful":true}',
+        json: null,
+      };
+    };
+
+    const desktop = await buildVault({ "push_me.md": "Body.\n" });
+    setRequestUrlImpl(capture);
+    await makePlugin(desktop.app, {
+      pushAfterExport: true,
+      booxUrl: "http://boox:8085",
+    }).exportSingle(tfile(desktop.root, "push_me.md"));
+    const desktopUrls = [...seenUrls];
+
+    seenUrls.length = 0;
+    const mobile = await buildVault({ "push_me.md": "Body.\n" });
+    setPlatform("mobile");
+    setRequestUrlImpl(capture);
+    await makePlugin(mobile.app, {
+      pushAfterExport: true,
+      booxUrl: "http://boox:8085",
+      mobileOutputFolder: "Exports",
+    }).exportSingle(tfile(mobile.root, "push_me.md"));
+
+    expect(seenUrls).toEqual(desktopUrls);
+    expect(successNotices().some((n) => n.includes("pushed to Boox"))).toBe(true);
+  });
+
+  it("writes the local file BEFORE pushing, so a failed push never loses the book (constitution II)", async () => {
+    const { app, root } = await buildVault({ "push_fail.md": "Body.\n" });
+    setPlatform("mobile");
+    let fileExistedAtPushTime = false;
+    setRequestUrlImpl(async () => {
+      fileExistedAtPushTime = await fs
+        .access(join(root, "Exports", "push_fail.epub"))
+        .then(() => true)
+        .catch(() => false);
+      return { status: 500, headers: {}, arrayBuffer: new ArrayBuffer(0), text: "", json: null };
+    });
+
+    await makePlugin(app, {
+      pushAfterExport: true,
+      booxUrl: "http://boox:8085",
+      mobileOutputFolder: "Exports",
+    }).exportSingle(tfile(root, "push_fail.md"));
+
+    expect(fileExistedAtPushTime).toBe(true);
+    // And it is still there after the failure.
+    expect((await fs.readFile(join(root, "Exports", "push_fail.epub"))).length).toBeGreaterThan(0);
   });
 });

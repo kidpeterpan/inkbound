@@ -918,6 +918,27 @@ describe("rewriteImages", () => {
     expect(imgs[0].getAttribute("src")).toBe("../images/img_001.png");
     expect(imgs[1].getAttribute("src")).toBe("https://x.com/y.jpg");
   });
+  // 008-mobile-support: on mobile the vault adapter is not a FileSystemAdapter,
+  // so main.ts passes basePath: "". `"anything".indexOf("")` is 0, NOT -1, so
+  // the `at === -1` guard below it never fired and the else-branch sliced off
+  // nothing — yielding the whole app:// URL as a "vault path". That silently
+  // disabled the basename fallback these very tests describe, for EVERY image
+  // on EVERY mobile export.
+  it("falls back to the basename when basePath is empty (mobile)", () => {
+    const el = div('<img src="app://abc123/Users/pan/vault/05.%20assets/pic.png">');
+    const found = rewriteImages(el, "");
+    expect(found).toEqual([{ vaultPath: "pic.png", newHref: "../images/img_001.png" }]);
+  });
+
+  it("never returns an app:// URL as a vault path, whatever the basePath", () => {
+    for (const base of ["", "/wrong/vault", "/Users/pan/vault"]) {
+      const el = div('<img src="app://abc123/Users/pan/vault/images/pic.png">');
+      const found = rewriteImages(el, base);
+      expect(found[0].vaultPath).not.toContain("app://");
+      expect(found[0].vaultPath.startsWith("/")).toBe(false);
+    }
+  });
+
   it("tolerates malformed image URIs with literal percent", () => {
     const base = "/Users/pan/vault";
     const el = div(`<img src="app://abc123${base}/100%off.png">`);

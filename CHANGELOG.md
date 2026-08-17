@@ -3,6 +3,34 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.7.0
+
+Inkbound now runs on Obsidian mobile. Export a note, a folder, or a note and
+everything it links to from your phone or tablet — and push it to your Boox
+over Wi-Fi — without a computer anywhere in the loop.
+
+- **iOS and Android support** — the plugin loads and exports on Obsidian
+  mobile, with the same three exports, the same chapter order, the same table
+  of contents, and the same covers, math, diagrams and Thai fonts as on
+  desktop.
+- **Books are saved into your vault on mobile**, in the folder set by the new
+  **Output folder (mobile)** setting (`Exports` by default) — a phone has no
+  save-anywhere filesystem. From there you can open the book in a reading app
+  or reach it through your device's own file access.
+- **Desktop and mobile have separate output settings**, and each device only
+  reads and writes its own. If you sync your vault, changing the mobile folder
+  on your phone can never move where your desktop saves books.
+- **Share last exported book** — a new command hands the finished book to your
+  device's share sheet. It appears only where sharing is supported; where it
+  isn't, the book is still saved exactly where the notice said.
+- **Progress while exporting** — long exports now report `chapter 3/24`
+  instead of sitting on a single message, on desktop as well as mobile.
+- **Fixed: images served through `app://` could resolve to a broken path.**
+  When the vault had no filesystem base path, the fallback that recovers such
+  images by filename never ran. This affected every image on mobile, and any
+  desktop vault whose adapter isn't a filesystem one.
+- Desktop exports are unchanged — same output folder, same file contents.
+
 ## 1.6.0
 
 Chapter titles now come from the notes themselves, so a book's table of

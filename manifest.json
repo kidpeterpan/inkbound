@@ -1,11 +1,11 @@
 {
   "id": "inkbound",
   "name": "Inkbound",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "minAppVersion": "1.5.0",
   "description": "Turn notes into EPUB ebooks for your e-reader. Export a single note, or a folder of notes as a chaptered book with cover and images, and optionally send it to an Onyx Boox over Wi-Fi.",
   "author": "kidpeterpan",
   "authorUrl": "https://github.com/kidpeterpan",
   "fundingUrl": "https://buymeacoffee.com/kidpeterpan",
-  "isDesktopOnly": true
+  "isDesktopOnly": false
 }

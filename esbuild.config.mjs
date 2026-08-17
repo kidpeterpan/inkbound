@@ -20,6 +20,15 @@ const buildOptions = {
   bundle: true,
   format: "cjs",
   target: "es2020",
+  // 008-mobile-support — INVARIANT: `platform: "node"` is why this plugin can
+  // break on mobile in ways the source does not show. It makes esbuild (a)
+  // externalize node builtins, so a STATIC `import ... from "fs"` becomes a
+  // top-level require() that throws at load on mobile, and (b) emit Node
+  // variants of its runtime helpers, e.g. the Buffer-based `__toBinaryNode`
+  // for the "binary" loader (see the ttf loader note below). Neither is
+  // visible in src/. `npm run check-mobile-safe` guards both by scanning the
+  // built bundle AND loading it in a mobile-like runtime; it runs in CI right
+  // after `build`. Changing this line means re-reading that script first.
   platform: "node",
   external: ["obsidian", "electron"],
   alias,
@@ -29,9 +38,16 @@ const buildOptions = {
   // inside the shipped plugin). Defining PACKAGE_VERSION makes it take the
   // static branch instead. Keep in sync with package.json's mathjax-full.
   define: { PACKAGE_VERSION: JSON.stringify("3.2.1") },
-  // 006-thai-font: inline the bundled TTFs as Uint8Array default exports
-  // (base64 inside main.js) so the plugin ships its fonts offline.
-  loader: { ".ttf": "binary" },
+  // 006-thai-font: inline the bundled TTFs so the plugin ships its fonts
+  // offline.
+  // 008-mobile-support — INVARIANT: "base64" (a plain string), NOT "binary".
+  // Under `platform: "node"` above, the "binary" loader emits a
+  // `__toBinaryNode` helper built on `Buffer.from(base64, "base64")` that runs
+  // at module top level. `Buffer` is a Node global absent from Obsidian
+  // mobile's WebView, so "binary" makes the plugin fail to LOAD on mobile —
+  // with no require() involved for a static scan to catch. src/font-assets.ts
+  // decodes the string with atob, which exists on both platforms.
+  loader: { ".ttf": "base64" },
   sourcemap: prod ? false : "inline",
   logLevel: "info",
 };

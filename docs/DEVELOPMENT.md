@@ -32,21 +32,22 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 
 ## Development commands
 
-| Command                            | What it does                                                                                                                                        |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                     |
-| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                          |
-| `npm test`                         | Runs the vitest suite once.                                                                                                                         |
-| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.     |
-| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development" above).                      |
-| `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec. |
-| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                     |
-| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                         |
-| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                          |
+| Command                            | What it does                                                                                                                                         |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                      |
+| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                           |
+| `npm test`                         | Runs the vitest suite once.                                                                                                                          |
+| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.      |
+| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development" above).                       |
+| `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec.  |
+| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                      |
+| `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI. |
+| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                          |
+| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                           |
 | `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project.                                                                                                  |
-| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                       |
-| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                 |
-| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                         |
+| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                        |
+| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                  |
+| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                          |
 
 ## Testing and its limits
 
@@ -72,9 +73,14 @@ The gates that actually touch real artifacts, in increasing order of realism:
 1. **`npm run local-export`** (the CLI harness, below) — runs the real
    orchestrator against a real vault on disk and inspects the real EPUB zip,
    but still outside Obsidian.
-2. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
+2. **`npm run check-mobile-safe`** — proves the built bundle would load on
+   mobile at all: no node-builtin `require()` executes at load, and the bundle
+   evaluates without throwing in a runtime that has a DOM but no `Buffer`, no
+   `process`, and no `require`. See "The mobile load gate" below.
+3. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
    with the industry-standard validator.
-3. **Manual testing inside Obsidian, on the actual Boox device** — the only
+4. **Manual testing inside Obsidian, on the actual Boox device — and, since
+   008-mobile-support, on a real iPhone/iPad and a real Android device** — the only
    gate that exercises the real `MarkdownRenderer`, the real DOM Obsidian
    produces, and the real BooxDrop HTTP API.
 
@@ -101,6 +107,55 @@ this writing:
   Sans Thai is valid per epubcheck and NeoReader is documented to support
   `@font-face` embedded fonts, but the compound-vowel rendering has not been
   eye-checked on the device yet.
+
+**Mobile (008-mobile-support) — nothing below has run on a real phone.** The
+whole feature is unverified in the only sense that counts; the automated gates
+prove the bundle _can_ load and that the pure logic is right, not that Obsidian
+mobile does what we expect:
+
+- That the plugin loads and enables at all, on iOS and on Android. The
+  `check-mobile-safe` gate proves the bundle evaluates with no node builtin and
+  no `Buffer` in a jsdom-backed simulation — a real WebView is still a
+  different runtime.
+- Whether the vault adapter's `writeBinary` lands the book where the completion
+  notice claims, and whether the user can reach it through the device's own
+  file access.
+- The shape of mobile `app://` image URLs. The basename fallback in
+  `rewriteImages` is shape-agnostic by design (and its empty-`basePath` guard is
+  now correct — see below), but no real mobile URL has been observed.
+- Whether Mermaid and math rasterize at all. `defaultRasterizeSvg` uses
+  `Blob` → `Image` → `canvas`, which exist in mobile WebViews, but iOS
+  WKWebView is strict about SVG in `<img>` — especially the `foreignObject`
+  content Mermaid emits for labels. Failure already degrades to the inline SVG
+  with a warning, so this is a fidelity question, not a safety one. **Record
+  the outcome per OS.**
+- Whether `navigator.canShare({files})` is available in the mobile WebView on
+  either platform. Absence is a supported outcome (FR-017 — the command is
+  hidden, the export still succeeds), so "not available on iOS" is a result
+  worth writing down, not a bug.
+- Thai rendering on a phone, and Boox push from a phone over Wi-Fi.
+- Whether a **nested** mobile output folder (`Books/EPUB`) is created correctly.
+  `writeBook` creates it segment by segment because Obsidian's
+  `DataAdapter.mkdir` is not documented to create intermediate parents; the
+  test stub is non-recursive to match, but only a device settles it.
+- Memory: `lastShareTarget` holds the finished book's bytes in plugin memory
+  until the next export, so the share command has something to hand over. For a
+  large image-heavy book on a phone that is a real, if modest, resident cost —
+  worth watching during the 50-note check below.
+
+Note two things that WERE fixed rather than merely being listed, because they
+were provably broken:
+
+- `rewriteImages`' `app://` branch computed `decoded.indexOf(basePath)` and
+  treated `-1` as "fall back to the basename". With an empty `basePath` —
+  which is every mobile export, since the mobile adapter is not a
+  `FileSystemAdapter` — `indexOf("")` returns `0`, so the fallback never ran and
+  the whole `app://` URL was returned as a vault path. This was a latent desktop
+  bug too, for any non-`FileSystemAdapter` vault.
+- The `.ttf` binary loader emitted `Buffer.from(...)` at module top level under
+  esbuild's `platform: "node"`. `Buffer` does not exist in a mobile WebView, so
+  the plugin would have failed to load even with the `fs`/`os` imports fixed.
+  Fonts are now inlined as base64 and decoded with `atob`.
 
 Treat exports that exercise any of the above with extra scrutiny until they
 have been checked by hand. (The user-facing subset of this list — the parts
@@ -190,3 +245,33 @@ client handles application-level failures (a 2xx HTTP status with
 `"successful": false` in the JSON body) are documented in
 [`booxdrop-probe.md`](./booxdrop-probe.md) — read that before touching
 `src/booxdrop.ts`'s `UPLOAD_PATH`.
+
+## The mobile load gate (`scripts/check-mobile-safe.mjs`)
+
+Mobile support has one failure mode that dwarfs the rest: the plugin does not
+misbehave on a phone, it **fails to load at all**, before `onload()` runs and
+before any `Platform.isDesktopApp` guard could execute. Nothing in `src/` looks
+wrong when this happens, because the cause is in how the bundle is built.
+
+`esbuild.config.mjs` sets `platform: "node"`. That has two consequences a
+reader of `src/` cannot see:
+
+1. Node builtins are externalized, so a **static** `import ... from "fs"`
+   becomes a `require("fs")` at the top of `main.js`. Mobile has no `require`.
+   A **dynamic** `await import("fs")` inside a function body becomes a
+   `require()` inside that body, which mobile never reaches — that is the
+   permitted form, and `src/main.ts` uses it for its desktop-only write path.
+2. esbuild emits the _Node_ variants of its runtime helpers. The `binary`
+   loader's helper is `__toBinaryNode`, built on `Buffer.from(...)` — a Node
+   global absent from mobile WebViews, executed at module top level. This is
+   why the bundled fonts use the `base64` loader and are decoded with `atob`
+   in `src/font-assets.ts`.
+
+The gate checks both, and the second check is the important one: it **loads the
+bundle** in a jsdom-backed context with no `Buffer`, no `process`, and a
+`require` that throws for node builtins. Simulating the failing environment
+catches hazards that scanning for known symptoms cannot — hazard (2) above was
+found this way, with no `require()` anywhere in it for a scan to notice.
+
+It is not a substitute for a real device. It proves the bundle _evaluates_; it
+says nothing about whether Obsidian mobile then behaves as expected.

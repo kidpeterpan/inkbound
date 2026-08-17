@@ -4,13 +4,20 @@ import type EpubExportPlugin from "./main";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 
-import { coerceBacklinkPosition, coerceTocHeadingDepth, coerceEmbedThaiFont } from "./settings-core";
+import {
+  coerceBacklinkPosition,
+  coerceTocHeadingDepth,
+  coerceEmbedThaiFont,
+  coerceMobileOutputFolder,
+} from "./settings-core";
 
 export type { BacklinkPosition, EpubExportSettings } from "./settings-core";
 export {
   DEFAULT_SETTINGS,
   coerceBacklinkPosition,
   coerceTocHeadingDepth,
+  coerceMobileOutputFolder,
+  DEFAULT_MOBILE_OUTPUT_FOLDER,
   resolveOutputPath,
   summarizeWarnings,
 } from "./settings-core";
@@ -76,6 +83,14 @@ export class EpubExportSettingTab extends PluginSettingTab {
         name: "Output folder",
         desc: "Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.",
         control: { type: "text", key: "outputFolder" },
+      },
+      {
+        // 008-mobile-support: shown on BOTH platforms, each labeled for the
+        // platform it governs. Hiding the inactive one would leave a user
+        // unable to explain where their other device's books went.
+        name: "Output folder (mobile)",
+        desc: "Folder inside the vault where mobile saves books; empty = Exports. Mobile has no access outside the vault.",
+        control: { type: "text", key: "mobileOutputFolder" },
       },
       {
         name: "Default link depth",
@@ -146,6 +161,20 @@ export class EpubExportSettingTab extends PluginSettingTab {
       .addText((t) =>
         t.setValue(s.outputFolder).onChange((v) => {
           s.outputFolder = v;
+          void save();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Output folder (mobile)")
+      .setDesc(
+        "Folder inside the vault where mobile saves books; empty = Exports. Mobile has no access outside the vault."
+      )
+      .addText((t) =>
+        t.setValue(s.mobileOutputFolder).onChange((v) => {
+          // Coerced on the way in, not just on load: the value is handed to the
+          // vault adapter, so a typo like "../" must never reach a write.
+          s.mobileOutputFolder = coerceMobileOutputFolder(v);
           void save();
         })
       );

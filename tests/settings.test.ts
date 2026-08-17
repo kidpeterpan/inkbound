@@ -12,6 +12,8 @@ import {
   coerceBacklinkPosition,
   coerceTocHeadingDepth,
   coerceEmbedThaiFont,
+  coerceMobileOutputFolder,
+  DEFAULT_MOBILE_OUTPUT_FOLDER,
 } from "../src/settings-core";
 import { EpubExportSettingTab } from "../src/settings";
 import EpubExportPlugin from "../src/main";
@@ -70,6 +72,7 @@ describe("DEFAULT_SETTINGS", () => {
   it("matches the spec defaults", () => {
     expect(DEFAULT_SETTINGS).toEqual({
       outputFolder: "",
+      mobileOutputFolder: "Exports",
       linkDepth: 1,
       language: "th",
       fallbackAuthor: "",
@@ -137,10 +140,11 @@ describe("EpubExportSettingTab", () => {
     resetRequestUrlImpl();
   });
 
-  it("case 1: renders a setting for each of the nine fields plus the BooxDrop heading and Test-connection button", () => {
+  it("case 1: renders a setting for each of the ten fields plus the BooxDrop heading and Test-connection button", () => {
     makeTab();
     expect(SETTINGS.map((s) => s.nameEl.textContent)).toEqual([
       "Output folder",
+      "Output folder (mobile)",
       "Default link depth",
       "Backlink listing position",
       "TOC heading depth",
@@ -278,6 +282,7 @@ describe("EpubExportSettingTab", () => {
     const flat = flattenDefinitions(tab.getSettingDefinitions());
     expect(flat.map((d) => d.name)).toEqual([
       "Output folder",
+      "Output folder (mobile)",
       "Default link depth",
       "Backlink listing position",
       "TOC heading depth",
@@ -435,5 +440,75 @@ describe("embedThaiFont (006-thai-font FR-009)", () => {
     expect(coerceEmbedThaiFont(undefined)).toBe(true);
     expect(coerceEmbedThaiFont("yes" as unknown as boolean)).toBe(true);
     expect(coerceEmbedThaiFont(1 as unknown as boolean)).toBe(true);
+  });
+});
+
+// ── 008-mobile-support: mobileOutputFolder ────────────────────────────────
+describe("coerceMobileOutputFolder (008-mobile-support)", () => {
+  it("passes through a plain vault-relative folder", () => {
+    expect(coerceMobileOutputFolder("Exports")).toBe("Exports");
+    expect(coerceMobileOutputFolder("Books/EPUB")).toBe("Books/EPUB");
+  });
+
+  it("strips trailing and leading separators — the value is vault-relative only", () => {
+    expect(coerceMobileOutputFolder("Books/EPUB/")).toBe("Books/EPUB");
+    expect(coerceMobileOutputFolder("/Exports")).toBe("Exports");
+    expect(coerceMobileOutputFolder("//Exports//")).toBe("Exports");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(coerceMobileOutputFolder("  Exports  ")).toBe("Exports");
+  });
+
+  it("degrades an empty or whitespace-only value to the default", () => {
+    expect(coerceMobileOutputFolder("")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder("   ")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+  });
+
+  it("refuses to escape the vault — any .. segment degrades to the default", () => {
+    expect(coerceMobileOutputFolder("../secrets")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder("a/../../b")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder("..")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+  });
+
+  it("degrades desktop-shaped paths, which are meaningless on mobile", () => {
+    expect(coerceMobileOutputFolder("~/Downloads")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder("C:\\Books")).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+  });
+
+  // Same house contract as the other coerce* functions: persisted data.json can
+  // hold anything after hand-edits or a downgrade, and must degrade, not crash.
+  it("degrades any non-string to the default", () => {
+    expect(coerceMobileOutputFolder(42)).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder(null)).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder(undefined)).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder({})).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(coerceMobileOutputFolder([])).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+  });
+
+  it("ships a default in DEFAULT_SETTINGS", () => {
+    expect(DEFAULT_SETTINGS.mobileOutputFolder).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+  });
+});
+
+// ── 008-mobile-support: cross-device settings isolation (FR-004 / FR-006) ──
+// These pin the guarantee that makes FR-006 structural rather than careful: a
+// phone has no code path by which it could relocate desktop exports. S3/S4 pass
+// today without new code, because loadSettings' Object.assign already preserves
+// keys it does not recognize — they exist so that a future refactor of
+// loadSettings cannot silently break the guarantee.
+describe("settings isolation across synced devices (008-mobile-support)", () => {
+  it("S3: a data.json written by a phone leaves the desktop's outputFolder intact", () => {
+    const fromPhone = { mobileOutputFolder: "Books/EPUB" };
+    const merged = Object.assign({}, DEFAULT_SETTINGS, { outputFolder: "~/Books" }, fromPhone);
+    expect(merged.outputFolder).toBe("~/Books");
+    expect(merged.mobileOutputFolder).toBe("Books/EPUB");
+  });
+
+  it("S4: a data.json written by a desktop that never knew mobileOutputFolder keeps the default", () => {
+    const fromDesktop = { outputFolder: "~/Downloads" };
+    const merged = Object.assign({}, DEFAULT_SETTINGS, fromDesktop);
+    expect(merged.mobileOutputFolder).toBe(DEFAULT_MOBILE_OUTPUT_FOLDER);
+    expect(merged.outputFolder).toBe("~/Downloads");
   });
 });

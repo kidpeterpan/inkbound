@@ -1,6 +1,6 @@
 {
   "name": "inkbound",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "Export notes, book folders, or linked notes as EPUB for e-ink readers, with optional wireless delivery to Onyx Boox.",
   "author": "kidpeterpan",
@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "node esbuild.config.mjs production",
+    "check-mobile-safe": "node scripts/check-mobile-safe.mjs",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

@@ -68,16 +68,22 @@ all:
 ## Requirements
 
 - Obsidian **1.5.0** or newer.
-- **Desktop only** — Inkbound is not available on Obsidian mobile (see
-  "Known limitations" below).
+- **Desktop and mobile** — Inkbound runs on Windows, macOS and Linux, and on
+  iOS and Android. Where books are saved differs by platform (see "On a phone
+  or tablet" below).
 
 ## Install
 
-**From Obsidian's Community plugins browser**, once Inkbound is listed
-there: **Settings → Community plugins → Browse**, search for "Inkbound",
-then **Install** and enable it.
+**From Obsidian's Community plugins browser** — the easiest way, and the one
+that keeps Inkbound updated for you:
 
-**From a GitHub release** (works today, before the plugin is listed):
+1. **Settings → Community plugins → Browse**.
+2. Search for **Inkbound**, then **Install**.
+3. **Enable** it.
+
+That works on desktop and on mobile alike.
+
+**From a GitHub release**, if you would rather install manually:
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the
    [latest release](https://github.com/kidpeterpan/inkbound/releases/latest).
@@ -236,12 +242,36 @@ export is uploaded straight to the device's library after it saves. The
 local file is always written first, so a failed push never loses your
 export — it just stays in your output folder.
 
+## On a phone or tablet
+
+Inkbound works on Obsidian mobile too, with the same three exports. The one
+real difference is **where the book goes**. A phone has no folder-anywhere
+filesystem the way a laptop does, so mobile saves books **inside your vault**,
+in the folder set by **Settings → Inkbound → Output folder (mobile)**
+(`Exports` by default). From there you can open the book in a reading app,
+or reach it through your device's own file access.
+
+That gives you two independent settings — one for desktop, one for mobile —
+and each device only ever reads and writes its own. If you sync your vault,
+changing the mobile folder on your phone will never move where your desktop
+saves books, and vice versa.
+
+Because books are saved into the vault, they sync like any other vault file.
+If you would rather they didn't, point the mobile output folder at a folder
+your sync excludes.
+
+To send a finished book somewhere else, run **Share last exported book** from
+the command palette. It appears only on devices that support sharing — if you
+don't see it, the book is still saved exactly where the notice said it is.
+
+**Push to a Boox works from mobile too**, over the same Wi-Fi, so you can go
+from note to e-reader without a computer anywhere in the loop.
+
 ## Known limitations
 
-- **Desktop only.** Inkbound is not available on Obsidian mobile, because it
-  writes the `.epub` file directly to a folder on disk (the one you choose
-  in Settings) and reads note images through your vault — both of which
-  need filesystem access that mobile does not offer.
+- **Where mobile can save.** On a phone or tablet, books are saved inside your
+  vault rather than to a folder of your choosing anywhere on the device —
+  that's a platform restriction, not a setting. See "On a phone or tablet".
 - **Math typesets as images.** Expressions are rendered at export time and
   embedded as pictures (like Mermaid diagrams), which means they are no
   longer selectable or searchable text inside the EPUB. Math containing

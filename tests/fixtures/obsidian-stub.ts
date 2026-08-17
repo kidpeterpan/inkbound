@@ -11,7 +11,9 @@
 // a harness fixture, not a general-purpose Obsidian API shim.
 
 import * as fsSync from "fs";
+import { promises as nodeFs } from "fs";
 import * as pathMod from "path";
+import * as nodePath from "path";
 import { marked } from "marked";
 
 // ── DOM helper polyfills ──────────────────────────────────────────────────
@@ -240,6 +242,40 @@ export class FileSystemAdapter {
   getBasePath(): string {
     return this.basePath;
   }
+
+  // 008-mobile-support: the vault-adapter write surface, which is how MOBILE
+  // saves a book (mobile has no filesystem access outside the vault). Backed by
+  // real fs against the test's temp vault root, so mobile-path tests exercise a
+  // genuine write rather than a spy. Obsidian's real adapters take
+  // vault-relative paths; so does this.
+  async exists(vaultRelativePath: string): Promise<boolean> {
+    try {
+      await nodeFs.stat(nodePath.join(this.basePath, vaultRelativePath));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // NON-recursive, matching Obsidian's own DataAdapter.mkdir, which is not
+  // documented to create intermediate parents. A recursive stub would make a
+  // nested output folder pass here and fail on a real phone.
+  async mkdir(vaultRelativePath: string): Promise<void> {
+    await nodeFs.mkdir(nodePath.join(this.basePath, vaultRelativePath));
+  }
+
+  // Deliberately does NOT create the parent folder. Obsidian's real adapter
+  // does not either, and a stub that silently mkdir'd would let main.ts's
+  // folder-creation logic be deleted with every test still passing — the exact
+  // "stub is more permissive than the real thing" trap this repo warns about.
+  async writeBinary(vaultRelativePath: string, data: ArrayBuffer): Promise<void> {
+    await nodeFs.writeFile(nodePath.join(this.basePath, vaultRelativePath), Buffer.from(data));
+  }
+
+  async readBinary(vaultRelativePath: string): Promise<ArrayBuffer> {
+    const buf = await nodeFs.readFile(nodePath.join(this.basePath, vaultRelativePath));
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
+  }
 }
 
 // ── requestUrl (real network fetch for http/https) ───────────────────────
@@ -327,6 +363,35 @@ export function resetRequestUrlImpl(): void {
 
 export async function requestUrl(request: RequestUrlParamLike | string) {
   return (requestUrlImpl ?? realRequestUrl)(request);
+}
+
+// ── Platform (008-mobile-support) ─────────────────────────────────────────
+// Defaults to DESKTOP deliberately: every test written before mobile support
+// existed asserts desktop behavior, and must keep asserting it without being
+// touched. A test that wants the mobile branch opts in via setPlatform() and
+// resetPlatform()s afterward — same shape as setRequestUrlImpl above.
+
+export const Platform = {
+  isDesktopApp: true,
+  isMobileApp: false,
+  isIosApp: false,
+  isAndroidApp: false,
+  isMobile: false,
+  isDesktop: true,
+};
+
+export function setPlatform(kind: "desktop" | "mobile"): void {
+  const mobile = kind === "mobile";
+  Platform.isDesktopApp = !mobile;
+  Platform.isMobileApp = mobile;
+  Platform.isMobile = mobile;
+  Platform.isDesktop = !mobile;
+  Platform.isIosApp = false;
+  Platform.isAndroidApp = false;
+}
+
+export function resetPlatform(): void {
+  setPlatform("desktop");
 }
 
 // ── Component / Plugin ────────────────────────────────────────────────────
