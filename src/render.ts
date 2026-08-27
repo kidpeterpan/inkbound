@@ -305,6 +305,16 @@ export function isImageEmbedSrc(src: string): boolean {
   return EMBED_IMAGE_EXT.test(src.trim());
 }
 
+// Obsidian Bases (.base) render an interactive, filtered view of note
+// properties — an EPUB reader has no way to reproduce that, so the embed
+// degrades with a message naming the feature rather than the generic
+// "not a note" wording (GitHub issue #2: read as a failed export).
+// The suffix may carry a `#`/`^` scope (the wrapper's src is the raw
+// linktext), so the extension need not sit at the very end.
+function isBasesSrc(src: string): boolean {
+  return /\.base([#^].*)?$/i.test(src.trim());
+}
+
 // ── Scoped (heading/block) embed extraction ────────────────────────────────
 //
 // A heading-scoped (`![[Note#Heading]]`) or block-scoped (`![[Note^blockid]]`)
@@ -495,7 +505,9 @@ function embedOmissionMessage(reason: string | null, name: string): string {
     case "circular":
       return `circular embed skipped: ${name}`;
     case "unsupported-type":
-      return `unsupported embed type (not a note): ${name}`;
+      return isBasesSrc(name)
+        ? `bases view omitted (interactive Bases have no EPUB equivalent): ${name}`
+        : `unsupported embed type (not a note): ${name}`;
     case "heading-not-found":
       return `heading not found: ${name}`;
     case "block-not-found":
@@ -508,11 +520,12 @@ function embedOmissionMessage(reason: string | null, name: string): string {
 // The omission marker an embed degrades to when it has no rendered content
 // (spec.md Clarifications Q2 — matches the existing missing-image/
 // cover-download-failure convention of surfacing degraded content in the
-// export's warning summary, not just inline).
-function embedOmissionPlaceholder(name: string): HTMLElement {
+// export's warning summary, not just inline). Bases embeds name their own
+// feature so the reader-side marker explains why no table is there.
+function embedOmissionPlaceholder(reason: string | null, name: string): HTMLElement {
   const p = createEl("p");
   p.className = "omitted";
-  p.textContent = `[embedded content omitted: ${name}]`;
+  p.textContent = `[${reason === "unsupported-type" && isBasesSrc(name) ? "Bases view omitted" : "embedded content omitted"}: ${name}]`;
   return p;
 }
 
@@ -589,7 +602,9 @@ export function flattenEmbeds(root: HTMLElement): string[] {
         if (caption && !img.getAttribute("alt")) img.setAttribute("alt", caption);
         wrapper.replaceWith(img);
       } else {
-        embedReplaceTarget(wrapper).replaceWith(embedOmissionPlaceholder(name));
+        embedReplaceTarget(wrapper).replaceWith(
+          embedOmissionPlaceholder(wrapper.getAttribute("data-embed-reason"), name)
+        );
         warnings.push(embedOmissionMessage(wrapper.getAttribute("data-embed-reason"), name));
       }
       continue;
@@ -603,7 +618,7 @@ export function flattenEmbeds(root: HTMLElement): string[] {
       target.replaceWith(...Array.from(ourDiv.childNodes));
     } else {
       const reason = wrapper.getAttribute("data-embed-reason");
-      target.replaceWith(embedOmissionPlaceholder(name));
+      target.replaceWith(embedOmissionPlaceholder(reason, name));
       warnings.push(embedOmissionMessage(reason, name));
     }
   }
@@ -624,7 +639,7 @@ export function flattenEmbeds(root: HTMLElement): string[] {
     } else {
       const reason = contentEl.getAttribute("data-embed-reason");
       const name = (titleEl.textContent ?? "unknown").trim();
-      contentEl.replaceWith(embedOmissionPlaceholder(name));
+      contentEl.replaceWith(embedOmissionPlaceholder(reason, name));
       titleEl.remove();
       warnings.push(embedOmissionMessage(reason, name));
     }

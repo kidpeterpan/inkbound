@@ -411,6 +411,27 @@ describe("renderUnitToChapter", () => {
     expect(r.warnings).toEqual(["unsupported embed type (not a note): doc (referenced by note.md)"]);
   });
 
+  it("degrades an embed of an Obsidian Bases file with a feature-specific warning and placeholder", async () => {
+    // GitHub issue #2: a note embedding a .base produced the generic
+    // "unsupported embed type" wording, which its reporter read as the
+    // export having failed. The export itself always succeeded — the
+    // Bases-specific messages make both the warning and the in-book
+    // marker say exactly what was left out and why.
+    const r = await renderUnitToChapter(
+      appWith(new TFile("/vault", "61 - Connections.base")),
+      newComponent(),
+      "![[61 - Connections.base]]",
+      "note.md",
+      new Map(),
+      "/vault",
+      0
+    );
+    expect(r.xhtmlBody).toContain("[Bases view omitted: 61 - Connections.base]");
+    expect(r.warnings).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): 61 - Connections.base (referenced by note.md)",
+    ]);
+  });
+
   it("does not leak Obsidian's 'Click to create.' text for an unresolved embed", async () => {
     const r = await renderUnitToChapter(
       appWith(null),

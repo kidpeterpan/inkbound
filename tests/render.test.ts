@@ -279,6 +279,35 @@ describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", 
     expect(flattenEmbeds(el)).toEqual(["unsupported embed type (not a note): doc.pdf"]);
   });
 
+  it("surfaces a feature-specific warning and placeholder for an embedded Obsidian Bases file", () => {
+    const el = document.createElement("div");
+    el.appendChild(realEmbedWrapper({ src: "61 - Connections.base", reason: "unsupported-type" }));
+    expect(flattenEmbeds(el)).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): 61 - Connections.base",
+    ]);
+    expect(el.textContent).toContain("[Bases view omitted: 61 - Connections.base]");
+    expect(el.textContent).not.toContain("embedded content omitted");
+  });
+
+  it("matches the Bases extension case-insensitively and keeps a scope suffix in the name", () => {
+    const upper = document.createElement("div");
+    upper.appendChild(realEmbedWrapper({ src: "61 - Connections.BASE", reason: "unsupported-type" }));
+    expect(flattenEmbeds(upper)).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): 61 - Connections.BASE",
+    ]);
+
+    const scoped = document.createElement("div");
+    scoped.appendChild(realEmbedWrapper({ src: "61 - Connections.base#View", reason: "unsupported-type" }));
+    expect(flattenEmbeds(scoped)).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): 61 - Connections.base#View",
+    ]);
+    // A .pdf embed right next to it keeps the generic wording — only Bases
+    // gets the feature-specific message.
+    const pdf = document.createElement("div");
+    pdf.appendChild(realEmbedWrapper({ src: "61 - Connections.pdf", reason: "unsupported-type" }));
+    expect(flattenEmbeds(pdf)).toEqual(["unsupported embed type (not a note): 61 - Connections.pdf"]);
+  });
+
   it("degrades a wrapper with neither rendered copy nor reason to the missing-embed placeholder", () => {
     const el = document.createElement("div");
     el.appendChild(realEmbedWrapper({ src: "drawing.excalidraw" }));
