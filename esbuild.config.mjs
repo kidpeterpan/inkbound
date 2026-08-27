@@ -30,6 +30,19 @@ const buildOptions = {
   // built bundle AND loading it in a mobile-like runtime; it runs in CI right
   // after `build`. Changing this line means re-reading that script first.
   platform: "node",
+  // 008-mobile-support / desktop-load fix — INVARIANT: without this, esbuild
+  // leaves `await import("os")` VERBATIM in the CJS bundle (it only rewrites
+  // dynamic imports of modules it bundles, and platform: "node" above
+  // externalizes the builtins). Obsidian loads main.js as CommonJS, but a
+  // native import() inside it goes to the BROWSER's ESM loader, which cannot
+  // resolve a bare "os" — every desktop export died with "Failed to resolve
+  // module specifier 'os'" from 1.7.0 until this line. Telling esbuild the
+  // target does not support dynamic import makes it lower each one to a
+  // require() in place, INSIDE the function body — which is what the lazy-
+  // import invariant in src/main.ts has always claimed to produce, and what
+  // keeps the plugin loadable on mobile. `npm run check-mobile-safe` (check
+  // 1b) fails the build if a raw import() of a builtin ever returns.
+  supported: { "dynamic-import": false },
   external: ["obsidian", "electron"],
   alias,
   // mathjax-full's version.js does `eval('require')` + __dirname to read its

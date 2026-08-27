@@ -503,6 +503,13 @@ export default class EpubExportPlugin extends Plugin {
   // before any Platform check could guard anything. Inside a function body the
   // same import compiles to a require() that only executes if this function is
   // called, which on mobile it never is.
+  //
+  // That last sentence is true ONLY because esbuild.config.mjs sets
+  // `supported: { "dynamic-import": false }`. Without it esbuild emits these
+  // `await import("os")` calls verbatim, Obsidian hands them to the browser's
+  // ESM loader, and export dies with "Failed to resolve module specifier 'os'"
+  // — on desktop, where the require-scan had nothing to find. Read that flag's
+  // comment before touching either import below.
   // `npm run check-mobile-safe` fails the build if this ever regresses.
   // See specs/008-mobile-support/contracts/platform-seam.md.
   private async desktopHomedir(): Promise<string> {
