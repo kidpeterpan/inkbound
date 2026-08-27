@@ -52,6 +52,10 @@ jobs:
       # mobile-like runtime. A release that fails this would install on a phone
       # and then fail to load at all, so it gates a release as firmly as CI.
       - run: npm run check-mobile-safe
+      # Must follow build — same reason as in ci.yml: the review scanner greps
+      # the shipped bundle, so a release containing flagged text would be
+      # re-flagged the moment it shipped.
+      - run: npm run check-review-safe
       - run: npm run version:check
 
       # Publishes a signed statement that these exact bytes were built by this

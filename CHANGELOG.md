@@ -3,6 +3,36 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.7.3
+
+Clearer handling of embedded Obsidian Bases files (GitHub issue #2), and a
+bundle that no longer trips Obsidian's plugin-review scanner.
+
+- **Embedding a `.base` file now says exactly what happened** — a note that
+  embeds an Obsidian Bases file (`![[Connections.base]]`) was always omitted
+  from the book with a warning, but the generic "unsupported embed type (not
+  a note)" wording read like the export had failed. The warning now reads
+  "bases view omitted (interactive Bases have no EPUB equivalent)" and the
+  in-book marker reads "[Bases view omitted: …]", so it is clear the export
+  itself succeeded and why the view cannot be included. Bases are live,
+  interactive views of note properties — an EPUB page has no static
+  equivalent to render them into.
+- **No more "Dynamic Code Execution" review findings** — the shipped bundle
+  contained the TEXT `eval("require")` (MathJax's version module, inside a
+  branch that never ran) and six `new Function` matches (all of them actually
+  `new FunctionList()`, MathJax's filter-pipeline class). Obsidian's review
+  scanner greps the bundle verbatim, so both were flagged despite being
+  behaviorally inert. The build now stamps MathJax's version in from its real
+  package.json (replacing the eval-based module) and consistently renames the
+  colliding identifier, so the bundle contains no `eval(` or `new Function`
+  text at all. A new `check-review-safe` gate runs in CI after every build so
+  a dependency upgrade cannot silently reintroduce either pattern.
+- **"Direct Filesystem Access" remains, intentionally** — writing the finished
+  EPUB to a folder you choose outside the vault has no Obsidian-API
+  equivalent, so the desktop-only, lazily-imported `fs` write stays. It
+  remains guarded behind `Platform.isDesktop` and loaded only when an export
+  actually writes a book.
+
 ## 1.7.2
 
 Fixes a bug that broke EPUB export entirely on desktop in 1.7.0 and 1.7.1.
