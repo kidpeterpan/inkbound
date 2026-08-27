@@ -9,9 +9,14 @@
 // esbuild.config.mjs sets platform: "node", which externalizes node builtins
 // rather than bundling them, so a static `import ... from "fs"` compiles to a
 // top-level require(). A dynamic `await import("fs")` inside a function body
-// compiles to a require() inside that function body, which mobile never
-// reaches. This script is what keeps a future refactor from quietly turning
-// the second form back into the first.
+// only compiles to a require() inside that function body BECAUSE
+// esbuild.config.mjs sets `supported: { "dynamic-import": false }` — without
+// that flag esbuild leaves the `import()` verbatim in the CJS bundle, and
+// Obsidian evaluates it through the browser's ESM loader, which cannot resolve
+// a bare "os"/"fs" specifier. That shipped in 1.7.0 and broke export on
+// DESKTOP, where this script's require-scan had nothing to find. Check 1b
+// below is the guard for that second form; this script keeps a future
+// refactor from quietly turning the lazy form back into either hazard.
 //
 // HOW IT DECIDES: esbuild's non-minified output puts top-level statements at
 // column 0 and indents everything nested inside a function. So a require() of
@@ -29,17 +34,45 @@ const BUNDLE = fileURLToPath(new URL("../main.js", import.meta.url));
 // Externalized by esbuild's platform: "node". `obsidian` and `electron` are
 // externals too, but Obsidian itself provides those — they are not the hazard.
 const NODE_BUILTINS = [
-  "assert", "buffer", "child_process", "cluster", "constants", "crypto", "dns",
-  "domain", "events", "fs", "http", "http2", "https", "inspector", "module",
-  "net", "os", "path", "perf_hooks", "process", "punycode", "querystring",
-  "readline", "repl", "stream", "string_decoder", "sys", "timers", "tls",
-  "tty", "url", "util", "v8", "vm", "worker_threads", "zlib",
+  "assert",
+  "buffer",
+  "child_process",
+  "cluster",
+  "constants",
+  "crypto",
+  "dns",
+  "domain",
+  "events",
+  "fs",
+  "http",
+  "http2",
+  "https",
+  "inspector",
+  "module",
+  "net",
+  "os",
+  "path",
+  "perf_hooks",
+  "process",
+  "punycode",
+  "querystring",
+  "readline",
+  "repl",
+  "stream",
+  "string_decoder",
+  "sys",
+  "timers",
+  "tls",
+  "tty",
+  "url",
+  "util",
+  "v8",
+  "vm",
+  "worker_threads",
+  "zlib",
 ];
 
-const pattern = new RegExp(
-  `require\\(\\s*["'](?:node:)?(${NODE_BUILTINS.join("|")})["']\\s*\\)`,
-  "g",
-);
+const pattern = new RegExp(`require\\(\\s*["'](?:node:)?(${NODE_BUILTINS.join("|")})["']\\s*\\)`, "g");
 
 if (!existsSync(BUNDLE)) {
   console.error("check-mobile-safe: main.js not found — run `npm run build` first.");
@@ -62,7 +95,7 @@ if (lines.length < 50 || avgLineLength > 500) {
     `check-mobile-safe: main.js looks minified (${lines.length} lines, ` +
       `${Math.round(avgLineLength)} chars/line average). This check distinguishes ` +
       "top-level from nested code by indentation, which minification destroys. " +
-      "Revisit this script before shipping a minified bundle.",
+      "Revisit this script before shipping a minified bundle."
   );
   process.exit(2);
 }
@@ -82,7 +115,7 @@ lines.forEach((line, i) => {
 if (topLevel.length > 0) {
   console.error(
     `check-mobile-safe: FAIL — ${topLevel.length} node-builtin require(s) execute at plugin load.\n` +
-      "Obsidian mobile has no require(), so the plugin will fail to load entirely.\n",
+      "Obsidian mobile has no require(), so the plugin will fail to load entirely.\n"
   );
   for (const hit of topLevel) {
     console.error(`  main.js:${hit.line}  require("${hit.module}")`);
@@ -92,7 +125,54 @@ if (topLevel.length > 0) {
     "\nFix: move the import inside the desktop-only branch as a dynamic import,\n" +
       '  e.g. `const { promises: fs } = await import("fs");` inside the function\n' +
       "  body, reached only when Platform.isDesktopApp is true.\n" +
-      "  See specs/008-mobile-support/contracts/platform-seam.md.",
+      "  See specs/008-mobile-support/contracts/platform-seam.md."
+  );
+  process.exit(1);
+}
+
+// ── Check 1b: native dynamic import() of a node builtin ────────────────────
+//
+// A different hazard from the one above, and a WORSE one: it kills the plugin
+// on desktop too. esbuild does not rewrite `await import("os")` of an
+// externalized builtin unless `supported: { "dynamic-import": false }` is set
+// in esbuild.config.mjs — it emits the `import()` verbatim. Obsidian loads
+// main.js as CommonJS, but a native import() inside it is resolved by the
+// browser's ESM loader, which has no notion of a bare "os" specifier:
+//
+//   EPUB export failed: Failed to resolve module specifier 'os'
+//
+// Indentation does NOT excuse this one. A nested require() is fine because
+// mobile simply never calls that function; a nested import() is fatal the
+// moment the desktop branch it guards actually runs. So any hit fails.
+const dynamicImportPattern = new RegExp(
+  `import\\(\\s*["'\`](?:node:)?(${NODE_BUILTINS.join("|")})["'\`]\\s*\\)`,
+  "g"
+);
+
+const dynamicImports = [];
+lines.forEach((line, i) => {
+  // Skip comment lines: main.ts's invariant comments name these imports in
+  // prose, and esbuild copies them into the bundle verbatim.
+  if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+  for (const match of line.matchAll(dynamicImportPattern)) {
+    dynamicImports.push({ line: i + 1, module: match[1], text: line.trim().slice(0, 100) });
+  }
+});
+
+if (dynamicImports.length > 0) {
+  console.error(
+    `check-mobile-safe: FAIL — ${dynamicImports.length} native dynamic import(s) of node builtins.\n` +
+      "Obsidian resolves these through the browser's ESM loader, which throws\n" +
+      '"Failed to resolve module specifier" — on DESKTOP as well as mobile.\n'
+  );
+  for (const hit of dynamicImports) {
+    console.error(`  main.js:${hit.line}  import("${hit.module}")`);
+    console.error(`    ${hit.text}`);
+  }
+  console.error(
+    '\nFix: esbuild.config.mjs must set `supported: { "dynamic-import": false }`\n' +
+      "  so esbuild lowers these to require() calls inside the same function body.\n" +
+      "  See specs/008-mobile-support/contracts/platform-seam.md."
   );
   process.exit(1);
 }
@@ -151,8 +231,8 @@ try {
     "\nThe plugin would not merely misbehave on mobile — it would fail to load.\n" +
       "  Cause is usually a Node-only API used at module top level: a static node\n" +
       "  import, or a Node global such as Buffer/process (esbuild's `binary` loader\n" +
-      "  emits Buffer.from under platform: \"node\" — use `base64` and decode with atob).\n" +
-      "  See specs/008-mobile-support/contracts/platform-seam.md.",
+      '  emits Buffer.from under platform: "node" — use `base64` and decode with atob).\n' +
+      "  See specs/008-mobile-support/contracts/platform-seam.md."
   );
   process.exit(1);
 }
@@ -162,5 +242,5 @@ console.log(
     (nested.length > 0
       ? ` (${nested.length} lazy require(s) inside function bodies, which is the permitted form)`
       : "") +
-    ", and the bundle loads cleanly in a mobile-like runtime.",
+    ", and the bundle loads cleanly in a mobile-like runtime."
 );

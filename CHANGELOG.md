@@ -3,6 +3,24 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.7.2
+
+Fixes a bug that broke EPUB export entirely on desktop in 1.7.0 and 1.7.1.
+
+- **Export no longer fails with "Failed to resolve module specifier 'os'"** —
+  the desktop-only `os` and `fs` imports are lazy so that the plugin still
+  loads on mobile, but esbuild was leaving them in the built plugin as native
+  `import()` calls. Obsidian loads the plugin as CommonJS and hands a native
+  `import()` to the browser's module loader, which cannot resolve a bare
+  `"os"`, so every desktop export failed at the point it worked out where to
+  write the book. The build now compiles those imports to `require()` calls in
+  place — still lazy, still never reached on mobile.
+- **The build gate now catches this class of bug.** `check-mobile-safe` only
+  looked for imports that run when the plugin loads, which is why a broken
+  desktop build passed it twice. It now also fails on any native `import()` of
+  a Node builtin anywhere in the plugin, and the notes that described the old
+  (incorrect) behavior have been corrected.
+
 ## 1.7.1
 
 Fixes every finding from Obsidian's plugin review, and makes those rules part
