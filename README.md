@@ -1,5 +1,14 @@
 # Inkbound
 
+```text
+██╗███╗   ██╗██╗  ██╗██████╗  ██████╗ ██╗   ██╗███╗   ██╗██████╗
+██║████╗  ██║██║ ██╔╝██╔══██╗██╔═══██╗██║   ██║████╗  ██║██╔══██╗
+██║██╔██╗ ██║█████╔╝ ██████╔╝██║   ██║██║   ██║██╔██╗ ██║██║  ██║
+██║██║╚██╗██║██╔═██╗ ██╔══██╗██║   ██║██║   ██║██║╚██╗██║██║  ██║
+██║██║ ╚████║██║  ██╗██████╔╝╚██████╔╝╚██████╔╝██║ ╚████║██████╔╝
+╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═════╝  ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚═════╝
+```
+
 Inkbound exports your Obsidian notes as EPUB ebooks, so you can read them
 comfortably on an e-ink device instead of a laptop screen.
 
@@ -125,6 +134,7 @@ Found under **Settings → Community plugins → Inkbound**:
 | Setting                   | Default                      | Purpose                                                                                                                                                                                                                       |
 | ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Output folder             | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                                                        |
+| Output folder (mobile)    | `"Exports"`                  | Vault-relative folder books are saved into on a phone or tablet, since mobile has no filesystem-folder-anywhere (see "On a phone or tablet"). Desktop never reads or writes it.                                                    |
 | Default link depth        | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
 | Backlink listing position | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
 | TOC heading depth         | `3` (Level 3)                | Deepest heading level listed under each chapter in the book's table of contents (0–6, via a dropdown). `Off` restores the flat chapter-only TOC.                                                                              |
@@ -272,6 +282,12 @@ from note to e-reader without a computer anywhere in the loop.
 - **Where mobile can save.** On a phone or tablet, books are saved inside your
   vault rather than to a folder of your choosing anywhere on the device —
   that's a platform restriction, not a setting. See "On a phone or tablet".
+- **Obsidian Bases export as an omission marker.** Embedding a Bases file
+  (`![[Connections.base]]`) cannot become book content — Bases are live,
+  interactive views of note properties, and an EPUB page has no static
+  equivalent. The chapter shows `[Bases view omitted: …]` where the embed
+  was, the export logs a warning naming the file, and the export itself
+  succeeds.
 - **Math typesets as images.** Expressions are rendered at export time and
   embedded as pictures (like Mermaid diagrams), which means they are no
   longer selectable or searchable text inside the EPUB. Math containing
