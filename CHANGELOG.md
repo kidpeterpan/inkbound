@@ -3,6 +3,41 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.8.0
+
+Folder exports now read the book's structure from your notes instead of from
+filenames: the index note's link order is the chapter order, and subfolders
+become nested Parts in the table of contents.
+
+- **Chapters follow the index note's links.** In a folder export, the notes are
+  ordered by the sequence of regular `[[links]]` in the index note (the note
+  tagged `book` + `main`, or named after the folder). Reorder the links, export
+  again, and the book follows — no more renaming files to move a chapter. The
+  first link to a note wins; embeds (`![[…]]`), links inside frontmatter, and
+  links to notes outside the folder do not count.
+- **Unlinked notes are never dropped.** Notes the index note does not mention
+  are appended after the linked ones, in the previous order (numeric `NN_`
+  prefixes first, then by name). A folder with no index note, or an index note
+  with no links, exports exactly as before.
+- **Subfolders become Parts.** Every note under the exported folder, at any
+  depth, is now a chapter, and each subfolder that contains notes appears in
+  the table of contents as a Part with its chapters nested beneath it. A
+  subfolder's own index note (same detection rules) titles the Part, comes
+  first, and orders the Part's chapters; otherwise the folder name is the title.
+  Tapping a Part opens its first chapter. Folders with no notes beneath them
+  (an `assets/` folder) produce nothing. The root index note can place whole
+  Parts by linking to any note inside them.
+- **Behaviour change to be aware of:** earlier versions ignored subfolders
+  entirely, so a `drafts/` folder inside a book folder used to be silently
+  skipped and is now exported as a Part. Move such folders out of the book
+  folder to keep them out of the book. Flat folders are unaffected — their
+  output is byte-for-byte what 1.7.x produced.
+- **Never fails an export.** If anything goes wrong while working out the
+  order or the Parts, the export falls back to the previous filename order
+  with a warning naming the cause, and a table of contents the reader could
+  not open would fall back to the flat list — the book is always written.
+- Single-note and note-plus-linked exports are unchanged.
+
 ## 1.7.3
 
 Clearer handling of embedded Obsidian Bases files (GitHub issue #2), and a

@@ -1,5 +1,5 @@
 import { writeFileSync } from "fs";
-import { EpubBuilder } from "../src/epub";
+import { EpubBuilder, type NavItem } from "../src/epub";
 import { renderMathToSvg } from "../src/math";
 
 // A real 1×1 transparent PNG (base64) so the sample's cover page and
@@ -56,6 +56,30 @@ b.setThaiFont({
   bold: new Uint8Array([0x00, 0x01, 0x02]),
   license: "SIL OPEN FONT LICENSE Version 1.1 — fixture",
 });
+// Nested Parts (009-index-order-parts, SC-004): three Part levels deep —
+// root → "Part A" (an index chapter WITH heading sub-entries, so the merged
+// single-<ol> shape is validated) → "Deep" → "Deeper" → a chapter — so
+// epubcheck sees the nav grammar this feature emits at real depth. The tree
+// must follow spine order (epubcheck NAV-011 warns otherwise) — the planner
+// guarantees that for real books (FR-015); a hand-built sample has to too.
+const ch = (chapter: number): NavItem => ({ kind: "chapter", chapter });
+b.setNavTree([
+  ch(0),
+  ch(1),
+  {
+    kind: "part",
+    title: "Part A (ignored: index chapter titles it)",
+    indexChapter: 2,
+    children: [
+      {
+        kind: "part",
+        title: "Deep",
+        indexChapter: null,
+        children: [{ kind: "part", title: "Deeper & <nested>", indexChapter: null, children: [ch(3)] }],
+      },
+    ],
+  },
+]);
 b.build().then((bytes) => {
   writeFileSync("sample.epub", bytes);
   console.log("wrote sample.epub", bytes.length, "bytes");

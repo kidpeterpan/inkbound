@@ -271,6 +271,384 @@ function failFor(obj: unknown, method: string, path: string, error: Error): void
   target[method] = (f: { path: string }) => (f.path === path ? Promise.reject(error) : original(f));
 }
 
+// ── 009-index-order-parts: fixture sanity ───────────────────────────────
+//
+// main.ts reads `getFileCache(file).links` to learn an index note's chapter
+// order (research R4). Real Obsidian keeps embeds in `embeds`, frontmatter
+// links in `frontmatterLinks`, and never indexes fenced code — so the stub's
+// `links` must exclude all three or the ordering tests below would pass
+// against behaviour the real app does not have.
+describe("vault-stub: FileCache.links", () => {
+  it("lists regular wikilinks in document order and excludes embeds, frontmatter and fenced code", async () => {
+    const { app, root } = await buildVault({
+      "idx.md": [
+        "---",
+        "related: [[fm-link]]",
+        "tags: [book, main]",
+        "---",
+        "",
+        "# Index",
+        "",
+        "See [[b|Bee]] then [[a#Head]].",
+        "",
+        "![[embedded]]",
+        "",
+        "```",
+        "[[in-code]]",
+        "```",
+        "",
+        "- [[c^blk]]",
+        "",
+      ].join("\n"),
+      "a.md": "a",
+      "b.md": "b",
+      "c.md": "c",
+      "embedded.md": "e",
+      "in-code.md": "i",
+      "fm-link.md": "f",
+    });
+    const cache = (
+      app as unknown as {
+        metadataCache: {
+          getFileCache(f: unknown): {
+            links?: {
+              link: string;
+              original: string;
+              position: { start: { offset: number; line: number } };
+            }[];
+          } | null;
+        };
+      }
+    ).metadataCache.getFileCache(tfile(root, "idx.md"));
+    const links = cache?.links ?? [];
+    expect(links.map((l) => l.link)).toEqual(["b", "a#Head", "c^blk"]);
+    expect(links.map((l) => l.original)).toEqual(["[[b|Bee]]", "[[a#Head]]", "[[c^blk]]"]);
+    const offsets = links.map((l) => l.position.start.offset);
+    expect(offsets).toEqual([...offsets].sort((x, y) => x - y));
+    // Line numbers are 0-based and count the frontmatter, like Obsidian's.
+    expect(links[0].position.start.line).toBe(7);
+    expect(links[2].position.start.line).toBe(15);
+  });
+});
+
+// ── 009-index-order-parts: planner fallback (research R5, FR-016) ────────
+describe("folder export: planner fallback", () => {
+  it("falls back to filename order with a warning when planning throws, instead of failing the export", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\nRead [[2_b]] before [[1_a]].\n",
+      "book/1_a.md": "# A\n\nbody-a\n",
+      "book/2_b.md": "# B\n\nbody-b\n",
+    });
+    // Only the planner reads `.links` — titles, tags and rendering read other
+    // fields — so a throwing `links` getter isolates the failure to the new
+    // ordering path and leaves the legacy path and the chapter loop intact.
+    const mc = (app as unknown as { metadataCache: { getFileCache(f: { path: string }): object | null } })
+      .metadataCache;
+    const original = mc.getFileCache.bind(mc);
+    mc.getFileCache = (f: { path: string }) => {
+      const cache = original(f);
+      if (cache && f.path === "book/book.md") {
+        Object.defineProperty(cache, "links", {
+          get() {
+            throw new Error("cache exploded");
+          },
+        });
+      }
+      return cache;
+    };
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    // Legacy order: index, then NN_ ascending — NOT the index's link order.
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">Book</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">A</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">B</a>');
+    expect(
+      warnings.some(
+        (w) => w.includes("chapter ordering fell back to filename order") && w.includes("cache exploded")
+      )
+    ).toBe(true);
+    expect(successNotices().some((n) => n.includes("Exported with 1 warning"))).toBe(true);
+  });
+});
+
+// ── 009-index-order-parts US1: index note link order ─────────────────────
+describe("folder export: index note link order (US1)", () => {
+  it("orders chapters by the index note's links, then appends unlinked notes in today's order", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "---",
+        "",
+        "# The Book",
+        "",
+        "- [[recursion]]",
+        "- [[introduction]]",
+        "- [[selection_sort]]",
+        "",
+      ].join("\n"),
+      "book/introduction.md": "# Introduction\n\nmarker-intro\n",
+      "book/recursion.md": "# Recursion\n\nmarker-recursion\n",
+      "book/selection_sort.md": "# Selection Sort\n\nmarker-selection\n",
+      "book/appendix.md": "# Appendix\n\nmarker-appendix\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(5);
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">The Book</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">Recursion</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">Introduction</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">Selection Sort</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_005.xhtml">Appendix</a>');
+    expect(await epub.chapter(2)).toContain("marker-recursion");
+    expect(await epub.chapter(5)).toContain("marker-appendix");
+    // The index's own links became sibling chapter hrefs in reading order.
+    const index = await epub.chapter(1);
+    expect(index.indexOf('href="chapter_002.xhtml"')).toBeLessThan(index.indexOf('href="chapter_003.xhtml"'));
+    expect(warnings).toEqual([]);
+  });
+
+  it("alias, heading and block link forms all order the target note", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[c|See C]] and [[a#Top]] and [[b#^blk]]\n",
+      "book/a.md": "# A\n\n## Top\n\nx\n",
+      "book/b.md": "# B\n\npara ^blk\n",
+      "book/c.md": "# C\n\ny\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">C</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">A</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">B</a>');
+  });
+
+  it("embeds do not order: an embedded note lands in the unlinked group", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n![[z_embedded]]\n\n[[m_linked]]\n",
+      "book/a_first.md": "# A First\n\nx\n",
+      "book/m_linked.md": "# M Linked\n\ny\n",
+      "book/z_embedded.md": "# Z Embedded\n\nz\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    // linked first; then unlinked alphabetical: a_first, z_embedded.
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">M Linked</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">A First</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_004.xhtml">Z Embedded</a>');
+  });
+
+  it("a link to a note outside the folder is ignored without a warning", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[outside]] then [[b]] then [[a]]\n",
+      "book/a.md": "# A\n\nx\n",
+      "book/b.md": "# B\n\ny\n",
+      "outside.md": "# Outside\n\nnot in the book\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">B</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_003.xhtml">A</a>');
+    expect(epub.nav).not.toContain("Outside");
+    expect(warnings).toEqual([]);
+  });
+});
+
+// ── 009-index-order-parts US2: subfolders become Parts ────────────────────
+describe("folder export: subfolders become Parts (US2)", () => {
+  const olCount = (nav: string) => (nav.match(/<ol>/g) ?? []).length;
+
+  it("exports notes at any depth, nests each note-bearing subfolder as a Part, and skips asset folders", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# The Book\n\nintro\n",
+      "book/01_preface.md": "# Preface\n\nmarker-preface\n",
+      "book/Part I/ch1.md": "# Ch1\n\nmarker-ch1\n",
+      "book/Part I/ch2.md": "# Ch2\n\nmarker-ch2\n",
+      "book/Part II/ch3.md": "# Ch3\n\nmarker-ch3\n",
+      "book/assets/pic.png": new Uint8Array([137, 80, 78, 71]),
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(5);
+    expect(epub.nav).toContain('<li><a href="text/chapter_001.xhtml">The Book</a></li>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_002.xhtml">Preface</a></li>');
+    // Part I links to its first chapter and nests both chapters beneath it.
+    const partI = epub.nav.indexOf('<li><a href="text/chapter_003.xhtml">Part I</a><ol>');
+    expect(partI).toBeGreaterThan(-1);
+    expect(epub.nav.indexOf('<li><a href="text/chapter_003.xhtml">Ch1</a></li>')).toBeGreaterThan(partI);
+    expect(epub.nav.indexOf('<li><a href="text/chapter_004.xhtml">Ch2</a></li>')).toBeGreaterThan(partI);
+    expect(epub.nav).toContain('<li><a href="text/chapter_005.xhtml">Part II</a><ol>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_005.xhtml">Ch3</a></li>');
+    expect(epub.nav).not.toContain("assets");
+    expect(await epub.chapter(3)).toContain("marker-ch1");
+    expect(await epub.chapter(5)).toContain("marker-ch3");
+    expect(warnings).toEqual([]);
+  });
+
+  it("a sub-index note titles its Part, is the Part's entry (not repeated), and its links order the Part", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# The Book\n\nintro\n",
+      "book/Part I/Part I.md": "# Part One\n\n## Overview\n\n[[ch2]] then [[ch1]]\n",
+      "book/Part I/ch1.md": "# Ch1\n\nx\n",
+      "book/Part I/ch2.md": "# Ch2\n\ny\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(4);
+    const part = epub.nav.indexOf('<li><a href="text/chapter_002.xhtml">Part One</a><ol>');
+    expect(part).toBeGreaterThan(-1);
+    expect((epub.nav.match(/Part One/g) ?? []).length).toBe(1);
+    const overview = epub.nav.indexOf("chapter_002.xhtml#");
+    const ch2 = epub.nav.indexOf('<li><a href="text/chapter_003.xhtml">Ch2</a></li>');
+    const ch1 = epub.nav.indexOf('<li><a href="text/chapter_004.xhtml">Ch1</a></li>');
+    expect(part).toBeLessThan(overview);
+    expect(overview).toBeLessThan(ch2);
+    expect(ch2).toBeLessThan(ch1);
+    // The chapters sit INSIDE the Part's single <ol> (which also holds the
+    // heading sub-entry) — the list must not close before them.
+    expect(epub.nav.indexOf("</ol>", part)).toBeGreaterThan(ch1);
+  });
+
+  it("FR-018: same-named notes in different Parts are distinct chapters and cross-links resolve to the right one", async () => {
+    const { app, root } = await buildVault({
+      "book/Part I/notes.md": "# Notes One\n\nSee [[book/Part II/notes.md|the other notes]].\n",
+      "book/Part II/notes.md": "# Notes Two\n\nmarker-two\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(epub.nav).toContain('<a href="text/chapter_001.xhtml">Notes One</a>');
+    expect(epub.nav).toContain('<a href="text/chapter_002.xhtml">Notes Two</a>');
+    expect(await epub.chapter(1)).toContain('href="chapter_002.xhtml"');
+    expect(await epub.chapter(2)).toContain("marker-two");
+  });
+
+  it("R2: a chapter that fails to render inside a Part keeps its nav slot, pointing at the placeholder", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# The Book\n\nintro\n",
+      "book/Part I/ch1.md": "# Ch1\n\nx\n",
+      "book/Part I/ch2.md": "# Ch2\n\ny\n",
+      "book/Part I/ch3.md": "# Ch3\n\nmarker-ch3\n",
+    });
+    failFor(app.vault, "cachedRead", "book/Part I/ch2.md", new Error("disk read failed"));
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(4);
+    expect(epub.nav).toContain('<li><a href="text/chapter_002.xhtml">Part I</a><ol>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_003.xhtml">Ch2</a></li>');
+    expect(await epub.chapter(3)).toContain("chapter failed to render");
+    expect(await epub.chapter(4)).toContain("marker-ch3");
+    expect(warnings.some((w) => w.includes("chapter skipped"))).toBe(true);
+  });
+
+  it("FR-013: a flat folder still gets the flat nav — one <ol>, no Parts", async () => {
+    const { app, root } = await buildVault({
+      "flat/flat.md": "---\ntags: [book, main]\n---\n\n# Flat\n\nintro\n",
+      "flat/1_a.md": "# A\n\nx\n",
+      "flat/2_b.md": "# B\n\ny\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "flat"));
+
+    const epub = await readEpub("flat.epub");
+    expect(olCount(epub.nav)).toBe(1);
+    expect(epub.nav).toContain('<li><a href="text/chapter_001.xhtml">Flat</a></li>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_002.xhtml">A</a></li>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_003.xhtml">B</a></li>');
+  });
+
+  it("FR-014: single-note and linked exports are untouched — flat nav, one <ol>", async () => {
+    const { app, root } = await buildVault({
+      "Deep/Nested/start.md": "# Start\n\n[[Deep/Nested/next.md]]\n",
+      "Deep/Nested/next.md": "# Next\n\nz\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "Deep/Nested/start.md"));
+    const single = await readEpub("start.epub");
+    expect(single.spineCount(single.opf)).toBe(1);
+    expect(olCount(single.nav)).toBe(1);
+
+    await plugin.exportLinked(tfile(root, "Deep/Nested/start.md"));
+    const linked = await readEpub("start.epub");
+    expect(linked.spineCount(linked.opf)).toBe(2);
+    expect(olCount(linked.nav)).toBe(1);
+    expect(linked.nav).toContain('<li><a href="text/chapter_002.xhtml">Next</a></li>');
+  });
+});
+
+// ── 009-index-order-parts US3: the root index places Parts ────────────────
+describe("folder export: root index places Parts (US3)", () => {
+  it("a root link into a subfolder drags that whole Part to the link's position", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md":
+        "---\ntags: [book, main]\n---\n\n# The Book\n\nStart with [[ch3]], then [[01_preface]].\n",
+      "book/01_preface.md": "# Preface\n\nmarker-preface\n",
+      "book/Part I/ch1.md": "# Ch1\n\nmarker-ch1\n",
+      "book/Part I/ch2.md": "# Ch2\n\nmarker-ch2\n",
+      "book/Part II/ch3.md": "# Ch3\n\nmarker-ch3\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(5);
+    expect(epub.nav).toContain('<li><a href="text/chapter_001.xhtml">The Book</a></li>');
+    const partII = epub.nav.indexOf('<li><a href="text/chapter_002.xhtml">Part II</a><ol>');
+    const ch3 = epub.nav.indexOf('<li><a href="text/chapter_002.xhtml">Ch3</a></li>');
+    const preface = epub.nav.indexOf('<li><a href="text/chapter_003.xhtml">Preface</a></li>');
+    const partI = epub.nav.indexOf('<li><a href="text/chapter_004.xhtml">Part I</a><ol>');
+    const ch1 = epub.nav.indexOf('<li><a href="text/chapter_004.xhtml">Ch1</a></li>');
+    const ch2 = epub.nav.indexOf('<li><a href="text/chapter_005.xhtml">Ch2</a></li>');
+    for (const i of [partII, ch3, preface, partI, ch1, ch2]) expect(i).toBeGreaterThan(-1);
+    expect(partII).toBeLessThan(ch3);
+    expect(ch3).toBeLessThan(preface);
+    expect(preface).toBeLessThan(partI);
+    expect(partI).toBeLessThan(ch1);
+    expect(ch1).toBeLessThan(ch2);
+    expect(await epub.chapter(2)).toContain("marker-ch3");
+    expect(await epub.chapter(3)).toContain("marker-preface");
+    expect(await epub.chapter(5)).toContain("marker-ch2");
+    expect(warnings).toEqual([]);
+  });
+
+  it("FR-004: a regular link to an IMAGE inside a Part does not place that Part", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md":
+        "---\ntags: [book, main]\n---\n\n# The Book\n\nFigure: [[Part I/fig.png]] then [[01_preface]].\n",
+      "book/01_preface.md": "# Preface\n\nmarker-preface\n",
+      "book/Part I/ch1.md": "# Ch1\n\nmarker-ch1\n",
+      "book/Part I/fig.png": new Uint8Array([137, 80, 78, 71]),
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    expect(epub.nav).toContain('<li><a href="text/chapter_002.xhtml">Preface</a></li>');
+    expect(epub.nav).toContain('<li><a href="text/chapter_003.xhtml">Part I</a><ol>');
+  });
+});
+
 // ── happy paths ─────────────────────────────────────────────────────────
 
 describe("exportSingle", () => {
