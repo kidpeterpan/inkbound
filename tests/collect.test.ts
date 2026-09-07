@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orderChapters, pickIndexNote, bfsLinked } from "../src/collect";
+import { orderChapters, orderByName, pickIndexNote, bfsLinked } from "../src/collect";
 
 describe("orderChapters", () => {
   it("sorts NN_ prefixes numerically, then others alphabetically", () => {
@@ -71,5 +71,36 @@ describe("bfsLinked", () => {
     // are declared zebra-before-apple, forcing a real out-of-order compare.
     const reversedLinks = { "start.md": { "zebra.md": 1, "apple.md": 1 } };
     expect(bfsLinked(reversedLinks, "start.md", 1)).toEqual(["start.md", "apple.md", "zebra.md"]);
+  });
+});
+
+// 009-index-order-parts (research R6): the same rule as orderChapters, over
+// items that carry a name — so unlinked notes and unlinked subfolders can be
+// ordered together (FR-012) without duplicating the numeric-prefix logic.
+describe("orderByName", () => {
+  const byName = (names: string[]) =>
+    orderByName(
+      names.map((n) => ({ n })),
+      (x) => x.n
+    ).map((x) => x.n);
+
+  it("matches orderChapters exactly for plain strings", () => {
+    const input = ["zeta", "10_c", "Alpha", "2_a", "beta", "1_x"];
+    expect(byName(input)).toEqual(orderChapters(input));
+    expect(orderByName(input, (s) => s)).toEqual(orderChapters(input));
+  });
+
+  it("puts numeric NN_ prefixes first ascending, then the rest by plain string comparison", () => {
+    expect(byName(["b", "10_c", "A", "2_a"])).toEqual(["2_a", "10_c", "A", "b"]);
+  });
+
+  it("is stable for equal names, so notes listed before folders stay before them", () => {
+    const items = [
+      { n: "ch1", kind: "note" },
+      { n: "ch1", kind: "folder" },
+      { n: "1_intro", kind: "folder" },
+      { n: "1_intro", kind: "note" },
+    ];
+    expect(orderByName(items, (x) => x.n).map((x) => x.kind)).toEqual(["folder", "note", "note", "folder"]);
   });
 });
