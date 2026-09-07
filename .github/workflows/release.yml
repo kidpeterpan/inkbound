@@ -56,6 +56,10 @@ jobs:
       # the shipped bundle, so a release containing flagged text would be
       # re-flagged the moment it shipped.
       - run: npm run check-review-safe
+      # Must also follow `build` — loads the SHIPPED main.js and runs a full
+      # export through it against tests/fixtures/smoke-vault. The only gate that
+      # executes the artifact's export pipeline rather than src/ or a rebuild.
+      - run: npm run check-export-works
       - run: npm run version:check
 
       # Publishes a signed statement that these exact bytes were built by this
