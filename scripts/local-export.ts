@@ -7,7 +7,7 @@
 // esbuild (marking "obsidian" external) and, at runtime, redirects the
 // bundle's `require("obsidian")` to the exact same tests/fixtures/
 // obsidian-stub.ts instance this script itself loads via tsx — see
-// installObsidianRequireShim below for why a naive alias/inline approach
+// installObsidianRequireShim in scripts/lib/harness.ts for why a naive alias/inline approach
 // doesn't work. The bundle then runs under Node with a jsdom global DOM
 // (src/render.ts / src/render-adapter.ts need a working document).
 // tests/fixtures/vault-stub.ts supplies the `app` object, backed by real
@@ -18,16 +18,21 @@
 import { mkdirSync, readFileSync, rmSync, statSync } from "fs";
 import * as path from "path";
 import * as os from "os";
-import Module from "module";
-import { JSDOM } from "jsdom";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
 import { DEFAULT_SETTINGS } from "../src/settings-core";
+import {
+  REPO_ROOT,
+  inspectEpub,
+  installJsdomGlobals,
+  installObsidianRequireShim,
+  loadPluginClass,
+  savedPathFromNotices,
+} from "./lib/harness";
 
 // Defaults to the author's vault location without hardcoding a machine-specific
 // absolute path; override with VAULT_ROOT=/path/to/vault.
 const VAULT_ROOT = process.env.VAULT_ROOT ?? path.join(os.homedir(), "Documents", "pan_vault");
-const REPO_ROOT = path.resolve(__dirname, "..");
 const OUTPUT_DIR = path.join(REPO_ROOT, "local-out");
 const BUNDLE_PATH = path.join(REPO_ROOT, ".local-export-bundle.cjs");
 
@@ -37,30 +42,6 @@ function usageError(msg: string): never {
   console.error(msg);
   console.error("Usage: tsx scripts/local-export.ts <note|folder|linked> <vault-relative-path>");
   process.exit(1);
-}
-
-async function installJsdomGlobals(): Promise<void> {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "http://localhost/" });
-  const g = globalThis as Record<string, unknown>;
-  const defineGlobal = (name: string, value: unknown) => {
-    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
-  };
-  g.window = dom.window as unknown;
-  g.document = dom.window.document;
-  defineGlobal("navigator", dom.window.navigator);
-  g.HTMLElement = dom.window.HTMLElement;
-  g.Element = dom.window.Element;
-  g.Node = dom.window.Node;
-  g.Text = dom.window.Text;
-  g.DocumentFragment = dom.window.DocumentFragment;
-  g.XMLSerializer = dom.window.XMLSerializer;
-  // 005-latex-math: math.ts's svgStringToElement parses MathJax SVG strings
-  // via DOMParser + instanceof SVGSVGElement — browser globals the harness
-  // must install by hand for that path to run here too.
-  defineGlobal("DOMParser", dom.window.DOMParser);
-  defineGlobal("SVGSVGElement", dom.window.SVGSVGElement);
-  g.customElements = dom.window.customElements;
-  g.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 }
 
 async function buildBundle(): Promise<void> {
@@ -76,7 +57,7 @@ async function buildBundle(): Promise<void> {
   // own separate NOTICES array the harness could never observe.
   //
   // Instead, the runtime `require("obsidian")` is redirected (see
-  // installObsidianRequireShim below) to the exact same module instance tsx
+  // installObsidianRequireShim in ./lib/harness.ts) to the exact same module instance tsx
   // already loaded for this script — true singleton sharing across the
   // CJS/ESM boundary.
   await esbuild.build({
@@ -107,67 +88,6 @@ async function buildBundle(): Promise<void> {
     loader: { ".ttf": "base64" },
     logLevel: "warning",
   });
-}
-
-// Makes require("obsidian") — as called from inside the esbuild bundle above
-// — resolve to the SAME module instance this script gets from
-// `import(".../obsidian-stub.ts")` (tsx-transpiled, ESM). We inject a fake
-// entry directly into Node's CJS require cache so no re-loading/re-transpiling
-// ever happens; the bundle's `require("obsidian")` call just returns the
-// identical exports object, giving true class identity across the ESM (tsx)
-// / CJS (esbuild bundle) boundary.
-function installObsidianRequireShim(stubNamespace: Record<string, unknown>): void {
-  const virtualPath = path.join(REPO_ROOT, "__virtual_obsidian_module__.js");
-  const fakeModule = new Module(virtualPath, undefined);
-  fakeModule.filename = virtualPath;
-  fakeModule.loaded = true;
-  fakeModule.exports = { ...stubNamespace };
-  (Module as unknown as { _cache: Record<string, unknown> })._cache[virtualPath] = fakeModule;
-
-  type ResolveFilename = (request: string, parent: unknown, isMain: boolean, options: unknown) => string;
-  const originalResolveFilename = (Module as unknown as { _resolveFilename: ResolveFilename })
-    ._resolveFilename;
-  (Module as unknown as { _resolveFilename: ResolveFilename })._resolveFilename = function (
-    this: unknown,
-    request: string,
-    parent: unknown,
-    isMain: boolean,
-    options: unknown
-  ) {
-    if (request === "obsidian") return virtualPath;
-    return originalResolveFilename.call(this, request, parent, isMain, options);
-  };
-}
-
-interface ZipInventory {
-  entries: string[];
-  manifestHrefs: string[];
-  missingFromZip: string[];
-  missingFromManifest: string[];
-  invariantPass: boolean;
-}
-
-async function inspectEpub(epubPath: string): Promise<ZipInventory> {
-  const bytes = readFileSync(epubPath);
-  const zip = await JSZip.loadAsync(bytes);
-  const entries = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
-
-  const opfFile = zip.file("OEBPS/package.opf");
-  const opfText = opfFile ? await opfFile.async("string") : "";
-  const manifestHrefs = [...opfText.matchAll(/<item\b[^>]*\bhref="([^"]+)"/g)].map((m) => m[1]);
-  const manifestZipPaths = new Set(manifestHrefs.map((h) => `OEBPS/${h}`));
-
-  const contentEntries = entries.filter((e) => e.startsWith("OEBPS/") && e !== "OEBPS/package.opf");
-  const missingFromZip = manifestHrefs.filter((h) => !entries.includes(`OEBPS/${h}`));
-  const missingFromManifest = contentEntries.filter((e) => !manifestZipPaths.has(e));
-
-  return {
-    entries,
-    manifestHrefs,
-    missingFromZip,
-    missingFromManifest,
-    invariantPass: missingFromZip.length === 0 && missingFromManifest.length === 0,
-  };
 }
 
 interface ChapterImageStats {
@@ -250,7 +170,7 @@ async function main(): Promise<void> {
 
   mkdirSync(OUTPUT_DIR, { recursive: true });
 
-  await installJsdomGlobals();
+  installJsdomGlobals();
 
   // Load the stub and the vault-stub through tsx's normal ESM loader FIRST,
   // so there is exactly one instance of each in the process. vault-stub.ts's
@@ -276,17 +196,7 @@ async function main(): Promise<void> {
   installObsidianRequireShim(obsidianStubNs);
   await buildBundle();
 
-  const require = Module.createRequire(import.meta.url);
-  const mod = require(BUNDLE_PATH) as { default?: unknown };
-  const PluginClass = (mod.default ?? mod) as new (
-    app: unknown,
-    manifest: unknown
-  ) => {
-    settings: unknown;
-    exportSingle(f: unknown): Promise<void>;
-    exportFolder(f: unknown): Promise<void>;
-    exportLinked(f: unknown): Promise<void>;
-  };
+  const PluginClass = loadPluginClass(BUNDLE_PATH);
 
   const normalizedTarget = targetRel.replace(/^\/+/, "").replace(/\/+$/, "");
   const scanRoot = mode === "folder" ? normalizedTarget : path.dirname(normalizedTarget);
@@ -354,17 +264,12 @@ async function main(): Promise<void> {
   if (warnLines.length === 0) console.log("  (none)");
   for (const w of warnLines) console.log(`  [warn] ${w}`);
 
-  const savedNotice = (NOTICES as string[])
-    .slice()
-    .reverse()
-    .find((n) => n.startsWith("EPUB saved to "));
-  if (!savedNotice) {
+  const outPath = savedPathFromNotices(NOTICES);
+  if (!outPath) {
     console.log("\n--- FAILED: no 'EPUB saved to' notice found ---");
     process.exitCode = 1;
     return;
   }
-  const afterPrefix = savedNotice.slice("EPUB saved to ".length);
-  const outPath = afterPrefix.split("\n")[0].split(" and pushed to Boox")[0].trim();
 
   const size = statSync(outPath).size;
   console.log(`\n--- Output ---`);

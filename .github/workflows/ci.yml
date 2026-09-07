@@ -29,6 +29,10 @@ jobs:
       # (eval/new Function), including false positives that ship inside
       # bundled vendor code. See scripts/check-review-safe.mjs.
       - run: npm run check-review-safe
+      # Must also follow `build` — loads the SHIPPED main.js and runs a full
+      # export through it against tests/fixtures/smoke-vault. The only gate that
+      # executes the artifact's export pipeline rather than src/ or a rebuild.
+      - run: npm run check-export-works
       - run: npm run version:check
       - uses: actions/upload-artifact@v4
         if: always()

@@ -13,6 +13,7 @@
     "build": "node esbuild.config.mjs production",
     "check-mobile-safe": "node scripts/check-mobile-safe.mjs",
     "check-review-safe": "node scripts/check-review-safe.mjs",
+    "check-export-works": "tsx scripts/check-export-works.ts",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

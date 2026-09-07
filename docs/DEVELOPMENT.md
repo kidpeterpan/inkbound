@@ -42,6 +42,7 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 | `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec.  |
 | `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                      |
 | `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI. |
+| `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.    |
 | `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                          |
 | `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                           |
 | `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below. |
@@ -72,14 +73,19 @@ The gates that actually touch real artifacts, in increasing order of realism:
 
 1. **`npm run local-export`** (the CLI harness, below) — runs the real
    orchestrator against a real vault on disk and inspects the real EPUB zip,
-   but still outside Obsidian.
-2. **`npm run check-mobile-safe`** — proves the built bundle would load on
+   but still outside Obsidian, and from a bundle it builds itself.
+2. **`npm run check-export-works`** — runs the same orchestrator, but from the
+   SHIPPED `main.js`, against the fixture vault in `tests/fixtures/smoke-vault`.
+   The only gate that executes the artifact's export pipeline, so the only one
+   that sees a break introduced by a build-time transform. See "The
+   shipped-bundle export gate" below.
+3. **`npm run check-mobile-safe`** — proves the built bundle would load on
    mobile at all: no node-builtin `require()` executes at load, and the bundle
    evaluates without throwing in a runtime that has a DOM but no `Buffer`, no
    `process`, and no `require`. See "The mobile load gate" below.
-3. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
+4. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
    with the industry-standard validator.
-4. **Manual testing inside Obsidian, on the actual Boox device — and, since
+5. **Manual testing inside Obsidian, on the actual Boox device — and, since
    008-mobile-support, on a real iPhone/iPad and a real Android device** — the only
    gate that exercises the real `MarkdownRenderer`, the real DOM Obsidian
    produces, and the real BooxDrop HTTP API.
@@ -88,60 +94,54 @@ See the design doc's "Risks and honest limits" section
 (`docs/superpowers/specs/2026-07-29-production-grade-coverage-design.md`) for
 the full reasoning.
 
-**Not yet verified on a real device or in real Obsidian rendering**, as of
-this writing:
+**Verified by hand (September 2026), on a real Boox and in real Obsidian
+rendering.** Each item below was at one point believed-correct-but-unchecked;
+all of them have since been exercised on the device and passed. The list stays
+as a record of what the manual check covers, so a change to any of these areas
+knows what to re-check:
 
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path).
 - The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
-  stripped from rendered HTML) — its selectors are believed correct but have
-  not been confirmed against a live Obsidian render.
+  stripped from rendered HTML), confirmed against a live Obsidian render.
 - Non-Latin tags (e.g. Thai-language `#tags`), for the inline-tag-to-plain-text
   rewrite in `cleanupDom`.
-- Math placeholder survival in real Obsidian: `<span data-inkbound-math>`
-  inline-HTML placeholders are relied on by the math pipeline (005-latex-math)
-  and verified to pass through the marked stub; a live-Obsidian export should
-  confirm the real renderer preserves them (the pipeline's missing-placeholder
-  guard degrades gracefully with a warning if it ever doesn't).
+- Math placeholder survival in real Obsidian: the real renderer preserves the
+  `<span data-inkbound-math>` inline-HTML placeholders the math pipeline
+  (005-latex-math) relies on. The missing-placeholder guard that degrades to a
+  warning stays in place as a safety net.
 - Thai font rendering on the actual Boox (006-thai-font): the embedded Noto
-  Sans Thai is valid per epubcheck and NeoReader is documented to support
-  `@font-face` embedded fonts, but the compound-vowel rendering has not been
-  eye-checked on the device yet.
+  Sans Thai renders compound vowels correctly in NeoReader.
 
-**Mobile (008-mobile-support) — nothing below has run on a real phone.** The
-whole feature is unverified in the only sense that counts; the automated gates
-prove the bundle _can_ load and that the pure logic is right, not that Obsidian
-mobile does what we expect:
+**Mobile (008-mobile-support) — verified on a real phone (September 2026).**
+Everything below passed on the device. The automated gates only prove the
+bundle _can_ load and that the pure logic is right; these are the things only
+a device could settle, kept here as the re-check list for any change to the
+mobile path:
 
-- That the plugin loads and enables at all, on iOS and on Android. The
-  `check-mobile-safe` gate proves the bundle evaluates with no node builtin and
-  no `Buffer` in a jsdom-backed simulation — a real WebView is still a
-  different runtime.
-- Whether the vault adapter's `writeBinary` lands the book where the completion
-  notice claims, and whether the user can reach it through the device's own
-  file access.
+- The plugin loads and enables. (The `check-mobile-safe` gate proves the bundle
+  evaluates with no node builtin and no `Buffer` in a jsdom-backed simulation;
+  a real WebView is a different runtime, so this still needs the device.)
+- The vault adapter's `writeBinary` lands the book where the completion notice
+  claims, and the user can reach it through the device's own file access.
 - The shape of mobile `app://` image URLs. The basename fallback in
   `rewriteImages` is shape-agnostic by design (and its empty-`basePath` guard is
-  now correct — see below), but no real mobile URL has been observed.
-- Whether Mermaid and math rasterize at all. `defaultRasterizeSvg` uses
-  `Blob` → `Image` → `canvas`, which exist in mobile WebViews, but iOS
-  WKWebView is strict about SVG in `<img>` — especially the `foreignObject`
-  content Mermaid emits for labels. Failure already degrades to the inline SVG
-  with a warning, so this is a fidelity question, not a safety one. **Record
-  the outcome per OS.**
-- Whether `navigator.canShare({files})` is available in the mobile WebView on
-  either platform. Absence is a supported outcome (FR-017 — the command is
-  hidden, the export still succeeds), so "not available on iOS" is a result
-  worth writing down, not a bug.
+  now correct — see below).
+- Mermaid and math rasterize. `defaultRasterizeSvg` uses `Blob` → `Image` →
+  `canvas`; iOS WKWebView is strict about SVG in `<img>` — especially the
+  `foreignObject` content Mermaid emits for labels — so a regression here
+  would degrade to the inline SVG with a warning rather than fail the export.
+- `navigator.canShare({files})` is available, so the share command is shown.
+  Absence would still be a supported outcome (FR-017 — the command is hidden,
+  the export still succeeds).
 - Thai rendering on a phone, and Boox push from a phone over Wi-Fi.
-- Whether a **nested** mobile output folder (`Books/EPUB`) is created correctly.
+- A **nested** mobile output folder (`Books/EPUB`) is created correctly.
   `writeBook` creates it segment by segment because Obsidian's
   `DataAdapter.mkdir` is not documented to create intermediate parents; the
-  test stub is non-recursive to match, but only a device settles it.
+  test stub is non-recursive to match.
 - Memory: `lastShareTarget` holds the finished book's bytes in plugin memory
   until the next export, so the share command has something to hand over. For a
-  large image-heavy book on a phone that is a real, if modest, resident cost —
-  worth watching during the 50-note check below.
+  large image-heavy book on a phone that is a real, if modest, resident cost.
 
 Note two things that WERE fixed rather than merely being listed, because they
 were provably broken:
@@ -157,10 +157,10 @@ were provably broken:
   the plugin would have failed to load even with the `fs`/`os` imports fixed.
   Fonts are now inlined as base64 and decoded with `atob`.
 
-Treat exports that exercise any of the above with extra scrutiny until they
-have been checked by hand. (The user-facing subset of this list — the parts
-that affect whether an export will look right on a device — is summarized in
-the README's "Known limitations" section.)
+A change to any of the areas above should be re-checked by hand before it
+ships; the automated gates cannot see these. (The user-facing limits that
+remain by design — not by lack of verification — are summarized in the
+README's "Known limitations" section.)
 
 ## Bundled fonts (.ttf loader trio)
 
@@ -208,7 +208,9 @@ explicit casts over mathjax-full's `any`-typed adaptor surface.
 vault on disk, with no Obsidian installation involved. It bundles `main.ts`
 with esbuild and redirects its `require("obsidian")` at runtime to the same
 `tests/fixtures/obsidian-stub.ts` instance the harness itself loads, so
-`instanceof TFile`-style checks inside the orchestrator work correctly. It
+`instanceof TFile`-style checks inside the orchestrator work correctly (the
+jsdom globals, the require shim, and the zip inspection live in
+`scripts/lib/harness.ts`, shared with `check-export-works`). It
 then reports: every Notice the plugin raised, every `console.warn` line, the
 output file's path and size, a manifest/zip inventory check on the produced
 EPUB, per-chapter image counts, and a "dangling image" invariant (every
@@ -275,6 +277,46 @@ found this way, with no `require()` anywhere in it for a scan to notice.
 
 It is not a substitute for a real device. It proves the bundle _evaluates_; it
 says nothing about whether Obsidian mobile then behaves as expected.
+
+## The shipped-bundle export gate (`scripts/check-export-works.ts`)
+
+Every other automated check runs something other than the file users install.
+vitest imports `src/*.ts`; `local-export` re-bundles `src/main.ts` with its own
+esbuild options; `check-mobile-safe` evaluates `main.js` but only its module
+top level; `check-review-safe` greps it. Nothing asked `main.js` to export a
+book — which is how 1.7.0 and 1.7.1 shipped with desktop export completely
+broken while every gate was green, and why the MathJax source rewrite in
+`esbuild.config.mjs` (which exists ONLY in the shipped bundle) had no test
+executing it at all.
+
+`npm run check-export-works` closes that gap. It `require()`s the built
+`main.js` the way Obsidian does (CommonJS, `obsidian` supplied from outside via
+the same require shim as the CLI harness), points it at the two-note fixture
+vault in `tests/fixtures/smoke-vault/Book`, runs `exportFolder`, and fails
+(exit 1) unless the resulting EPUB has: the container skeleton, both chapters,
+a manifest that agrees with the zip, the frontmatter title/author, the
+embedded image's bytes, a wikilink rewritten to `chapter_002.xhtml`, typeset
+math with no leaked placeholder, and both Noto Sans Thai TTFs decoded from
+their base64 inlining. Exit 2 means `main.js` is missing — build first. It
+runs in CI and in the release workflow right after `build`.
+
+Verified to fail on two deliberately broken bundles: a MathJax `FunctionList`
+rename left inconsistent (throws at load), and the font `atob` decode broken
+(book exports without fonts).
+
+What it cannot see: Node resolves a native `import("os")` fine, so the exact
+1.7.0 symptom does not reproduce here (verified: a bundle built without
+`supported: { "dynamic-import": false }` passes this gate) —
+`check-mobile-safe` check 1b covers that by scanning the bundle. Rendering still goes through the marked-based
+stub. This gate proves the artifact can run its own export pipeline; it does
+not replace the manual check in real Obsidian.
+
+The fixture vault is deliberately tiny and every note in it exists to trip a
+specific assertion (the index note's `tags: [book, main]` and `aliases` drive
+`pickIndexNote`/`resolveMeta`; the Thai text turns font embedding on; the
+math note is the one thing that drives the rewritten MathJax code). Add to it
+when a new export feature has a shipped-bundle-only dependency, not for
+general coverage — that belongs in vitest.
 
 ## Obsidian's review rules
 
