@@ -394,6 +394,19 @@ export function resetPlatform(): void {
   setPlatform("desktop");
 }
 
+// ── parseLinktext ─────────────────────────────────────────────────────────
+//
+// Mirrors obsidian.d.ts's `parseLinktext(linktext): { path, subpath }`: the
+// part before the first `#` is the note path, the rest (including the `#`,
+// so `#heading` and `#^block` both survive) is the subpath. main.ts uses it
+// to turn an index note's `[[ch#Intro]]` / `[[ch^blk]]` links into plain
+// note paths before resolving them (009-index-order-parts, research R4).
+export function parseLinktext(linktext: string): { path: string; subpath: string } {
+  const hash = linktext.indexOf("#");
+  if (hash === -1) return { path: linktext, subpath: "" };
+  return { path: linktext.slice(0, hash), subpath: linktext.slice(hash) };
+}
+
 // ── Component / Plugin ────────────────────────────────────────────────────
 
 export class Component {

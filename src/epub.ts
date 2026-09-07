@@ -17,6 +17,14 @@ export function chapterHref(index: number): string {
   return `text/chapter_${String(index + 1).padStart(3, "0")}.xhtml`;
 }
 
+// 009-index-order-parts: the nested table-of-contents plan main.ts hands to
+// setNavTree. Chapters are referenced by their POSITION in addChapter order
+// (== job.files order), never by href or path — see the invariant comment at
+// main.ts's failed-chapter placeholder for why that alignment is load-bearing.
+export type NavItem =
+  | { kind: "chapter"; chapter: number }
+  | { kind: "part"; title: string; indexChapter: number | null; children: NavItem[] };
+
 interface Chapter {
   id: string;
   href: string;
@@ -58,24 +66,78 @@ function buildTocTree(entries: TocEntry[]): TocNode[] {
   return roots;
 }
 
+// Wraps already-rendered <li> strings in the one <ol> a nav <li> may carry.
+// Split out from renderTocNodes (009-index-order-parts) so a Part entry can
+// merge heading sub-entries and child chapters into a SINGLE list: EPUB 3's
+// nav grammar allows each <li> exactly one <a> followed by at most one <ol>,
+// and epubcheck enforces it — two sibling <ol>s in one <li> is an invalid book.
+function wrapOl(lis: string[]): string {
+  return `<ol>\n          ${lis.join("\n        ")}\n        </ol>`;
+}
+
+function tocNodeLis(nodes: TocNode[], href: string): string[] {
+  return nodes.map((n) => {
+    // children already carries its own <ol> wrapper (or "" when leaf) —
+    // wrapping it again would nest two <ol>s at the same level.
+    const children = renderTocNodes(n.children, href);
+    // Ids are sanitized by render.ts to XML NCName chars — no escaping
+    // needed in the href; the display text gets the same escapeXml the
+    // chapter titles already get (FR-009).
+    return `<li><a href="${href}#${n.entry.id}">${escapeXml(n.entry.text)}</a>${children}</li>`;
+  });
+}
+
 function renderTocNodes(nodes: TocNode[], href: string): string {
   if (nodes.length === 0) return "";
-  const lis = nodes
-    .map((n) => {
-      // children already carries its own <ol> wrapper (or "" when leaf) —
-      // wrapping it again would nest two <ol>s at the same level.
-      const children = renderTocNodes(n.children, href);
-      // Ids are sanitized by render.ts to XML NCName chars — no escaping
-      // needed in the href; the display text gets the same escapeXml the
-      // chapter titles already get (FR-009).
-      return `<li><a href="${href}#${n.entry.id}">${escapeXml(n.entry.text)}</a>${children}</li>`;
-    })
-    .join("\n        ");
-  return `<ol>\n          ${lis}\n        </ol>`;
+  return wrapOl(tocNodeLis(nodes, href));
 }
 
 export function renderTocSubEntries(entries: TocEntry[], href: string): string {
   return renderTocNodes(buildTocTree(entries), href);
+}
+
+// ── Nested Parts (009-index-order-parts) ──────────────────────────────────
+//
+// Validates that a nav tree covers chapters 0..count-1 exactly once and that
+// every Part can be opened (an index-less Part needs a descendant chapter to
+// link to, FR-010). Throws with a message naming the problem; main.ts catches
+// and falls back to the flat nav with a warning (constitution II).
+function validateNavTree(tree: NavItem[], count: number): void {
+  const seen = new Set<number>();
+  const take = (i: number) => {
+    if (!Number.isInteger(i) || i < 0 || i >= count) {
+      throw new Error(`nav tree entry ${i} is out of range (book has ${count} chapters)`);
+    }
+    if (seen.has(i)) throw new Error(`nav tree lists chapter ${i + 1} twice`);
+    seen.add(i);
+  };
+  const walk = (items: NavItem[]) => {
+    for (const item of items) {
+      if (item.kind === "chapter") {
+        take(item.chapter);
+        continue;
+      }
+      if (item.indexChapter !== null) take(item.indexChapter);
+      else if (firstChapterOf(item) === null) throw new Error(`Part "${item.title}" has no chapter to open`);
+      walk(item.children);
+    }
+  };
+  walk(tree);
+  for (let i = 0; i < count; i++) {
+    if (!seen.has(i)) throw new Error(`nav tree is missing chapter ${i + 1}`);
+  }
+}
+
+// The chapter a Part entry opens: its index chapter, else the first chapter
+// reached by depth-first descent (null only for a malformed, empty Part).
+function firstChapterOf(item: NavItem): number | null {
+  if (item.kind === "chapter") return item.chapter;
+  if (item.indexChapter !== null) return item.indexChapter;
+  for (const child of item.children) {
+    const found = firstChapterOf(child);
+    if (found !== null) return found;
+  }
+  return null;
 }
 
 export class EpubBuilder {
@@ -85,8 +147,16 @@ export class EpubBuilder {
   // is ON. Absent = this feature's code paths are all no-ops and the built
   // book keeps today's exact structure (FR-003/SC-002).
   private thaiFont: ThaiFontAsset | null = null;
+  // 009-index-order-parts: null ⇒ nav() renders today's flat list, byte for
+  // byte (FR-013/FR-014). Set only by folder exports that produced Parts.
+  private navTree: NavItem[] | null = null;
 
   constructor(private meta: ExportMeta) {}
+
+  setNavTree(tree: NavItem[]): void {
+    validateNavTree(tree, this.chapters.length);
+    this.navTree = tree;
+  }
 
   setThaiFont(asset: ThaiFontAsset): void {
     this.thaiFont = asset;
@@ -214,12 +284,35 @@ export class EpubBuilder {
 </package>`;
   }
 
+  private chapterLi(c: Chapter): string {
+    return `<li><a href="${c.href}">${escapeXml(c.title)}</a>${renderTocSubEntries(c.toc, c.href)}</li>`;
+  }
+
+  // A Part with an index chapter IS that chapter's entry: same <a> as the
+  // flat renderer, then ONE <ol> holding the index chapter's heading
+  // sub-entries followed by the Part's children (research R1). Without an
+  // index the entry links to the first descendant chapter and nests every
+  // child. Either way: one <a>, at most one <ol> — see wrapOl.
+  private renderNavItem(item: NavItem): string {
+    if (item.kind === "chapter") return this.chapterLi(this.chapters[item.chapter]);
+    const childLis = item.children.map((c) => this.renderNavItem(c));
+    if (item.indexChapter !== null) {
+      const c = this.chapters[item.indexChapter];
+      const lis = [...tocNodeLis(buildTocTree(c.toc), c.href), ...childLis];
+      return `<li><a href="${c.href}">${escapeXml(c.title)}</a>${lis.length ? wrapOl(lis) : ""}</li>`;
+    }
+    const target = this.chapters[firstChapterOf(item)!];
+    return `<li><a href="${target.href}">${escapeXml(item.title)}</a>${wrapOl(childLis)}</li>`;
+  }
+
   private nav(): string {
-    const lis = this.chapters
-      .map(
-        (c) => `<li><a href="${c.href}">${escapeXml(c.title)}</a>${renderTocSubEntries(c.toc, c.href)}</li>`
-      )
-      .join("\n        ");
+    // Re-validate at build time: addChapter may have run after setNavTree.
+    if (this.navTree) validateNavTree(this.navTree, this.chapters.length);
+    const lis = (
+      this.navTree
+        ? this.navTree.map((i) => this.renderNavItem(i))
+        : this.chapters.map((c) => this.chapterLi(c))
+    ).join("\n        ");
     // Landmarks: the cover page must stay OUT of the TOC (it is not a
     // chapter, FR-005), but a spine document must be reachable from a
     // hyperlink for epubcheck's OPF-096 check (research R1). A landmarks

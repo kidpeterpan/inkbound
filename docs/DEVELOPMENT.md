@@ -157,6 +157,18 @@ were provably broken:
   the plugin would have failed to load even with the `fs`/`os` imports fixed.
   Fonts are now inlined as base64 and decoded with `atob`.
 
+**Unverified — 009-index-order-parts (nested Parts in the TOC).** Not yet
+checked on a device as of 2026-09-07; `epubcheck` accepts the nested nav and
+the shipped-bundle gate exports a fixture with a Part, but how a reader
+*presents* it is the device's call:
+
+- NeoReader's TOC panel rendering of nested `<ol>` Part entries (collapsed,
+  indented, or flattened?), and the same in Obsidian's own reading view of the
+  exported book on mobile.
+- What tapping a Part entry opens on the device — it links to the Part's first
+  chapter (the sub-index note when there is one), so it should open that
+  chapter rather than do nothing.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the

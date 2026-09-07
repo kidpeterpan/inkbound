@@ -8,6 +8,21 @@ export function orderChapters(basenames: string[]): string[] {
   return [...numbered, ...rest];
 }
 
+// 009-index-order-parts (research R6): orderChapters' rule over items that
+// carry a name, so a folder's unlinked notes AND unlinked subfolders can be
+// ordered together (FR-012) — a subfolder participates under its folder name.
+// Same comparison as orderChapters on purpose (plain code-point order, so
+// uppercase sorts before lowercase): "today's order" is defined by that
+// function, and this must agree with it for every list of plain strings.
+// Array.prototype.sort is stable, so equal names keep input order.
+export function orderByName<T>(items: T[], key: (item: T) => string): T[] {
+  const numbered = items.filter((i) => NN.test(key(i)));
+  const rest = items.filter((i) => !NN.test(key(i)));
+  numbered.sort((a, b) => parseInt(NN.exec(key(a))![1], 10) - parseInt(NN.exec(key(b))![1], 10));
+  rest.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  return [...numbered, ...rest];
+}
+
 export function pickIndexNote(
   candidates: { basename: string; tags: string[] }[],
   folderName: string
