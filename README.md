@@ -17,7 +17,8 @@ comfortably on an e-ink device instead of a laptop screen.
 Export from the command palette or a right-click menu, in three ways:
 
 - **A single note** becomes a one-chapter book.
-- **A folder of notes** becomes a book, with chapters in filename order.
+- **A folder of notes** becomes a book, with chapters in the order your index
+  note links them, and subfolders as nested Parts.
 - **A note plus everything it links to** — the active note and the notes it
   links to, out to a depth you choose, become one book, with real links
   between the chapters that came from the same export.
@@ -179,9 +180,14 @@ tags:
 Then right-click the `grokking-algorithms` folder and choose **Export folder
 to EPUB**. You get a single `Grokking Algorithms.epub` containing:
 
-- The index note first, then the chapters in numeric order — `01`, `02`, `03`,
-  `10`. Note that `10` comes last, not after `01`, because the `NN_` prefix is
-  read as a number rather than sorted as text.
+- The index note first, then the chapters **in the order the index note links
+  them** — list `[[03_recursion]]` before `[[01_introduction]]` and the book
+  follows. Only regular links count (an embed `![[…]]` does not), the first
+  link to a note wins, and links to notes outside the folder are ignored.
+- Notes the index note never links are still included, after the linked ones,
+  in the old order: numeric `NN_` prefixes first (`10` after `03`, because the
+  prefix is read as a number), then the rest by name. So the prefixes still
+  work — they are just no longer the only way to order a book.
 - **Grokking Algorithms** as the book title, taken from `aliases` rather than
   the filename, with Aditya Y. Bhargava as the author.
 - The cover image downloaded from `coverUrl` and embedded, so it shows on your
@@ -195,6 +201,42 @@ The index note is found by its `book` + `main` tags. If you would rather not
 tag it, name it after the folder instead — `grokking-algorithms.md` inside
 `grokking-algorithms/` is detected the same way. Without either, the folder
 name becomes the title and every note is treated as a chapter.
+
+### Parts from subfolders
+
+A longer book can be split into subfolders, and each subfolder that contains
+notes becomes a **Part** in the table of contents:
+
+```
+Reading/
+└── clean-architecture/
+    ├── clean-architecture.md         <- the index note
+    ├── 00_preface.md
+    ├── Part I – Introduction/
+    │   ├── Part I – Introduction.md  <- optional sub-index (same detection rules)
+    │   ├── 01_what_is_design.md
+    │   └── 02_a_tale_of_two_values.md
+    ├── Part II – Programming Paradigms/
+    │   └── 03_paradigm_overview.md
+    └── assets/                       <- no notes → no Part
+```
+
+- Every note under the folder, at any depth, is a chapter; the reading order is
+  the table of contents read top to bottom.
+- A subfolder with its own index note (tagged `book` + `main`, or named after
+  the folder) uses that note's title as the Part title, puts it first, and
+  orders the Part's chapters by its links. Without one, the folder name is the
+  Part title and its notes follow the numeric-then-name order.
+- Tapping a Part in your reader opens its first chapter. Its chapters (and any
+  nested Parts) are listed beneath it.
+- The root index note can place whole Parts too: linking to any note inside
+  `Part II/` before `[[00_preface]]` puts Part II before the preface. Parts it
+  never mentions follow, ordered by folder name alongside unlinked notes.
+- Folders with no notes beneath them (an `assets/` folder) produce nothing.
+
+Note that this is a change from earlier versions, which ignored subfolders
+entirely: a `drafts/` folder inside a book folder now shows up as a Part. Move
+such folders out of the book folder if you don't want them in the book.
 
 Chapter titles come from each note's first `#` heading when there is one, so
 `03_recursion` with an `# Recursion` heading appears in the table of contents

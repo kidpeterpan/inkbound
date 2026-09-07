@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder, chapterHref, escapeXml } from "../src/epub";
+import { EpubBuilder, type NavItem, chapterHref, escapeXml } from "../src/epub";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 
@@ -333,5 +333,122 @@ describe("EpubBuilder Thai font embedding", () => {
     const zip = await JSZip.loadAsync(await b.build());
     const ofl = await zip.file("OEBPS/fonts/OFL.txt")!.async("string");
     expect(ofl).toContain("SIL OPEN FONT LICENSE Version 1.1");
+  });
+});
+
+// ── 009-index-order-parts: nested Parts in nav.xhtml (contracts/nav-tree.md) ──
+
+describe("nav tree: Parts (009-index-order-parts)", () => {
+  const OVERVIEW = [{ level: 2, text: "Overview", id: "overview" }];
+
+  async function navOf(b: EpubBuilder): Promise<string> {
+    const zip = await JSZip.loadAsync(await b.build());
+    const nav = await zip.file("OEBPS/nav.xhtml")!.async("string");
+    return nav.match(/<nav epub:type="toc">([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  }
+  function fourChapters(): EpubBuilder {
+    const b = new EpubBuilder(META);
+    b.addChapter("Book", "<p>0</p>");
+    b.addChapter("Part One", "<p>1</p>", OVERVIEW);
+    b.addChapter("Ch1", "<p>2</p>");
+    b.addChapter("Ch2", "<p>3</p>");
+    return b;
+  }
+  const ch = (chapter: number): NavItem => ({ kind: "chapter", chapter });
+
+  it("N1: no tree ⇒ the flat list, identical to a tree of plain chapter entries", async () => {
+    const flat = await navOf(fourChapters());
+    const treed = fourChapters();
+    treed.setNavTree([ch(0), ch(1), ch(2), ch(3)]);
+    expect(await navOf(treed)).toBe(flat);
+    expect(flat).toContain('<li><a href="text/chapter_001.xhtml">Book</a></li>');
+    expect(flat).toContain('<li><a href="text/chapter_003.xhtml">Ch1</a></li>');
+  });
+
+  it("a Part with an index chapter IS that chapter's entry, with heading sub-entries and children merged into one <ol>", async () => {
+    const b = fourChapters();
+    b.setNavTree([ch(0), { kind: "part", title: "ignored", indexChapter: 1, children: [ch(2), ch(3)] }]);
+    const toc = await navOf(b);
+    const partStart = toc.indexOf('<li><a href="text/chapter_002.xhtml">Part One</a>');
+    expect(partStart).toBeGreaterThan(-1);
+    expect(toc).not.toContain("ignored");
+    expect((toc.match(/Part One/g) ?? []).length).toBe(1); // not repeated as a child
+    const overview = toc.indexOf('chapter_002.xhtml#overview">Overview</a>');
+    const ch1 = toc.indexOf('<a href="text/chapter_003.xhtml">Ch1</a>');
+    const ch2 = toc.indexOf('<a href="text/chapter_004.xhtml">Ch2</a>');
+    expect(partStart).toBeLessThan(overview);
+    expect(overview).toBeLessThan(ch1);
+    expect(ch1).toBeLessThan(ch2);
+    // Exactly one <ol> opens between the Part's anchor and its first child:
+    // heading sub-entries and chapters share a single list (EPUB nav grammar).
+    const between = toc.slice(partStart, ch1);
+    expect((between.match(/<ol>/g) ?? []).length).toBe(1);
+    expect(between).not.toContain("</ol>");
+  });
+
+  it("a Part without an index chapter links to its first descendant chapter and nests every child", async () => {
+    const b = fourChapters();
+    b.setNavTree([
+      ch(0),
+      ch(1),
+      { kind: "part", title: "Part <II>", indexChapter: null, children: [ch(2), ch(3)] },
+    ]);
+    const toc = await navOf(b);
+    const part = toc.indexOf('<li><a href="text/chapter_003.xhtml">Part &lt;II&gt;</a><ol>');
+    expect(part).toBeGreaterThan(-1);
+    const ch1 = toc.indexOf('<li><a href="text/chapter_003.xhtml">Ch1</a></li>');
+    const ch2 = toc.indexOf('<li><a href="text/chapter_004.xhtml">Ch2</a></li>');
+    expect(ch1).toBeGreaterThan(part);
+    expect(ch2).toBeGreaterThan(ch1);
+  });
+
+  it("Parts nest inside Parts; an index-less Part descends to find its link target", async () => {
+    const b = fourChapters();
+    b.setNavTree([
+      ch(0),
+      {
+        kind: "part",
+        title: "Outer",
+        indexChapter: null,
+        children: [{ kind: "part", title: "Inner", indexChapter: null, children: [ch(1)] }, ch(2), ch(3)],
+      },
+    ]);
+    const toc = await navOf(b);
+    expect(toc).toContain('<li><a href="text/chapter_002.xhtml">Outer</a><ol>');
+    expect(toc).toContain('<li><a href="text/chapter_002.xhtml">Inner</a><ol>');
+    expect(toc.indexOf("Outer")).toBeLessThan(toc.indexOf("Inner"));
+    expect(toc.indexOf("Inner")).toBeLessThan(toc.indexOf(">Part One<"));
+  });
+
+  it("N4: the spine (reading order) is addChapter order regardless of the tree", async () => {
+    const b = fourChapters();
+    b.setNavTree([ch(3), ch(2), ch(1), ch(0)]);
+    const zip = await JSZip.loadAsync(await b.build());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+    const spine = opf.slice(opf.indexOf("<spine"));
+    expect(spine.indexOf("ch_001")).toBeLessThan(spine.indexOf("ch_002"));
+    expect(spine.indexOf("ch_003")).toBeLessThan(spine.indexOf("ch_004"));
+  });
+
+  it("rejects a tree that does not cover every chapter exactly once, or points outside the book", () => {
+    expect(() => fourChapters().setNavTree([ch(0), ch(1), ch(2)])).toThrow(/chapter 4|missing/i);
+    expect(() => fourChapters().setNavTree([ch(0), ch(1), ch(2), ch(3), ch(3)])).toThrow(/twice|duplicate/i);
+    expect(() => fourChapters().setNavTree([ch(0), ch(1), ch(2), ch(9)])).toThrow(/range|9/);
+    expect(() =>
+      fourChapters().setNavTree([
+        ch(0),
+        ch(1),
+        ch(2),
+        ch(3),
+        { kind: "part", title: "Empty", indexChapter: null, children: [] },
+      ])
+    ).toThrow(/Empty|no chapter/i);
+  });
+
+  it("re-validates at build(): chapters added after the tree was set make build() fail loudly", async () => {
+    const b = fourChapters();
+    b.setNavTree([ch(0), ch(1), ch(2), ch(3)]);
+    b.addChapter("Late", "<p>4</p>");
+    await expect(b.build()).rejects.toThrow(/chapter 5|missing/i);
   });
 });

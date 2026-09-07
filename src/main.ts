@@ -7,9 +7,11 @@ import {
   TAbstractFile,
   TFile,
   TFolder,
+  parseLinktext,
   requestUrl,
 } from "obsidian";
-import { EpubBuilder, chapterHref, escapeXml } from "./epub";
+import { EpubBuilder, chapterHref, escapeXml, type NavItem } from "./epub";
+import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./book-tree";
 import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
@@ -35,6 +37,13 @@ import { getThaiFontLoader } from "./font-assets";
 interface Job {
   meta: ExportMeta;
   files: TFile[]; // chapter order
+  // 009-index-order-parts: nested TOC plan (folder exports only); absent ⇒
+  // today's flat nav. Indices refer to positions in `files`.
+  nav?: NavItem[];
+  // Warnings raised while BUILDING the job (before runExport owns the list),
+  // e.g. the folder planner falling back to filename order. Seeded into
+  // runExport's warnings so they reach the user with everything else.
+  warnings?: string[];
 }
 
 export default class EpubExportPlugin extends Plugin {
@@ -257,41 +266,125 @@ export default class EpubExportPlugin extends Plugin {
     await this.runExport({ meta: await this.metaFromNote(file, file.basename), files });
   }
 
-  async exportFolder(folder: TFolder) {
-    const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
-    if (mdFiles.length === 0) {
-      new Notice("Folder has no Markdown notes.");
-      return;
-    }
+  // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
+  // rather than a list. pickIndexNote's `.includes(...)` checks are
+  // Array.prototype.includes for list-shaped tags, but a string scalar
+  // would silently fall through to String.prototype.includes, which is
+  // substring matching and can misfire (e.g. "notebook mainframe"
+  // contains both "book" and "main"). Only genuine arrays count.
+  private tagsOf(f: TFile): string[] {
+    const tags: unknown = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
+    return Array.isArray(tags) ? (tags as string[]) : [];
+  }
 
-    const candidates = mdFiles.map((f) => {
-      const tags: unknown = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
-      return {
-        basename: f.basename,
-        // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
-        // rather than a list. pickIndexNote's `.includes(...)` checks are
-        // Array.prototype.includes for list-shaped tags, but a string scalar
-        // would silently fall through to String.prototype.includes, which is
-        // substring matching and can misfire (e.g. "notebook mainframe"
-        // contains both "book" and "main"). Only genuine arrays count.
-        tags: Array.isArray(tags) ? (tags as string[]) : [],
-      };
-    });
+  // 009-index-order-parts (research R4): an index note's REGULAR links, in
+  // document order, resolved to vault paths. Obsidian keeps embeds in
+  // `embeds` and frontmatter links in `frontmatterLinks`, so reading `links`
+  // alone is what makes FR-005 ("embeds never order") hold — do not widen
+  // this to resolvedLinks, whose key order is not document order.
+  private orderedLinkTargets(file: TFile): string[] {
+    const links = [...(this.app.metadataCache.getFileCache(file)?.links ?? [])];
+    links.sort((a, b) => a.position.start.offset - b.position.start.offset);
+    const targets: string[] = [];
+    for (const l of links) {
+      const { path } = parseLinktext(l.link);
+      if (path === "") continue; // [[#heading]] — a link to the note itself
+      const dest = this.app.metadataCache.getFirstLinkpathDest(path, file.path);
+      // Notes only (FR-004): a plain link to an image inside `Part I/` would
+      // otherwise resolve to a path under that folder and drag the Part with it.
+      if (dest instanceof TFile && dest.extension === "md") targets.push(dest.path);
+    }
+    return targets;
+  }
+
+  // Plain-data mirror of a TFolder subtree for the pure planner. Only `.md`
+  // files become notes; every subfolder is included (the planner drops the
+  // ones with no notes beneath them).
+  private buildFolderInput(folder: TFolder, byPath: Map<string, TFile>): FolderInput {
+    const notes: NoteInput[] = [];
+    const subfolders: FolderInput[] = [];
+    for (const child of folder.children) {
+      if (child instanceof TFile) {
+        if (child.extension !== "md") continue;
+        byPath.set(child.path, child);
+        notes.push({
+          path: child.path,
+          basename: child.basename,
+          tags: this.tagsOf(child),
+          linkTargets: this.orderedLinkTargets(child),
+        });
+      } else if (child instanceof TFolder) {
+        subfolders.push(this.buildFolderInput(child, byPath));
+      }
+    }
+    return { name: folder.name, path: folder.path, notes, subfolders };
+  }
+
+  // Pre-009 folder collection: direct children only, index first, NN_ then
+  // alphabetical. Kept as the fallback the planner degrades to (research R5)
+  // and as the reference for FR-013 ("flat folders export identically").
+  private legacyFolderOrder(mdFiles: TFile[], folder: TFolder): { index: TFile | null; files: TFile[] } {
+    const candidates = mdFiles.map((f) => ({ basename: f.basename, tags: this.tagsOf(f) }));
     const indexName = pickIndexNote(candidates, folder.name);
     const index = mdFiles.find((f) => f.basename === indexName) ?? null;
-
     const chapterNames = orderChapters(mdFiles.filter((f) => f !== index).map((f) => f.basename));
     const files = chapterNames.map((n) => mdFiles.find((f) => f.basename === n)!);
     if (index) files.unshift(index);
+    return { index, files };
+  }
 
-    const meta = await this.metaFromNote(index, folder.name);
-    await this.runExport({ meta, files });
+  async exportFolder(folder: TFolder) {
+    const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
+    const legacy = this.legacyFolderOrder(mdFiles, folder);
+    const warnings: string[] = [];
+    let files = legacy.files;
+    let nav: NavItem[] | undefined;
+    try {
+      const byPath = new Map<string, TFile>();
+      const input = this.buildFolderInput(folder, byPath);
+      if (byPath.size === 0) {
+        new Notice("Folder has no Markdown notes.");
+        return;
+      }
+      const plan = planBook(input);
+      // Path-keyed, not basename-keyed: two subfolders may hold same-named notes (FR-018).
+      files = plan.order.map((p) => byPath.get(p)!);
+      // The nav tree references chapters by POSITION in `files` (research
+      // R2): runExport's hrefByPath and the failed-chapter placeholder are
+      // both position-derived, so an index-keyed tree stays aligned with
+      // them for free. Only set when there is at least one Part — a flat
+      // folder keeps the flat nav untouched (FR-013).
+      const position = new Map(plan.order.map((p, i) => [p, i]));
+      const toNavItem = (node: NavPlanNode): NavItem =>
+        node.kind === "chapter"
+          ? { kind: "chapter", chapter: position.get(node.path)! }
+          : {
+              kind: "part",
+              title: node.indexPath ? this.titleFor(byPath.get(node.indexPath)!) : node.folderName,
+              indexChapter: node.indexPath ? position.get(node.indexPath)! : null,
+              children: node.children.map(toNavItem),
+            };
+      if (plan.nav.some((n) => n.kind === "part")) nav = plan.nav.map(toNavItem);
+    } catch (e) {
+      // Constitution II / FR-016: ordering is structure, not content — a bug
+      // here degrades to the pre-009 flat order and says so, never aborts.
+      warnings.push(
+        `chapter ordering fell back to filename order: ${e instanceof Error ? e.message : String(e)}`
+      );
+      if (files.length === 0) {
+        new Notice("Folder has no Markdown notes.");
+        return;
+      }
+    }
+
+    const meta = await this.metaFromNote(legacy.index, folder.name);
+    await this.runExport({ meta, files, nav, warnings });
   }
 
   // ── orchestrator ────────────────────────────────────────────────
 
   async runExport(job: Job) {
-    const warnings: string[] = [];
+    const warnings: string[] = [...(job.warnings ?? [])];
     let notice: Notice | null = null;
     try {
       notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
@@ -440,6 +533,20 @@ export default class EpubExportPlugin extends Plugin {
           }
         } catch (e) {
           warnings.push(`Thai font embedding skipped: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      // 009-index-order-parts: set AFTER the chapter loop so every slot —
+      // including failed-chapter placeholders — exists to be referenced. A
+      // tree the builder rejects degrades to the flat nav with a warning;
+      // the book itself is unaffected (constitution II).
+      if (job.nav) {
+        try {
+          builder.setNavTree(job.nav);
+        } catch (e) {
+          warnings.push(
+            `table of contents fell back to a flat list: ${e instanceof Error ? e.message : String(e)}`
+          );
         }
       }
 

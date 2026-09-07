@@ -155,7 +155,7 @@ async function main(): Promise<void> {
 
     console.log(
       "check-export-works: PASS — the shipped main.js exported the fixture book end to end " +
-        "(2 chapters, image, Thai fonts, typeset math, rewritten wikilink)."
+        "(3 chapters incl. a nested Part, image, Thai fonts, typeset math, rewritten wikilink)."
     );
   } finally {
     console.error = originalError;
@@ -225,6 +225,18 @@ async function checkBook(epubPath: string): Promise<string[]> {
   }
   if (ch2.includes("data-inkbound-math")) problems.push("chapter 2 leaked a raw math placeholder");
   if (/\$E = mc\^2\$/.test(ch2)) problems.push("chapter 2 still contains the raw TeX source");
+
+  // Nested Parts (009-index-order-parts): the fixture's `Part Two/` subfolder
+  // must appear in nav.xhtml as a Part entry with its chapter nested beneath
+  // it — one <li>, one <a>, one <ol> — and its chapter must be in the spine.
+  const nav = await text("OEBPS/nav.xhtml");
+  if (!entries.has("OEBPS/text/chapter_003.xhtml"))
+    problems.push("missing zip entry: OEBPS/text/chapter_003.xhtml (subfolder note)");
+  const partLi = nav.indexOf('<li><a href="text/chapter_003.xhtml">Part Two</a><ol>');
+  if (partLi === -1) problems.push("nav.xhtml has no Part entry for the Part Two subfolder");
+  else if (nav.indexOf('<li><a href="text/chapter_003.xhtml">Deep</a></li>', partLi) === -1) {
+    problems.push("nav.xhtml does not nest the subfolder's chapter under its Part entry");
+  }
 
   // Thai text in the fixture + embedThaiFont default ON → both fonts shipped
   // (proves the base64-inlined TTFs decode through the shipped bundle).

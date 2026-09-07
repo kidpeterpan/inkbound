@@ -27,11 +27,24 @@ interface StubPos {
   start: { line: number };
   end: { line: number };
 }
+interface LinkLoc {
+  line: number;
+  col: number;
+  offset: number;
+}
 export interface FileCache {
   frontmatter: Record<string, unknown>;
   headings: { heading: string; level: number; position: StubPos }[];
   sections: { id?: string; type: string; position: StubPos }[];
   listItems: { id?: string; parent: number; position: StubPos }[];
+  // 009-index-order-parts: regular wikilinks in document order, the shape
+  // of Obsidian's `LinkCache` (`Reference` + `CacheItem`). See parseLinks.
+  links: {
+    link: string;
+    original: string;
+    displayText?: string;
+    position: { start: LinkLoc; end: LinkLoc };
+  }[];
 }
 
 function stripQuotes(s: string): string {
@@ -184,6 +197,57 @@ function parseHeadingsAndSections(content: string): {
   return { headings, sections, listItems };
 }
 
+// 009-index-order-parts (research R4/R7.1): main.ts orders chapters by an
+// index note's `getFileCache(file).links`. Real Obsidian puts embeds in
+// `embeds`, frontmatter links in `frontmatterLinks`, and does not index links
+// inside fenced code — so this extractor must exclude all three, or ordering
+// tests would pass against behaviour the app does not have. Deliberately NOT
+// built on buildResolvedLinks' regex, which includes embeds on purpose.
+function parseLinks(content: string): FileCache["links"] {
+  const links: FileCache["links"] = [];
+  const fm = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(content);
+  const bodyStart = fm ? fm[0].length : 0;
+
+  // Line start offsets (for line/col) and fenced-code offset ranges.
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < content.length; i++) if (content[i] === "\n") lineStarts.push(i + 1);
+  const fences: [number, number][] = [];
+  const lines = content.split("\n");
+  let fenceOpen: number | null = null;
+  for (let n = 0; n < lines.length; n++) {
+    if (!/^\s*```/.test(lines[n])) continue;
+    if (fenceOpen === null) fenceOpen = lineStarts[n];
+    else {
+      fences.push([fenceOpen, lineStarts[n] + lines[n].length]);
+      fenceOpen = null;
+    }
+  }
+  if (fenceOpen !== null) fences.push([fenceOpen, content.length]);
+  const inFence = (offset: number) => fences.some(([a, b]) => offset >= a && offset <= b);
+  const locOf = (offset: number): LinkLoc => {
+    let line = 0;
+    while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) line++;
+    return { line, col: offset - lineStarts[line], offset };
+  };
+
+  const linkRe = /(^|[^!])\[\[([^\]\n]+?)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = linkRe.exec(content))) {
+    const start = m.index + m[1].length;
+    if (start < bodyStart || inFence(start)) continue;
+    const inner = m[2];
+    const pipe = inner.indexOf("|");
+    const original = `[[${inner}]]`;
+    links.push({
+      link: pipe === -1 ? inner : inner.slice(0, pipe),
+      original,
+      ...(pipe === -1 ? {} : { displayText: inner.slice(pipe + 1) }),
+      position: { start: locOf(start), end: locOf(start + original.length) },
+    });
+  }
+  return links;
+}
+
 function normalizeRel(p: string): string {
   return p.replace(/^\/+/, "").replace(/\/+$/, "");
 }
@@ -293,7 +357,13 @@ export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultSt
         return null;
       }
       const { headings, sections, listItems } = parseHeadingsAndSections(content);
-      return { frontmatter: parseFrontmatter(content), headings, sections, listItems };
+      return {
+        frontmatter: parseFrontmatter(content),
+        headings,
+        sections,
+        listItems,
+        links: parseLinks(content),
+      };
     },
     getFirstLinkpathDest,
     get resolvedLinks(): Record<string, Record<string, number>> {
