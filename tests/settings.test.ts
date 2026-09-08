@@ -60,11 +60,18 @@ describe("summarizeWarnings", () => {
   it("is null when there are no warnings", () => {
     expect(summarizeWarnings([])).toBeNull();
   });
-  it("counts warnings and points at the console", () => {
-    expect(summarizeWarnings(["a", "b"])).toBe("Exported with 2 warnings — details in developer console.");
+  it("counts warnings and points at the report", () => {
+    expect(summarizeWarnings(["a", "b"])).toBe("Exported with 2 warnings — tap for the full report.");
   });
   it("uses singular 'warning' wording for exactly one warning", () => {
-    expect(summarizeWarnings(["a"])).toBe("Exported with 1 warning — details in developer console.");
+    expect(summarizeWarnings(["a"])).toBe("Exported with 1 warning — tap for the full report.");
+  });
+  // 010-export-report FR-002. The old wording ended "details in developer
+  // console." — a place Obsidian mobile does not have, on a platform the
+  // constitution has supported since v1.1.0. Naming the console here again
+  // would re-open exactly the hole this feature closed.
+  it("never points the reader at the developer console (FR-002)", () => {
+    expect(summarizeWarnings(["a"])?.toLowerCase()).not.toContain("console");
   });
 });
 

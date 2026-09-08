@@ -45,7 +45,7 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 | `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.    |
 | `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                          |
 | `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                           |
-| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below. |
+| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below.  |
 | `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                        |
 | `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                  |
 | `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                          |
@@ -143,6 +143,22 @@ mobile path:
   until the next export, so the share command has something to hand over. For a
   large image-heavy book on a phone that is a real, if modest, resident cost.
 
+**Export report (010-export-report) — not yet checked on a device.** The
+feature exists precisely because mobile has no developer console, so the parts
+only a phone can settle are the parts that matter:
+
+- Whether tapping the completion notice opens the report. The affordance is a
+  click listener on a `DocumentFragment` body passed to the `Notice`
+  constructor (neither `Notice` element member is usable here — see
+  `specs/010-export-report/research.md` R3), and a tap is not a click event
+  everywhere.
+- Whether `navigator.clipboard.writeText` is available in the mobile WebView on
+  each OS. Absence is a supported outcome — the copy degrades to a notice
+  saying the device did not allow it — so "clipboard unavailable on iOS" is a
+  result worth writing down, not a bug. **Record the outcome per OS.**
+- Whether a report with warnings from ~50 chapters scrolls acceptably as a
+  mobile sheet.
+
 Note two things that WERE fixed rather than merely being listed, because they
 were provably broken:
 
@@ -160,7 +176,7 @@ were provably broken:
 **Unverified — 009-index-order-parts (nested Parts in the TOC).** Not yet
 checked on a device as of 2026-09-07; `epubcheck` accepts the nested nav and
 the shipped-bundle gate exports a fixture with a Part, but how a reader
-*presents* it is the device's call:
+_presents_ it is the device's call:
 
 - NeoReader's TOC panel rendering of nested `<ol>` Part entries (collapsed,
   indented, or flattened?), and the same in Obsidian's own reading view of the

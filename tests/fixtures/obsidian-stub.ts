@@ -150,9 +150,31 @@ if (typeof (globalThis as { createSpan?: unknown }).createSpan === "undefined") 
   };
 }
 
+// Bare-global createFragment — same ambient-global form as createEl above.
+// Obsidian's signature takes an optional callback that receives the fragment,
+// so a caller can build children inline; the fragment is returned either way.
+// 010-export-report uses it to give the completion notice a clickable body
+// without touching Notice.noticeEl (see main.ts's comment there for why).
+if (typeof (globalThis as { createFragment?: unknown }).createFragment === "undefined") {
+  (globalThis as { createFragment?: unknown }).createFragment = function createFragment(
+    callback?: (el: DocumentFragment) => void
+  ): DocumentFragment {
+    const frag = document.createDocumentFragment();
+    callback?.(frag);
+    return frag;
+  };
+}
+
 // ── Notice ──────────────────────────────────────────────────────────────
 
 export const NOTICES: string[] = [];
+
+// 010-export-report: the notice ELEMENTS, parallel to NOTICES above and reset
+// the same way. NOTICES answers "what did the reader read"; this answers "what
+// could the reader tap". The completion notice's report affordance is a click
+// handler on the notice element (research R3), so a test that wants to perform
+// the reader's actual gesture needs the element, not the string.
+export const NOTICE_ELS: HTMLElement[] = [];
 
 export class Notice {
   noticeEl: HTMLElement;
@@ -164,8 +186,15 @@ export class Notice {
     NOTICES.push(text);
     this.containerEl = document.createElement("div");
     this.messageEl = document.createElement("div");
-    this.messageEl.textContent = text;
+    // A DocumentFragment message is APPENDED, not flattened to text: real
+    // Obsidian renders the fragment's nodes into the notice, so anything the
+    // caller made clickable stays clickable. Flattening it to textContent
+    // would silently drop that, and a test could never perform the reader's
+    // actual gesture (010-export-report).
+    if (typeof message === "string") this.messageEl.textContent = text;
+    else this.messageEl.appendChild(message);
     this.noticeEl = this.messageEl;
+    NOTICE_ELS.push(this.noticeEl);
   }
 
   setMessage(message: string | DocumentFragment): this {
@@ -438,6 +467,48 @@ export class App {
   vault!: unknown;
   workspace!: unknown;
   metadataCache!: unknown;
+}
+
+// ── Modal ─────────────────────────────────────────────────────────────────
+//
+// 010-export-report. Narrowed to exactly what src/report-view.ts touches
+// (`app`, `contentEl`, `titleEl`, `open`, `close`, `onOpen`, `onClose`) —
+// same discipline as every other class in this file: a harness fixture, not a
+// general-purpose Obsidian shim. Real Obsidian's Modal also carries `scope`,
+// `containerEl`, `modalEl`, `setTitle`/`setContent` and history handling,
+// none of which this plugin uses.
+//
+// MODALS records what was opened, mirroring NOTICES above, because this
+// harness has no window manager for a test to inspect. A test asserts what
+// the reader would have seen by reading the recorded modal's contentEl.
+export const MODALS: Modal[] = [];
+
+export class Modal {
+  app: App;
+  contentEl: HTMLElement;
+  titleEl: HTMLElement;
+  /** Whether close() has been called — lets a test assert dismissal. */
+  closed = false;
+
+  constructor(app: App) {
+    this.app = app;
+    this.contentEl = document.createElement("div");
+    this.titleEl = document.createElement("div");
+  }
+
+  open(): void {
+    MODALS.push(this);
+    void this.onOpen();
+  }
+
+  close(): void {
+    this.closed = true;
+    this.onClose();
+  }
+
+  onOpen(): Promise<void> | void {}
+
+  onClose(): void {}
 }
 
 export interface StubCommand {

@@ -33,6 +33,8 @@ import { resolveMeta, MetaDefaults } from "./metadata";
 import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "./cover";
 import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
+import { createWarningCollector, buildReport, type ExportReport } from "./report";
+import { openExportReport } from "./report-view";
 
 interface Job {
   meta: ExportMeta;
@@ -54,6 +56,11 @@ export default class EpubExportPlugin extends Plugin {
   // sheet. Only set on mobile, and only after the file is safely on disk —
   // sharing is a bonus layered on a completed export, never part of one.
   private lastShareTarget: ShareTarget | null = null;
+  // 010-export-report FR-016: only the most recent export's report is kept —
+  // same in-memory, session-only shape as lastShareTarget above, and for the
+  // same reason: the command that consumes it needs something to hand over,
+  // and nothing about it belongs in a synced data.json.
+  private lastReport: ExportReport | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -86,6 +93,23 @@ export default class EpubExportPlugin extends Plugin {
     // the offer to be ABSENT (not failing) where sharing is unsupported —
     // checkCallback returning false hides the command from the palette
     // entirely, which is exactly that.
+    // 010-export-report FR-013/FR-014. A plain `callback`, deliberately NOT
+    // the `checkCallback` its neighbour below uses: checkCallback returning
+    // false HIDES a command from the palette, and a hidden command cannot
+    // tell the reader that there is nothing to show. Being told is the
+    // requirement, so this command is always present and answers for itself.
+    this.addCommand({
+      id: "show-export-report",
+      name: "Show last export report",
+      callback: () => {
+        if (!this.lastReport) {
+          new Notice("No export has run yet — the report appears after your first export.");
+          return;
+        }
+        openExportReport(this.app, this.lastReport);
+      },
+    });
+
     this.addCommand({
       id: "share-last-export",
       name: "Share last exported book",
@@ -384,7 +408,24 @@ export default class EpubExportPlugin extends Plugin {
   // ── orchestrator ────────────────────────────────────────────────
 
   async runExport(job: Job) {
-    const warnings: string[] = [...(job.warnings ?? [])];
+    // 010-export-report — WHY A COLLECTOR, NOT A string[]: the report groups
+    // warnings by the chapter that produced them, and that fact is only
+    // available HERE, as each warning is recorded. Recovering it afterwards
+    // would mean regex-parsing prose ("... (referenced by X.md)") that four
+    // modules author independently — and five warnings carry no path at all
+    // (the Thai-font, Mermaid- and math-rasterization, chapter-ordering and
+    // table-of-contents fallbacks), so parsing would mis-group those five
+    // today and break silently the next time a message is reworded.
+    // See specs/010-export-report/research.md R1.
+    //
+    // `collector.messages()` is exactly what the old string[] held, in the
+    // same order — console output and summarizeWarnings must not change
+    // (FR-020), because scripts/local-export.ts parses those console lines.
+    const collector = createWarningCollector();
+    // job.warnings carries the chapter-ordering fallback, which exportFolder
+    // records BEFORE runExport is called — so it is book-level by definition,
+    // and is seeded here rather than looked for in the chapter loop below.
+    (job.warnings ?? []).forEach(collector.forBook());
     let notice: Notice | null = null;
     try {
       notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
@@ -439,6 +480,8 @@ export default class EpubExportPlugin extends Plugin {
       let hasThai = false;
 
       for (const [chapterIndex, file] of job.files.entries()) {
+        // Everything recorded inside this iteration is about THIS chapter.
+        const warnForChapter = collector.forNote(file.path);
         // 008-mobile-support FR-014/SC-006: a long export on a phone otherwise
         // looks like a frozen app. Reuses the persistent notice the push step
         // already updates, so this costs nothing new — and it helps desktop
@@ -456,7 +499,7 @@ export default class EpubExportPlugin extends Plugin {
             imageCount,
             this.settings.tocHeadingDepth
           );
-          warnings.push(...r.warnings);
+          r.warnings.forEach(warnForChapter);
           hasThai = hasThai || containsThai(r.xhtmlBody);
           // Bump immediately, before the asset loop below: these numbers are
           // already burned into r.xhtmlBody regardless of what happens next.
@@ -490,7 +533,7 @@ export default class EpubExportPlugin extends Plugin {
                 // Outside the allowlist (e.g. .bmp/.tiff/.avif/.md): embedding
                 // it would mislabel the asset and epubcheck flags malformed
                 // images / non-core media types. Skip, don't embed.
-                warnings.push(`unsupported image type: ${img.vaultPath} (referenced by ${file.path})`);
+                warnForChapter(`unsupported image type: ${img.vaultPath} (referenced by ${file.path})`);
                 continue;
               }
               const bytes = new Uint8Array(await this.app.vault.readBinary(af));
@@ -499,12 +542,12 @@ export default class EpubExportPlugin extends Plugin {
               // Missing image: export continues (spec's error table) — this
               // one image's href stays dangling in the chapter HTML, but the
               // chapter itself is still added below.
-              warnings.push(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
+              warnForChapter(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
             }
           }
           builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody), r.toc);
         } catch (e) {
-          warnings.push(`chapter skipped: ${file.path} — ${String(e)}`);
+          warnForChapter(`chapter skipped: ${file.path} — ${String(e)}`);
           // Placeholder keeps builder's chapter count == job.files.length, so
           // hrefByPath (position-derived from job.files) stays in sync with
           // EpubBuilder's own internal numbering (which only advances on
@@ -529,10 +572,10 @@ export default class EpubExportPlugin extends Plugin {
           if (asset) {
             builder.setThaiFont(asset);
           } else {
-            warnings.push("Thai font unavailable — exporting without embedded font");
+            collector.forBook()("Thai font unavailable — exporting without embedded font");
           }
         } catch (e) {
-          warnings.push(`Thai font embedding skipped: ${e instanceof Error ? e.message : String(e)}`);
+          collector.forBook()(`Thai font embedding skipped: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
 
@@ -544,7 +587,7 @@ export default class EpubExportPlugin extends Plugin {
         try {
           builder.setNavTree(job.nav);
         } catch (e) {
-          warnings.push(
+          collector.forBook()(
             `table of contents fell back to a flat list: ${e instanceof Error ? e.message : String(e)}`
           );
         }
@@ -578,9 +621,53 @@ export default class EpubExportPlugin extends Plugin {
           pushMsg = ` — saved locally, push failed: ${e instanceof Error ? e.message : String(e)}`;
         }
       }
+      const warnings = collector.messages();
       warnings.forEach((w) => console.warn("[inkbound]", w));
       const warnMsg = summarizeWarnings(warnings);
-      new Notice(`EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`, 8000);
+      const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
+
+      // 010-export-report. Built and wired in its own try: everything above
+      // has already succeeded and the book IS on disk, so a bug in the report
+      // must not fall through to the outer catch and tell the reader the
+      // export failed (FR-019, Constitution II). Worst case is a saved book
+      // shown with the plain notice — exactly the pre-feature behavior.
+      let report: ExportReport | null = null;
+      try {
+        report = buildReport(
+          job.meta.title,
+          job.files.map((f) => f.path),
+          collector.scoped()
+        );
+        this.lastReport = report;
+      } catch (e) {
+        console.error("[inkbound] could not build the export report", e);
+      }
+
+      if (report && report.total > 0) {
+        // WHY A DocumentFragment AND NOT Notice.noticeEl: the report needs a
+        // tap target on the notice, and Notice exposes exactly two element
+        // members — `messageEl` (@since 1.8.7, which manifest.json's
+        // minAppVersion of 1.5.0 forbids: undefined on 1.5.0 through 1.8.6,
+        // and the no-unsupported-api lint rule fails the build for it) and
+        // `noticeEl` (available since 0.9.7 but deprecated, and this repo's
+        // lint config forbids disabling @typescript-eslint/no-deprecated at
+        // all). The constructor's DocumentFragment overload predates both and
+        // is flagged by neither: we build the notice body ourselves and make
+        // it clickable, so no Notice member is touched. See
+        // specs/010-export-report/research.md R3.
+        const openReport = report;
+        new Notice(
+          createFragment((frag) => {
+            const body = frag.createDiv({ text: savedText });
+            body.addEventListener("click", () => openExportReport(this.app, openReport));
+          }),
+          8000
+        );
+      } else {
+        // FR-003: a warning-free export's notice is byte-identical to what it
+        // was before this feature, and nothing about it is clickable.
+        new Notice(savedText, 8000);
+      }
     } catch (e) {
       console.error("[inkbound] export failed", e);
       new Notice(`EPUB export failed: ${e instanceof Error ? e.message : String(e)}`);

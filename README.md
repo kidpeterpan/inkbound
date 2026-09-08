@@ -126,6 +126,27 @@ Output folder** (`~/Downloads` by default), and a notice in Obsidian confirms
 the path once the export finishes. If **Push after export** is turned on,
 the same notice reports whether the send to your Boox device succeeded.
 
+**When something in your notes could not be carried into the book**, the
+export still finishes — that is deliberate — and the notice says how many
+things degraded. Tap it to open the **export report**, which lists every one
+of them grouped under the note it came from, so you know exactly which note to
+go fix:
+
+- a missing or unsupported image,
+- an embed that could not be resolved, or a Bases view that has no book
+  equivalent,
+- an expression that would not typeset,
+- a chapter that failed to render at all,
+- and anything that applies to the whole book rather than one note, such as
+  the Thai font not loading, listed separately at the end.
+
+The notice disappears after a few seconds. **Show last export report** in the
+command palette brings the same report back for the most recent export, for as
+long as Obsidian stays open. A **Copy report** button in the report copies it
+as plain text, which is what to paste into a bug report. A clean export shows
+its usual notice with nothing extra, and the report simply says there were no
+warnings.
+
 ## Settings
 
 Found under **Settings → Community plugins → Inkbound**:
@@ -311,6 +332,12 @@ saves books, and vice versa.
 Because books are saved into the vault, they sync like any other vault file.
 If you would rather they didn't, point the mobile output folder at a folder
 your sync excludes.
+
+**The export report matters most here.** Warnings used to go only to a
+developer console, which a phone does not have — so on mobile there was no way
+to learn that a book had come out incomplete. Tapping the completion notice
+now opens the same report you get on desktop, and **Show last export report**
+reopens it afterwards.
 
 To send a finished book somewhere else, run **Share last exported book** from
 the command palette. It appears only on devices that support sharing — if you
