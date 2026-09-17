@@ -70,7 +70,7 @@ jobs:
       # Must follow check-export-works — validates the book that run exported,
       # alongside the hand-built sample, against the EPUB 3 spec. A release is
       # the last moment this can be caught before a reader finds it.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
