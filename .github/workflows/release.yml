@@ -13,6 +13,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # Kept in step with ci.yml — the release gate and the PR gate must be the
+      # same gate, or a release can ship something no PR was ever checked for.
+      EPUBCHECK_VERSION: "5.3.0"
     permissions:
       contents: write
       # Both are required to publish artifact attestations, which let users
@@ -60,6 +64,25 @@ jobs:
       # export through it against tests/fixtures/smoke-vault. The only gate that
       # executes the artifact's export pipeline rather than src/ or a rebuild.
       - run: npm run check-export-works
+        env:
+          INKBOUND_KEEP_EPUB: ${{ runner.temp }}/exported.epub
+
+      # Must follow check-export-works — validates the book that run exported,
+      # alongside the hand-built sample, against the EPUB 3 spec. A release is
+      # the last moment this can be caught before a reader finds it.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install epubcheck
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/epubcheck.zip" \
+            "https://github.com/w3c/epubcheck/releases/download/v$EPUBCHECK_VERSION/epubcheck-$EPUBCHECK_VERSION.zip"
+          unzip -q "$RUNNER_TEMP/epubcheck.zip" -d "$RUNNER_TEMP"
+          echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-$EPUBCHECK_VERSION/epubcheck.jar" >> "$GITHUB_ENV"
+      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub"
+
       - run: npm run version:check
 
       # Publishes a signed statement that these exact bytes were built by this
