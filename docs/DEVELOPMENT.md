@@ -336,8 +336,8 @@ general coverage — that belongs in vitest.
 
 Every other gate in this repo checks the export against what this code believes
 a book should be, so they agree with themselves by construction. epubcheck —
-the W3C's validator, the same one Kobo, Apple and the IDPF ecosystem run — is
-the only one whose rules come from outside: a malformed OPF manifest, a nav
+the W3C's validator for the format (originally the IDPF's) — is the only one
+whose rules come from outside: a malformed OPF manifest, a nav
 fragment that resolves nowhere, a wrong media type, a font declared but not
 listed. All of those produce a zip that `check-export-works` happily passes and
 a reader then refuses to open.
