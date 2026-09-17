@@ -39,7 +39,7 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 | `npm test`                         | Runs the vitest suite once.                                                                                                                          |
 | `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.      |
 | `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development" above).                       |
-| `npm run epubcheck`                | Builds a sample EPUB (`scripts/build-sample.ts`) and, if `epubcheck` is installed (`brew install epubcheck`), validates it against the EPUB 3 spec.  |
+| `npm run epubcheck`                | Builds the sample EPUB (`scripts/build-sample.ts`) and validates it against the EPUB 3 spec; takes extra `.epub` paths (`-- book.epub`). Skips with a hint when `epubcheck` is not installed locally, but is a hard failure in CI — see "The EPUB 3 spec gate" below. |
 | `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                      |
 | `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI. |
 | `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.    |
@@ -83,8 +83,10 @@ The gates that actually touch real artifacts, in increasing order of realism:
    mobile at all: no node-builtin `require()` executes at load, and the bundle
    evaluates without throwing in a runtime that has a DOM but no `Buffer`, no
    `process`, and no `require`. See "The mobile load gate" below.
-4. **`npm run epubcheck`** — validates a built EPUB against the EPUB 3 spec
-   with the industry-standard validator.
+4. **`npm run epubcheck`** — validates finished books against the EPUB 3 spec
+   with the W3C's validator: both the hand-built sample and, in CI, the book
+   the shipped bundle just exported in rung 2. The only gate whose pass/fail
+   criteria come from outside this repo. See "The EPUB 3 spec gate" below.
 5. **Manual testing inside Obsidian, on the actual Boox device — and, since
    008-mobile-support, on a real iPhone/iPad and a real Android device** — the only
    gate that exercises the real `MarkdownRenderer`, the real DOM Obsidian
@@ -329,6 +331,58 @@ specific assertion (the index note's `tags: [book, main]` and `aliases` drive
 math note is the one thing that drives the rewritten MathJax code). Add to it
 when a new export feature has a shipped-bundle-only dependency, not for
 general coverage — that belongs in vitest.
+
+## The EPUB 3 spec gate (`npm run epubcheck`)
+
+Every other gate in this repo checks the export against what this code believes
+a book should be, so they agree with themselves by construction. epubcheck —
+the W3C's validator, the same one Kobo, Apple and the IDPF ecosystem run — is
+the only one whose rules come from outside: a malformed OPF manifest, a nav
+fragment that resolves nowhere, a wrong media type, a font declared but not
+listed. All of those produce a zip that `check-export-works` happily passes and
+a reader then refuses to open.
+
+It validates **two** books:
+
+1. `sample.epub`, built by `scripts/build-sample.ts` — hand-assembled and
+   deliberately packed with the edge cases nothing else reaches: three levels of
+   nested nav Parts, Thai heading fragment ids, real MathJax SVG (including the
+   `merror` red-error path), embedded font assets with their OFL text file, and
+   a cover image. The comments in that file name the epubcheck rules each piece
+   exists to exercise (RSC-012, NAV-011) — keep them when adding to it.
+2. In CI, the book the shipped `main.js` exported in the previous step.
+   `check-export-works` builds it inside a temp dir it deletes on the way out,
+   so CI sets `INKBOUND_KEEP_EPUB=<path>` to have it copied out first. The copy
+   happens before that gate's own assertions run, so a book that fails them is
+   still on disk to inspect — and CI uploads it as an artifact when the job
+   fails.
+
+Two things about `scripts/epubcheck.ts` that are deliberate:
+
+- **Missing epubcheck is a skip locally and a failure in CI.** The script used
+  to be a shell `if command -v epubcheck; then ...; else echo ...; fi`, which
+  exits 0 when the tool is absent. That is right on a laptop and useless as a
+  gate: a runner without epubcheck would have reported a pass. The script keys
+  off `CI` (or `--require`).
+- **`--failonwarnings`.** Both books are at 0 errors and 0 warnings today, and
+  CI pins the epubcheck version (`EPUBCHECK_VERSION` in both workflows), so a
+  new warning can only come from a change in this repo. Bumping the pin is a
+  deliberate act — expect to fix whatever the new version newly objects to in
+  the same commit.
+
+Locally: `brew install epubcheck`, then `npm run epubcheck`. To validate a real
+book end to end the way CI does:
+
+```bash
+npm run build
+INKBOUND_KEEP_EPUB=/tmp/real.epub npm run check-export-works
+npm run epubcheck -- /tmp/real.epub
+```
+
+Point `EPUBCHECK_JAR` at an unpacked `epubcheck.jar` to use a specific version
+instead of the one on `PATH` (that is what CI does). The jar loads its
+dependencies from a sibling `lib/` through its manifest classpath, so run it
+where it was unpacked rather than copying the jar out.
 
 ## Obsidian's review rules
 
