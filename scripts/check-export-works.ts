@@ -27,8 +27,11 @@
 // Obsidian (docs/DEVELOPMENT.md, "Testing and its limits").
 //
 // Usage: tsx scripts/check-export-works.ts   (after `npm run build`)
+//
+// Set INKBOUND_KEEP_EPUB=<path> to also copy the exported book out of the
+// temp dir before it is cleaned up, so another gate can inspect it.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import JSZip from "jszip";
@@ -149,6 +152,19 @@ async function main(): Promise<void> {
         NOTICES.map((n) => `notice: ${n}`)
       );
     if (!existsSync(epubPath)) fail(`the completion notice names a file that does not exist: ${epubPath}`);
+
+    // The book itself lives in a temp dir this script deletes on the way out,
+    // so anything that wants to inspect it afterwards has to ask for a copy
+    // BEFORE the assertions below — a book that fails them is exactly the one
+    // worth keeping. CI sets this and then runs `npm run epubcheck` over the
+    // copy, which is how the shipped bundle's real output (not just the
+    // hand-built sample) gets validated against the EPUB 3 spec.
+    const keepAt = process.env.INKBOUND_KEEP_EPUB;
+    if (keepAt) {
+      mkdirSync(path.dirname(path.resolve(keepAt)), { recursive: true });
+      copyFileSync(epubPath, keepAt);
+      console.log(`  [kept] exported book copied to ${keepAt}`);
+    }
 
     const problems = await checkBook(epubPath);
     if (problems.length > 0) fail(`the exported EPUB is not a usable book (${epubPath}).`, problems);
