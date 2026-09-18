@@ -3,6 +3,37 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.8.1
+
+An export that had to leave something out now tells you what, inside Obsidian,
+on a phone as well as a laptop.
+
+- **The export report.** Inkbound deliberately never fails an export over
+  content: a missing image, an unresolvable embed, a Bases view, an expression
+  that will not typeset, a font that will not load — each degrades and records
+  a warning so the book still gets made. Until now those warnings went to the
+  developer console and nowhere else, and the completion notice said as much.
+  **Obsidian mobile has no developer console**, so on a platform Inkbound has
+  supported since 1.6 there was no way at all to learn that a book had come out
+  incomplete. Tap the completion notice and the full report opens, listing
+  every warning grouped under the note that produced it, in the book's own
+  chapter order, with anything that applies to the whole book rather than to
+  one note in its own section at the end.
+- **The report survives the notice.** Notices disappear after a few seconds,
+  which on a phone is often before you have looked at the screen. **Show last
+  export report** in the command palette reopens the most recent export's
+  report for as long as Obsidian stays open. Unlike the share command it is
+  always listed, and tells you plainly when no export has run yet rather than
+  hiding itself.
+- **Copy report** puts the whole thing on the clipboard as plain text with its
+  grouping intact — what to paste into a bug report. A device that refuses the
+  clipboard says so instead of failing.
+- **A clean export looks exactly as it did.** No warnings means the same notice
+  as before, with nothing new and nothing to tap. Books themselves are
+  byte-identical: this release changes what you can read about an export, not
+  what an export produces. Every warning still goes to the console too, in the
+  same order, so existing tooling is unaffected.
+
 ## 1.8.0
 
 Folder exports now read the book's structure from your notes instead of from

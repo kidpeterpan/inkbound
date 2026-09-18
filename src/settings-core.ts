@@ -100,5 +100,10 @@ export function resolveOutputPath(outputFolder: string, slug: string, homedir: s
 
 export function summarizeWarnings(warnings: string[]): string | null {
   if (warnings.length === 0) return null;
-  return `Exported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"} — details in developer console.`;
+  // 010-export-report FR-002: this used to end "details in developer
+  // console." Obsidian mobile has no developer console, so on a platform the
+  // constitution has supported since v1.1.0 that sentence pointed nowhere.
+  // The report is reachable from the notice itself and from the "Show last
+  // export report" command, on both platforms.
+  return `Exported with ${warnings.length} warning${warnings.length === 1 ? "" : "s"} — tap for the full report.`;
 }
