@@ -8,6 +8,12 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      # Pinned, not "latest": epubcheck's own rules change between releases, so
+      # an unpinned version turns an upstream release into a red build on a PR
+      # that changed nothing. Bump it deliberately, and expect to fix whatever
+      # the new version newly objects to in the same commit.
+      EPUBCHECK_VERSION: "5.3.0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +39,42 @@ jobs:
       # export through it against tests/fixtures/smoke-vault. The only gate that
       # executes the artifact's export pipeline rather than src/ or a rebuild.
       - run: npm run check-export-works
+        env:
+          # Keeps a copy of the book the shipped bundle just exported — the
+          # script's own temp dir is gone by the time the next step runs.
+          INKBOUND_KEEP_EPUB: ${{ runner.temp }}/exported.epub
+
+      # EPUB 3 spec validation. This is the only gate whose pass/fail criteria
+      # come from OUTSIDE this repo: every gate above asserts what this code
+      # believes a book should be, and agrees with itself by construction.
+      # epubcheck is what a reader's parser would say. It runs over BOTH the
+      # hand-built sample (edge cases: nested nav Parts, Thai fragment ids,
+      # MathJax SVG, embedded fonts) and the book the shipped main.js just
+      # exported from the fixture vault.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install epubcheck
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/epubcheck.zip" \
+            "https://github.com/w3c/epubcheck/releases/download/v$EPUBCHECK_VERSION/epubcheck-$EPUBCHECK_VERSION.zip"
+          unzip -q "$RUNNER_TEMP/epubcheck.zip" -d "$RUNNER_TEMP"
+          # The jar resolves its dependencies from a sibling lib/ through its
+          # manifest classpath, so it is used where it was unpacked.
+          echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-$EPUBCHECK_VERSION/epubcheck.jar" >> "$GITHUB_ENV"
+      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub"
+
+      # A spec violation is far easier to diagnose with the book in hand than
+      # from a log line naming a file that no longer exists.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: exported-epub
+          path: ${{ runner.temp }}/exported.epub
+          if-no-files-found: ignore
+
       - run: npm run version:check
       - uses: actions/upload-artifact@v4
         if: always()
