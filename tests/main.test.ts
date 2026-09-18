@@ -12,6 +12,11 @@ import {
   TFolder,
   Menu,
   NOTICES,
+  // 010-export-report: parallel to NOTICES — the notice ELEMENTS, so a test
+  // can perform the reader's gesture (tapping the notice) rather than
+  // asserting on text alone. MODALS records what that opened.
+  NOTICE_ELS,
+  MODALS,
   setRequestUrlImpl,
   resetRequestUrlImpl,
   // 008-mobile-support: imported from the stub BY PATH, not from "obsidian" —
@@ -24,6 +29,7 @@ import {
 import type { StubCommand } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
 import { setShareHost } from "../src/share";
+import { BOOK_GROUP_LABEL } from "../src/report";
 import type { EpubExportSettings } from "../src/settings";
 
 // ── fixture ─────────────────────────────────────────────────────────────
@@ -50,6 +56,8 @@ beforeEach(async () => {
   outDir = await fs.mkdtemp(join(tmpdir(), "epub-export-out-"));
   vaultDirs = [];
   NOTICES.length = 0;
+  NOTICE_ELS.length = 0;
+  MODALS.length = 0;
   warnings = [];
   errors = [];
   originalWarn = console.warn;
@@ -1369,7 +1377,7 @@ describe("overwrite", () => {
 // onload() at all.
 
 describe("onload: command and menu registration", () => {
-  it("registers the three export commands plus the mobile share command, under their exact ids", async () => {
+  it("registers the three export commands, the mobile share command and the report command, under their exact ids", async () => {
     const { app } = await buildVault({ "note.md": "Body.\n" });
     const plugin = await makeOnloadedPlugin(app);
     expect(Object.keys(commandsOf(plugin)).sort()).toEqual([
@@ -1380,6 +1388,10 @@ describe("onload: command and menu registration", () => {
       // hides it from the palette unless a book has been exported on mobile AND
       // the device can share (FR-017 — absent, not failing).
       "share-last-export",
+      // 010-export-report: unlike the share command above, this one is ALWAYS
+      // visible — FR-014 requires the reader to be told when there is nothing
+      // to show, and a hidden command tells nobody anything.
+      "show-export-report",
     ]);
   });
 
@@ -2195,5 +2207,213 @@ describe("Boox push from mobile (008-mobile-support)", () => {
     expect(fileExistedAtPushTime).toBe(true);
     // And it is still there after the failure.
     expect((await fs.readFile(join(root, "Exports", "push_fail.epub"))).length).toBeGreaterThan(0);
+  });
+});
+
+// ── 010-export-report ─────────────────────────────────────────────────────
+
+/**
+ * Performs the reader's gesture on the most recent notice. The report
+ * affordance is a clickable body the notice was constructed with (a
+ * DocumentFragment — see main.ts's comment for why not Notice.noticeEl), so
+ * the target is that body when there is one, and the bare notice element
+ * otherwise (which is what a warning-free export produces).
+ */
+function tapLastNotice(): void {
+  const el = NOTICE_ELS[NOTICE_ELS.length - 1];
+  const body = el.firstElementChild as HTMLElement | null;
+  if (body) body.click();
+  else el.click();
+}
+
+/** The stub records opened modals the way it records notices. */
+function openedReports(): { title: string; text: string }[] {
+  return MODALS.map((m) => ({
+    title: m.contentEl.querySelector("h2")?.textContent ?? "",
+    text: m.contentEl.textContent ?? "",
+  }));
+}
+
+/** Reads the group headings of the most recently opened report. */
+function lastReportHeadings(): string[] {
+  const last = MODALS[MODALS.length - 1];
+  return [...last.contentEl.querySelectorAll("h3")].map((h) => h.textContent ?? "");
+}
+
+/** A vault whose export degrades in two different notes plus at book level. */
+async function vaultThatWarns() {
+  return buildVault({
+    "Book/Book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[Ch1]]\n[[Ch2]]\n",
+    "Book/Ch1.md": "# Ch1\n\n![missing](nope.png)\n",
+    "Book/Ch2.md": "# Ch2\n\n![gone](also-missing.png)\n",
+  });
+}
+
+describe("export report: the completion notice (US1)", () => {
+  it("names the file and states the warning count (FR-001)", async () => {
+    const { app, root } = await vaultThatWarns();
+    await makePlugin(app).exportFolder(tfolder(root, "Book"));
+
+    const notice = successNotices()[0];
+    expect(notice).toContain("book.epub");
+    expect(notice).toMatch(/2 warnings/);
+  });
+
+  it("invites opening the report and never mentions the developer console (FR-002)", async () => {
+    const { app, root } = await vaultThatWarns();
+    await makePlugin(app).exportFolder(tfolder(root, "Book"));
+
+    const notice = successNotices()[0];
+    expect(notice.toLowerCase()).not.toContain("console");
+    expect(notice.toLowerCase()).toContain("report");
+  });
+
+  it("leaves a warning-free export's notice exactly as it was (FR-003)", async () => {
+    const { app, root } = await buildVault({ "clean.md": "# Clean\n\nBody.\n" });
+    await makePlugin(app).exportSingle(tfile(root, "clean.md"));
+
+    expect(warnings).toHaveLength(0);
+    const notice = successNotices()[0];
+    expect(notice).toBe(`EPUB saved to ${join(outDir, "clean.epub")}`);
+  });
+
+  it("opens the report for that export when the notice is acted on (FR-012)", async () => {
+    const { app, root } = await vaultThatWarns();
+    const plugin = makePlugin(app);
+    await plugin.exportFolder(tfolder(root, "Book"));
+
+    // Tapping the notice is the gesture on both platforms (research R3).
+    tapLastNotice();
+
+    expect(openedReports()).toHaveLength(1);
+    expect(openedReports()[0].title).toBe("Book");
+  });
+
+  it("groups each warning under the note it came from (FR-006, FR-010)", async () => {
+    const { app, root } = await vaultThatWarns();
+    await makePlugin(app).exportFolder(tfolder(root, "Book"));
+    tapLastNotice();
+
+    expect(lastReportHeadings()).toEqual(["Book/Ch1.md", "Book/Ch2.md"]);
+  });
+
+  it("makes a warning-free export's notice unclickable (FR-003)", async () => {
+    const { app, root } = await buildVault({ "clean.md": "# Clean\n\nBody.\n" });
+    await makePlugin(app).exportSingle(tfile(root, "clean.md"));
+
+    tapLastNotice();
+    expect(MODALS).toHaveLength(0);
+  });
+});
+
+// FR-020. This one is a CHARACTERIZATION test, not a red-first one: it pins
+// behavior that already exists so that changing the warning plumbing cannot
+// alter it unnoticed. scripts/local-export.ts parses these console lines, so
+// a reordering here silently breaks a tool no test would otherwise cover.
+describe("export report: console output is unchanged (FR-020)", () => {
+  it("writes every warning to the console, in collection order", async () => {
+    const { app, root } = await vaultThatWarns();
+    await makePlugin(app).exportFolder(tfolder(root, "Book"));
+
+    expect(warnings).toEqual([
+      "[inkbound] missing image: nope.png (referenced by Book/Ch1.md)",
+      "[inkbound] missing image: also-missing.png (referenced by Book/Ch2.md)",
+    ]);
+  });
+
+  it("writes book-level warnings to the console too", async () => {
+    setThaiFontLoader(() => {
+      throw new Error("font blew up");
+    });
+    const { app, root } = await buildVault({ "thai.md": "# หัวข้อ\n\nภาษาไทย\n" });
+    await makePlugin(app).exportSingle(tfile(root, "thai.md"));
+
+    expect(warnings).toEqual(["[inkbound] Thai font embedding skipped: font blew up"]);
+  });
+});
+
+describe("export report: book-level warnings (US1)", () => {
+  it("puts a warning that belongs to no note in its own group (FR-007)", async () => {
+    setThaiFontLoader(() => {
+      throw new Error("font blew up");
+    });
+    const { app, root } = await buildVault({ "thai.md": "# หัวข้อ\n\nภาษาไทย\n" });
+    await makePlugin(app).exportSingle(tfile(root, "thai.md"));
+
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual([BOOK_GROUP_LABEL]);
+  });
+});
+
+describe("export report: the command (US2)", () => {
+  it("reopens the last export's report on demand (FR-013)", async () => {
+    const { app, root } = await vaultThatWarns();
+    const plugin = await makeOnloadedPlugin(app, { outputFolder: outDir });
+    await plugin.exportFolder(tfolder(root, "Book"));
+    MODALS.length = 0; // the notice was never clicked
+
+    commandsOf(plugin)["show-export-report"].callback!();
+
+    expect(openedReports()).toHaveLength(1);
+    expect(lastReportHeadings()).toEqual(["Book/Ch1.md", "Book/Ch2.md"]);
+  });
+
+  // FR-014. Deliberately NOT modelled on the neighbouring "Share last
+  // exported book" command, which uses checkCallback to HIDE itself when
+  // there is nothing to share. A hidden command cannot tell the reader
+  // anything, and being told is the requirement.
+  it("is always available, and says so plainly when no export has run (FR-014)", async () => {
+    const { app } = await buildVault({ "a.md": "# A\n" });
+    const plugin = await makeOnloadedPlugin(app, { outputFolder: outDir });
+
+    const cmd = commandsOf(plugin)["show-export-report"];
+    expect(cmd.checkCallback).toBeUndefined();
+    cmd.callback!();
+
+    expect(MODALS).toHaveLength(0);
+    expect(NOTICES.some((n) => /no export/i.test(n))).toBe(true);
+  });
+
+  it("opens and says so after a warning-free export (FR-015)", async () => {
+    const { app, root } = await buildVault({ "clean.md": "# Clean\n\nBody.\n" });
+    const plugin = await makeOnloadedPlugin(app, { outputFolder: outDir });
+    await plugin.exportSingle(tfile(root, "clean.md"));
+
+    commandsOf(plugin)["show-export-report"].callback!();
+
+    expect(openedReports()).toHaveLength(1);
+    expect(openedReports()[0].text.toLowerCase()).toContain("no warnings");
+  });
+
+  it("shows the most recent export, replacing the one before it (FR-016)", async () => {
+    const { app, root } = await buildVault({
+      "first.md": "# First\n\n![missing](nope.png)\n",
+      "second.md": "# Second\n\nClean.\n",
+    });
+    const plugin = await makeOnloadedPlugin(app, { outputFolder: outDir });
+    await plugin.exportSingle(tfile(root, "first.md"));
+    await plugin.exportSingle(tfile(root, "second.md"));
+
+    commandsOf(plugin)["show-export-report"].callback!();
+
+    expect(openedReports()[0].title).toBe("second");
+    expect(openedReports()[0].text.toLowerCase()).toContain("no warnings");
+  });
+});
+
+describe("export report: never harms the export (FR-018, FR-019)", () => {
+  it("still reports a real failure as a failure, not as a report", async () => {
+    const { app, root } = await buildVault({ "boom.md": "# Boom\n" });
+    const plugin = makePlugin(app);
+    const buildSpy = vi
+      .spyOn(EpubBuilder.prototype, "build")
+      .mockRejectedValueOnce(new Error("zip exploded"));
+
+    await plugin.exportSingle(tfile(root, "boom.md"));
+    buildSpy.mockRestore();
+
+    expect(NOTICES.some((n) => n.startsWith("EPUB export failed"))).toBe(true);
+    expect(successNotices()).toHaveLength(0);
+    expect(MODALS).toHaveLength(0);
   });
 });
