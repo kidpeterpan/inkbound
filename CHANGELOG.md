@@ -3,6 +3,28 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.0
+
+An embedded Bases table now comes through as a table.
+
+- **Bases tables are exported.** Embedding a Bases file whose view is a table
+  (`![[Tasks.base]]`, or `![[Tasks.base#Open]]` for a named view) now puts that
+  table in the book: the rows Obsidian shows at the moment you export, as a plain
+  table captioned with the view's name. Cells with several values are
+  comma-separated, and a link to a note that is in the book works. Cards and list
+  views, grouped tables, and a Base that shows an error still become
+  `[Bases view omitted: …]`, and the export report now says why.
+- **A big Base is checked, not trusted.** Obsidian only draws the rows and columns
+  that fit its window, so the export makes room for all of them. If it still
+  cannot, the table is kept and the report says how many rows are missing.
+- **A ` ```base ` block no longer leaks its toolbar.** A Base written directly in a
+  note used to put Obsidian's search box and buttons into the book, with no
+  warning. It is now a `[Bases view omitted: inline base block]` marker, with a
+  warning in the report.
+- **Not yet tried on a phone or tablet.** Exporting a Base means drawing it briefly
+  in the app. If a device cannot, the Base falls back to the marker above and the
+  report says it timed out; the rest of the book is unaffected.
+
 ## 1.9.1
 
 Every problem an export survives now shows up in the export report.
