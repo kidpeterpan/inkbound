@@ -1,5 +1,6 @@
 import JSZip from "jszip";
-import { EPUB_CSS } from "./epub-css";
+import { EPUB_CSS, FOOTNOTE_CSS } from "./epub-css";
+import { usesFootnoteMarkup } from "./footnotes";
 import { thaiFontCss, THAI_FONT_META, OFL_LICENSE_HREF, type ThaiFontAsset } from "./fonts";
 import type { TocEntry } from "./render";
 import type { ExportMeta } from "./types";
@@ -195,9 +196,14 @@ export class EpubBuilder {
     }
     zip.file("OEBPS/package.opf", this.opf());
     zip.file("OEBPS/nav.xhtml", this.nav());
-    // 006-thai-font: the stylesheet only gains @font-face + body chain when
-    // the font is actually embedded — non-Thai books stay byte-stable.
-    zip.file("OEBPS/style/epub.css", this.thaiFont ? `${EPUB_CSS}\n${thaiFontCss()}` : EPUB_CSS);
+    // The stylesheet only GAINS things a book actually uses, so a book that uses
+    // neither stays byte-stable: 006-thai-font adds @font-face + body chain when the font
+    // is embedded, 011-footnote-semantics adds the footnote rules when any chapter
+    // carries footnotes. Fixed order: base, footnotes, Thai.
+    const css = [EPUB_CSS];
+    if (this.chapters.some((c) => usesFootnoteMarkup(c.body))) css.push(FOOTNOTE_CSS);
+    if (this.thaiFont) css.push(thaiFontCss());
+    zip.file("OEBPS/style/epub.css", css.join("\n"));
     if (this.thaiFont) {
       // Font binaries + the OFL license that must travel with them (FR-005).
       for (const f of THAI_FONT_META) {
@@ -351,9 +357,14 @@ export class EpubBuilder {
   }
 
   private chapterDoc(ch: Chapter): string {
+    // 011-footnote-semantics: `epub:type` needs the EPUB structural-semantics namespace
+    // (epubcheck: an unbound prefix is FATAL RSC-016). Declared ONLY on a chapter whose
+    // markup uses it — matching an attribute inside a tag, not prose that mentions one —
+    // so every other chapter stays byte-identical (FR-023/FR-024).
+    const epubNs = /<[^<>]*\sepub:type=/.test(ch.body) ? ' xmlns:epub="http://www.idpf.org/2007/ops"' : "";
     return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml"${epubNs}>
   <head>
     <title>${escapeXml(ch.title)}</title>
     <link rel="stylesheet" type="text/css" href="../style/epub.css"/>

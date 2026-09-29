@@ -1,0 +1,50 @@
+<!--
+  REAL Obsidian footnote markup — ground truth for 011-footnote-semantics (FR-030).
+
+  Captured 2026-09-29 from a live Obsidian 1.13.7 (macOS) with:
+    obsidian vault=pan_vault eval code=<script>
+  where the script called dataview's api.renderValue(markdown, detachedDiv, ...),
+  which renders through Obsidian's real MarkdownRenderer. The outer <span> is
+  dataview's wrapper, not Obsidian's. Nothing was written to the vault.
+
+  Source markdown that produced it:
+    # Title with note[^h]
+    
+    Numbered ref[^1] and a named one[^note] and repeated[^1] and inline^[an inline note] text.
+    
+    - list item with ref[^3]
+    
+    Dangling ref[^nope] here.
+    
+    [^1]: First note, para one.
+    
+        Second paragraph of note one.
+    
+    [^note]: Named note with [[Some Link]] and **bold**.
+    [^3]: Third.
+    [^h]: Heading note.
+    [^unused]: Never referenced.
+
+  What it proves (see specs/011-footnote-semantics/research.md):
+   - every id / href carries a per-render random suffix (docId): a second render of
+     the same markdown produced a different suffix (342a5098d4d5bca8 vs df9c212992ce6b0b);
+   - the dangling [^nope] became the bare text "nope" (no marker, no note);
+   - [^unused] is absent from the notes section;
+   - a marker in a heading leaks "[1]" into the heading's textContent;
+   - repeated references read "[2-1]", and both back-links are an identical arrow.
+-->
+<span><h1 data-heading="Title with note[^h]" dir="auto">Title with note<sup data-footnote-id="fnref-1-342a5098d4d5bca8" class="footnote-ref" id="fnref-1-342a5098d4d5bca8"><a data-footref="h" href="#fn-1-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup></h1>
+<p dir="auto">Numbered ref<sup data-footnote-id="fnref-2-342a5098d4d5bca8" class="footnote-ref" id="fnref-2-342a5098d4d5bca8"><a data-footref="1" href="#fn-2-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[2]</a></sup> and a named one<sup data-footnote-id="fnref-3-342a5098d4d5bca8" class="footnote-ref" id="fnref-3-342a5098d4d5bca8"><a data-footref="note" href="#fn-3-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[3]</a></sup> and repeated<sup data-footnote-id="fnref-2-1-342a5098d4d5bca8" class="footnote-ref" id="fnref-2-1-342a5098d4d5bca8"><a data-footref="1" href="#fn-2-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[2-1]</a></sup> and inline<sup data-footnote-id="fnref-4-342a5098d4d5bca8" class="footnote-ref" id="fnref-4-342a5098d4d5bca8"><a data-footref="[inline3" href="#fn-4-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[4]</a></sup> text.</p>
+<ul>
+<li dir="auto">list item with ref<sup data-footnote-id="fnref-5-342a5098d4d5bca8" class="footnote-ref" id="fnref-5-342a5098d4d5bca8"><a data-footref="3" href="#fn-5-342a5098d4d5bca8" class="footnote-link" target="_blank" rel="noopener nofollow">[5]</a></sup></li>
+</ul>
+<p dir="auto">Dangling refnope here.</p>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-342a5098d4d5bca8" id="fn-1-342a5098d4d5bca8" dir="auto"><p>Heading note.<a href="#fnref-1-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+<li data-footnote-id="fn-2-342a5098d4d5bca8" id="fn-2-342a5098d4d5bca8" dir="auto"><p>First note, para one.</p><p>Second paragraph of note one.<a href="#fnref-2-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a><a href="#fnref-2-1-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+<li data-footnote-id="fn-3-342a5098d4d5bca8" id="fn-3-342a5098d4d5bca8" dir="auto"><p>Named note with <a data-href="Some Link" href="Some Link" class="internal-link" target="_blank" rel="noopener nofollow">Some Link</a> and <strong>bold</strong>.<a href="#fnref-3-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+<li data-footnote-id="fn-4-342a5098d4d5bca8" id="fn-4-342a5098d4d5bca8" dir="auto">an inline note<a href="#fnref-4-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></li>
+<li data-footnote-id="fn-5-342a5098d4d5bca8" id="fn-5-342a5098d4d5bca8" dir="auto"><p>Third.<a href="#fnref-5-342a5098d4d5bca8" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></span>

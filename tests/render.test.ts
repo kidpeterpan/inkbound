@@ -1476,3 +1476,55 @@ describe("collectHeadingToc validity hardening (004-heading-toc US4)", () => {
     expect(toc[0].text).toBe('What? "Really" & Such!');
   });
 });
+
+// 011-footnote-semantics: a footnote marker inside a heading must not leak into the
+// TOC entry's text or id (FR-012, SC-008), and heading ids must never duplicate an id
+// already in the chapter (the notes section mints fn-N / fnref-N ids).
+describe("collectHeadingToc and footnotes (011)", () => {
+  const MARKER = '<sup class="footnote-ref"><a id="fnref-1" href="#fn-1" role="doc-noteref">1</a></sup>';
+
+  it("leaves a footnote marker out of the entry text and the id", () => {
+    const root = div(`<h1>Title</h1><h2>Part A${MARKER}</h2>`);
+    const toc = collectHeadingToc(root, 3);
+    expect(toc).toEqual([{ level: 2, text: "Part A", id: "part-a" }]);
+    expect(root.querySelector("h2")!.id).toBe("part-a");
+  });
+
+  it("keeps the marker itself in the heading, so the reader still sees it", () => {
+    const root = div(`<h1>Title</h1><h2>Part A${MARKER}</h2>`);
+    collectHeadingToc(root, 3);
+    expect(root.querySelector("h2 sup.footnote-ref a")!.textContent).toBe("1");
+  });
+
+  it("skips a heading that is nothing but a marker", () => {
+    const root = div(`<h1>Title</h1><h2>${MARKER}</h2><h2>Real</h2>`);
+    expect(collectHeadingToc(root, 3)).toEqual([{ level: 2, text: "Real", id: "real" }]);
+    expect(root.querySelector("h2")!.hasAttribute("id")).toBe(false);
+  });
+
+  it("does not stamp a heading id that an existing element already holds", () => {
+    const root = div('<h1>Title</h1><aside id="fn-1"></aside><h2>fn 1</h2><h2>fn 1</h2>');
+    const toc = collectHeadingToc(root, 3);
+    expect(toc.map((t) => t.id)).toEqual(["fn-1-2", "fn-1-3"]);
+    const ids = Array.from(root.querySelectorAll("[id]")).map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("adds nothing to the TOC for a heading that sits inside a note (FR-012)", () => {
+    const root = div(
+      '<h1>Title</h1><h2>Real</h2><section class="footnotes" epub:type="footnotes"><aside id="fn-1"><h2>A heading inside a note</h2></aside></section>'
+    );
+    expect(collectHeadingToc(root, 3)).toEqual([{ level: 2, text: "Real", id: "real" }]);
+    expect(root.querySelector("aside h2")!.hasAttribute("id")).toBe(false);
+  });
+
+  it("is unchanged for headings with no marker and no clashing id", () => {
+    const root = div("<h1>T</h1><h2>Usage</h2><h2>Usage</h2><h2>บทที่ 1</h2><h3>a &amp; b?</h3>");
+    expect(collectHeadingToc(root, 3)).toEqual([
+      { level: 2, text: "Usage", id: "usage" },
+      { level: 2, text: "Usage", id: "usage-2" },
+      { level: 2, text: "บทที่ 1", id: "บทที่-1" },
+      { level: 3, text: "a & b?", id: "a-b" },
+    ]);
+  });
+});

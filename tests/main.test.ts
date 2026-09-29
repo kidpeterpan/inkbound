@@ -31,6 +31,8 @@ import { createVaultStub } from "./fixtures/vault-stub";
 import { setShareHost } from "../src/share";
 import { BOOK_GROUP_LABEL } from "../src/report";
 import type { EpubExportSettings } from "../src/settings";
+import { epubEntryFingerprints } from "./fixtures/epub-fingerprint";
+import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 
 // ── fixture ─────────────────────────────────────────────────────────────
 //
@@ -2415,5 +2417,268 @@ describe("export report: never harms the export (FR-018, FR-019)", () => {
     expect(NOTICES.some((n) => n.startsWith("EPUB export failed"))).toBe(true);
     expect(successNotices()).toHaveLength(0);
     expect(MODALS).toHaveLength(0);
+  });
+});
+
+// 011-footnote-semantics, spec Story 3 scenario 3: exporting the same footnote-free
+// vault twice yields the same book. "Same" is judged entry by entry — every export
+// writes a fresh package uuid and modified date, so whole-file comparison is
+// impossible (see tests/fixtures/epub-fingerprint.ts).
+describe("footnote-free export identity (011 FR-023)", () => {
+  it("exports the same footnote-free vault twice with identical entries", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "---",
+        "",
+        "# The Book",
+        "",
+        "- [[one]]",
+        "- [[two]]",
+        "",
+      ].join("\n"),
+      "book/one.md":
+        "# One\n\nBody with a [link](https://example.com), a^b, and [brackets].\n\n```ts\nconst x = 1;\n```\n",
+      "book/two.md": "# Two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> [!note] Callout\n> text\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "book"));
+    const first = await epubEntryFingerprints(await fs.readFile(join(outDir, "book.epub")));
+    await plugin.exportFolder(tfolder(root, "book"));
+    const second = await epubEntryFingerprints(await fs.readFile(join(outDir, "book.epub")));
+
+    expect(Object.keys(first).length).toBeGreaterThan(5);
+    expect(second).toEqual(first);
+  });
+});
+
+// 011-footnote-semantics US2: whole books, end to end through the real orchestrator.
+const FOOTNOTED_BOOK: Record<string, string> = {
+  "book/book.md": [
+    "---",
+    "tags: [book, main]",
+    "---",
+    "",
+    "# The Book",
+    "",
+    "- [[one]]",
+    "",
+    "Index note[^i].",
+    "",
+    "[^i]: Index footnote.",
+  ].join("\n"),
+  "book/one.md":
+    "# One[^t]\n\n## Sub[^s]\n\nText[^1] and again[^1].\n\n[^1]: One's note.\n\n[^s]: Heading note.\n\n[^t]: Title note.\n",
+  "book/Part I/two.md": "# Two\n\nTwo's text[^1].\n\n[^1]: Two's note.\n",
+  "book/Part I/Deeper/three.md": "# Three\n\nThree's text[^1].\n\n[^1]: Three's note.\n",
+};
+
+describe("footnotes in whole books (011 US2)", () => {
+  it("gives every chapter, at every Part depth, its own valid footnotes", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+
+    expect(epub.spineCount(epub.opf)).toBe(4);
+    for (let n = 1; n <= 4; n++) {
+      // A whole chapter DOCUMENT from the zip, so this also proves xmlns:epub is declared.
+      const doc = await epub.chapter(n);
+      expect(doc).toContain('xmlns:epub="http://www.idpf.org/2007/ops"');
+      assertChapterFootnoteInvariants(doc);
+    }
+  });
+
+  it("keeps footnote markers out of the table of contents (FR-012)", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+
+    expect(epub.nav).toMatch(/>Sub<\/a>/);
+    expect(epub.nav).not.toContain("Sub1");
+    expect(epub.nav.toLowerCase()).not.toContain("footnote");
+  });
+
+  // The chapter TITLE is not read from the rendered page: main.ts's titleFor takes the H1
+  // from Obsidian's metadata cache, which keeps the heading's SOURCE text ("One[^t]").
+  it("keeps a footnote reference out of a chapter's title, in the nav and in the chapter itself (FR-012)", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+
+    expect(epub.nav).toMatch(/<a href="text\/chapter_002\.xhtml">One<\/a>/);
+    expect(epub.nav).not.toContain("[^t]");
+    expect(epub.nav).not.toMatch(/One\d/);
+    const chapter = await epub.chapter(2);
+    expect(chapter).toContain("<title>One</title>");
+    // The marker itself is still in the heading the reader sees.
+    expect(chapter).toMatch(/<h1>One<sup class="footnote-ref">/);
+  });
+
+  // R9 accepted that the "Linked from" trail lands AFTER the notes section when the setting
+  // is "end". That combination ships, so it is exercised rather than assumed.
+  it("stays valid when the backlink trail is placed at the end of the chapter", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    await makePlugin(app, { backlinkPosition: "end" }).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+
+    for (let n = 1; n <= 4; n++) assertChapterFootnoteInvariants(await epub.chapter(n));
+    const linked = await epub.chapter(2); // one.md is linked from the index note
+    expect(linked).toContain('class="backlinks"');
+    expect(linked.indexOf('class="backlinks"')).toBeGreaterThan(linked.indexOf('class="footnotes"'));
+  });
+
+  it("marks up footnotes in a linked-note export too", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    await makePlugin(app).exportLinked(tfile(root, "book/book.md"));
+    const epub = await readEpub("book.epub");
+
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    assertChapterFootnoteInvariants(await epub.chapter(1));
+    assertChapterFootnoteInvariants(await epub.chapter(2));
+  });
+});
+
+describe("footnote books are reproducible (011 FR-008, FR-025, SC-005)", () => {
+  afterEach(() => resetPlatform());
+
+  it("exports the same footnote vault twice with identical entries — fresh random suffixes each time", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    const plugin = makePlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "book"));
+    const first = await epubEntryFingerprints(await fs.readFile(join(outDir, "book.epub")));
+    await plugin.exportFolder(tfolder(root, "book"));
+    const second = await epubEntryFingerprints(await fs.readFile(join(outDir, "book.epub")));
+
+    expect(Object.keys(first)).toContain("OEBPS/text/chapter_004.xhtml");
+    expect(second).toEqual(first);
+  });
+
+  it("produces the same chapters on desktop and on mobile", async () => {
+    const { app, root } = await buildVault(FOOTNOTED_BOOK);
+    const plugin = makePlugin(app, { mobileOutputFolder: "Exports" });
+
+    await plugin.exportFolder(tfolder(root, "book"));
+    const desktop = await epubEntryFingerprints(await fs.readFile(join(outDir, "book.epub")));
+    setPlatform("mobile");
+    await plugin.exportFolder(tfolder(root, "book"));
+    const mobile = await epubEntryFingerprints(await fs.readFile(join(root, "Exports", "book.epub")));
+
+    const chapters = (fp: Record<string, string>) =>
+      Object.fromEntries(Object.entries(fp).filter(([name]) => name.startsWith("OEBPS/text/")));
+    expect(Object.keys(chapters(desktop))).toHaveLength(4);
+    expect(chapters(mobile)).toEqual(chapters(desktop));
+  });
+});
+
+// US3 / FR-024: footnotes in ONE chapter must not touch any other. Two books are exported
+// from the same folder, one with a footnoted note and one without; the plain chapters must
+// be byte-identical between them, and nothing but the footnoted chapter (and the
+// stylesheet's footnote rules) may appear.
+describe("a footnoted chapter leaves its neighbours untouched (011 US3, FR-024)", () => {
+  const PLAIN = {
+    "book/a_plain.md":
+      "# A\n\nPlain chapter with [a link](https://example.com), a^b and a table:\n\n| x | y |\n|---|---|\n| 1 | 2 |\n",
+    "book/b_plain.md": "# B\n\n## Section\n\nAnother plain chapter.\n\n> [!note] A callout\n> plain\n",
+  };
+  const FOOTNOTED = { "book/c_footnoted.md": "# C\n\nA note[^1].\n\n[^1]: The only footnote.\n" };
+
+  async function exportBook(files: Record<string, string>) {
+    const { app, root } = await buildVault(files);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+    const entries = Object.keys(epub.zip.files).filter((n) => !epub.zip.files[n].dir);
+    const read = async (name: string) => epub.zip.file(name)!.async("string");
+    return { entries, read };
+  }
+
+  it("keeps the plain chapters byte-identical and adds only the footnoted chapter", async () => {
+    const without = await exportBook(PLAIN);
+    const withNote = await exportBook({ ...PLAIN, ...FOOTNOTED });
+
+    for (const chapter of ["OEBPS/text/chapter_001.xhtml", "OEBPS/text/chapter_002.xhtml"]) {
+      expect(await withNote.read(chapter), chapter).toBe(await without.read(chapter));
+      expect(await withNote.read(chapter)).not.toContain("xmlns:epub");
+    }
+    expect(withNote.entries.filter((n) => !without.entries.includes(n))).toEqual([
+      "OEBPS/text/chapter_003.xhtml",
+    ]);
+    expect(without.entries.filter((n) => !withNote.entries.includes(n))).toEqual([]);
+    expect(await withNote.read("OEBPS/text/chapter_003.xhtml")).toContain(
+      'xmlns:epub="http://www.idpf.org/2007/ops"'
+    );
+  });
+
+  it("adds footnote styling only to the book that has footnotes", async () => {
+    const without = await exportBook(PLAIN);
+    const withNote = await exportBook({ ...PLAIN, ...FOOTNOTED });
+    expect(await without.read("OEBPS/style/epub.css")).not.toContain(".footnotes");
+    expect(await withNote.read("OEBPS/style/epub.css")).toContain(".footnotes");
+  });
+});
+
+// 011 US4 end to end: a footnote problem is a warning in the completion notice and in the
+// export report, never a failed export (Principle II, FR-017, FR-018).
+describe("footnote problems degrade, they do not fail the export (011 US4)", () => {
+  // Named so the notes sort A, B, C, D, then the embedded note last: folder order is by name,
+  // and an uppercase "Far.md" would have sorted first and renumbered every chapter.
+  const BOOK: Record<string, string> = {
+    "book/a_good.md": "# A\n\nA note[^1].\n\n[^1]: Chapter A's note.\n",
+    "book/b_broken.md": "# B\n\nA dangling reference[^nope].\n\n[^unused]: Nothing refers to this.\n",
+    "book/c_good.md": "# C\n\nAnother note[^1].\n\n[^1]: Chapter C's note.\n",
+    "book/d_embed.md": "# D\n\n![[z_far#Lonely]]\n",
+    "book/z_far.md": "# Far\n\n## Lonely\n\nText[^far].\n\n## Elsewhere\n\n[^far]: Outside the slice.\n",
+  };
+
+  it("completes the export and counts the footnote warnings in the notice", async () => {
+    const { app, root } = await buildVault(BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(5);
+    expect(successNotices()).toHaveLength(1);
+    expect(successNotices()[0]).toMatch(/Exported with 3 warnings/);
+    expect(errors).toEqual([]);
+  });
+
+  it("lists them in the report under the chapter they arose in, in chapter order, naming the note", async () => {
+    const { app, root } = await buildVault(BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    tapLastNotice();
+
+    expect(lastReportHeadings()).toEqual(["book/b_broken.md", "book/d_embed.md"]);
+    const text = openedReports()[0].text;
+    expect(text).toContain("Footnote [^nope] is referenced but has no matching note");
+    expect(text).toContain("Footnote note [^unused] is never referenced and was left out");
+    // The slice's problem belongs to the embedded note's source, and says so.
+    expect(text).toContain(
+      "Footnote [^far] is referenced but has no matching note (referenced by book/z_far.md)"
+    );
+  });
+
+  it("leaves every other chapter's footnotes intact (FR-018)", async () => {
+    const { app, root } = await buildVault(BOOK);
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+    const epub = await readEpub("book.epub");
+
+    for (const n of [1, 3]) {
+      expect(assertChapterFootnoteInvariants(await epub.chapter(n))).toEqual({ markers: 1, notes: 1 });
+    }
+    expect(await epub.chapter(2)).not.toContain('role="doc-noteref"');
+    expect(await epub.chapter(2)).toContain("nope");
+  });
+
+  it("still turns a chapter that fails to render into a placeholder, adding no second failure", async () => {
+    const { app, root } = await buildVault(BOOK);
+    failFor(app.vault, "cachedRead", "book/a_good.md", new Error("disk read failed"));
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(await epub.chapter(1)).toContain("chapter failed to render");
+    expect(assertChapterFootnoteInvariants(await epub.chapter(3))).toEqual({ markers: 1, notes: 1 });
+    expect(successNotices()).toHaveLength(1);
+    expect(errors).toEqual([]);
   });
 });

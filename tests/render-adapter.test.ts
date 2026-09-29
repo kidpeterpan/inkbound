@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
 import { renderUnitToChapter, setSvgRasterizer } from "../src/render-adapter";
+import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 
 // Deviation from the brief's illustrative `appWith`: the real
 // MarkdownRenderer.render() (see tests/fixtures/obsidian-stub.ts) reads
@@ -1189,5 +1190,196 @@ describe("renderUnitToChapter heading TOC (004-heading-toc)", () => {
     expect(r.images).toHaveLength(0);
     expect(r.xhtmlBody).toContain("$\\text{ไทย}$");
     expect(r.warnings.some((w) => w.includes("non-Latin"))).toBe(true);
+  });
+});
+
+// 011-footnote-semantics: the footnote pass runs INSIDE renderUnitToChapter, after links,
+// images and math have been processed and before heading ids are stamped. These tests
+// go through the stub renderer, which reproduces Obsidian's footnote markup (held to the
+// real capture by tests/obsidian-stub.test.ts).
+describe("renderUnitToChapter footnotes (011)", () => {
+  afterEach(() => setSvgRasterizer(null));
+
+  const render = (md: string, tocDepth = 0, dest: TFile | null = null, hrefs = new Map<string, string>()) =>
+    renderUnitToChapter(appWith(dest), newComponent(), md, "note.md", hrefs, "/vault", 0, tocDepth);
+
+  it("marks up numbered, named, inline and repeated footnotes in a single note", async () => {
+    const r = await render(
+      "Numbered[^1] named[^n] inline^[inline text] repeat[^1].\n\n[^1]: First.\n\n[^n]: Second.\n"
+    );
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 4, notes: 3 });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("types math inside a footnote, numbered with the chapter's other images", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([9]), width: 10, height: 10 }));
+    const r = await render("Text[^m].\n\n[^m]: The value $x^2$ here.\n");
+    assertChapterFootnoteInvariants(r.xhtmlBody);
+    expect(r.xhtmlBody).not.toContain("$");
+    expect(r.xhtmlBody).toMatch(
+      /<aside[^>]*>[\s\S]*<img[^>]*src="\.\.\/images\/img_001\.png"[\s\S]*<\/aside>/
+    );
+    expect(r.images.map((i) => i.newHref)).toEqual(["../images/img_001.png"]);
+  });
+
+  it("rewrites an image inside a footnote to a book asset", async () => {
+    const r = await render("Text[^i].\n\n[^i]: See ![cap](fig.png)\n");
+    assertChapterFootnoteInvariants(r.xhtmlBody);
+    expect(r.xhtmlBody).toMatch(/<aside[\s\S]*src="\.\.\/images\/img_001\.png"[\s\S]*<\/aside>/);
+    expect(r.images).toHaveLength(1);
+  });
+
+  it("retargets a wikilink inside a footnote to the sibling chapter's href", async () => {
+    const dest = new TFile("/vault", "book/02_two.md");
+    const r = await render(
+      "Text[^w].\n\n[^w]: See [[Chapter Two]].\n",
+      0,
+      dest,
+      new Map([["book/02_two.md", "text/chapter_002.xhtml"]])
+    );
+    assertChapterFootnoteInvariants(r.xhtmlBody);
+    expect(r.xhtmlBody).toMatch(/<aside[\s\S]*href="chapter_002\.xhtml"[\s\S]*<\/aside>/);
+    expect(r.xhtmlBody).not.toContain("data-href");
+  });
+
+  it("keeps a marker in a heading out of the TOC entry and its id", async () => {
+    const r = await render("# Title[^h]\n\n## Sub[^s]\n\nBody.\n\n[^h]: A.\n\n[^s]: B.\n", 3);
+    assertChapterFootnoteInvariants(r.xhtmlBody);
+    expect(r.toc).toEqual([{ level: 2, text: "Sub", id: "sub" }]);
+    expect(r.xhtmlBody).toContain('<h2 id="sub">Sub<sup');
+  });
+
+  it("leaves a note with no footnotes byte-for-byte as before (no section, no namespace use)", async () => {
+    const r = await render("# Plain\n\nJust text with a^b and [brackets].\n");
+    expect(r.xhtmlBody).not.toContain("epub:type");
+    expect(r.xhtmlBody).not.toContain("footnote");
+  });
+});
+
+// 011 US2: an embedded note is rendered by its OWN MarkdownRenderer.render call, so its
+// footnotes arrive as a second `section.footnotes` numbered from 1 with a different
+// random suffix. renderUnitToChapter must end up with ONE correctly numbered section.
+describe("renderUnitToChapter footnotes across embeds (011 US2)", () => {
+  afterEach(() => setSvgRasterizer(null));
+
+  const NOTES: Record<string, string> = {
+    "Embedded.md": "Embedded text[^1].\n\n[^1]: Embedded note.\n",
+    "Middle.md": "Middle text[^1].\n\n![[Inner]]\n\n[^1]: Middle note.\n",
+    "Inner.md": "Inner text[^1].\n\n[^1]: Inner note.\n",
+    "Scoped.md":
+      "# Scoped\n\n## Part\n\nSliced text[^s].\n\n[^s]: Definition inside the slice.\n\n## Other\n\nElse.\n",
+  };
+  const resolve = (lp: string): TFile | null => {
+    const path = `${lp.split(/[#^]/)[0]}.md`;
+    return path in NOTES ? new TFile("/vault", path) : null;
+  };
+  const render = (md: string) =>
+    renderUnitToChapter(appWithNotes(NOTES, resolve), newComponent(), md, "host.md", new Map(), "/vault", 0);
+  const notes = (xhtml: string): string[] =>
+    Array.from(
+      new DOMParser()
+        .parseFromString(`<x xmlns="http://www.w3.org/1999/xhtml">${xhtml}</x>`, "text/html")
+        .querySelectorAll("aside")
+    ).map((a) => a.textContent ?? "");
+
+  it("consolidates a whole-note embed's footnotes with the host's, numbered in document order", async () => {
+    const r = await render("Host[^1].\n\n![[Embedded]]\n\n[^1]: Host note.\n");
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 2, notes: 2 });
+    expect(notes(r.xhtmlBody).map((t) => t.replace(/↩︎/g, ""))).toEqual([
+      "1. Host note.",
+      "2. Embedded note.",
+    ]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("keeps the same note embedded twice as two distinct notes", async () => {
+    const r = await render("![[Embedded]]\n\n![[Embedded]]\n");
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 2, notes: 2 });
+    expect(notes(r.xhtmlBody).map((t) => t.replace(/↩︎/g, ""))).toEqual([
+      "1. Embedded note.",
+      "2. Embedded note.",
+    ]);
+  });
+
+  it("handles an embed nested inside an embed", async () => {
+    const r = await render("![[Middle]]\n");
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 2, notes: 2 });
+    expect(notes(r.xhtmlBody).map((t) => t.replace(/↩︎/g, ""))).toEqual(["1. Middle note.", "2. Inner note."]);
+  });
+
+  it("keeps a host and an embed that both use [^1] distinct", async () => {
+    const r = await render("Host[^1] and ![[Embedded]]\n\n[^1]: Host note.\n");
+    assertChapterFootnoteInvariants(r.xhtmlBody);
+    expect(new Set(notes(r.xhtmlBody).map((t) => t.replace(/↩︎/g, ""))).size).toBe(2);
+  });
+
+  it("carries a heading-scoped embed's footnote when its definition lies inside the slice", async () => {
+    const r = await render("![[Scoped#Part]]\n");
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 1, notes: 1 });
+    expect(notes(r.xhtmlBody)[0]).toContain("Definition inside the slice.");
+  });
+});
+
+// 011 US4: Obsidian destroys orphan footnotes before Inkbound sees the DOM, so real ones can
+// only be found by reading each note's SOURCE — the host's, and every embed's slice.
+describe("renderUnitToChapter footnote warnings (011 US4)", () => {
+  afterEach(() => setSvgRasterizer(null));
+
+  const NOTES: Record<string, string> = {
+    "Far.md":
+      "# Far\n\n## Lonely\n\nA paragraph whose note lives elsewhere[^far].\n\n## Elsewhere\n\nMore.\n\n[^far]: The note is outside the section.\n",
+    "Unused.md": "Some text.\n\n[^spare]: Defined but never referred to.\n",
+    "Fine.md": "Fine text[^ok].\n\n[^ok]: All present.\n",
+  };
+  const resolve = (lp: string): TFile | null => {
+    const path = `${lp.split(/[#^]/)[0]}.md`;
+    return path in NOTES ? new TFile("/vault", path) : null;
+  };
+  const render = (md: string, sourcePath = "note.md") =>
+    renderUnitToChapter(appWithNotes(NOTES, resolve), newComponent(), md, sourcePath, new Map(), "/vault", 0);
+
+  it("warns once, naming the embedded note, when a scoped slice keeps a reference but loses its note", async () => {
+    const r = await render("![[Far#Lonely]]\n");
+    expect(r.warnings).toEqual([
+      "Footnote [^far] is referenced but has no matching note (referenced by Far.md)",
+    ]);
+    // The chapter still exists and shows the bare label, exactly as Obsidian's reading view does.
+    expect(r.xhtmlBody).toContain("elsewherefar");
+    expect(r.xhtmlBody).not.toContain("doc-noteref");
+  });
+
+  it("warns once for a whole-note embed with a definition nothing refers to", async () => {
+    const r = await render("![[Unused]]\n");
+    expect(r.warnings).toEqual([
+      "Footnote note [^spare] is never referenced and was left out (referenced by Unused.md)",
+    ]);
+    expect(r.xhtmlBody).not.toContain("Defined but never referred to");
+  });
+
+  it("warns for orphans in the host note, naming the host", async () => {
+    const r = await render("Host[^nope].\n\n[^unused]: Nothing points here.\n", "Notes/host.md");
+    expect(r.warnings).toEqual([
+      "Footnote [^nope] is referenced but has no matching note (referenced by Notes/host.md)",
+      "Footnote note [^unused] is never referenced and was left out (referenced by Notes/host.md)",
+    ]);
+  });
+
+  it("degrades only the orphan and keeps the note's real footnotes intact", async () => {
+    const r = await render("Real[^1] and orphan[^nope].\n\n[^1]: Real note.\n");
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 1, notes: 1 });
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("[^nope]");
+    expect(r.xhtmlBody).toContain("orphannope");
+  });
+
+  it("raises no warning for footnotes that pair up, in the host or in an embed", async () => {
+    const r = await render("Host[^1].\n\n![[Fine]]\n\n[^1]: Host note.\n");
+    expect(r.warnings).toEqual([]);
+    expect(assertChapterFootnoteInvariants(r.xhtmlBody)).toEqual({ markers: 2, notes: 2 });
+  });
+
+  it("does not mistake footnote-shaped text in code for a footnote", async () => {
+    const r = await render("```\nnot a ref[^x]\n```\n\nand `[^y]` inline.\n");
+    expect(r.warnings).toEqual([]);
   });
 });

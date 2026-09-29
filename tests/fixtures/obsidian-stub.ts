@@ -982,6 +982,173 @@ function preprocessMarkdown(md: string, app: RenderApp, sourcePath: string, base
   return output.join("\n");
 }
 
+// ── Footnotes (011-footnote-semantics) ───────────────────────────────────
+//
+// Emulates what real Obsidian's reading view does with footnotes, as captured from a
+// live 1.13.7 (tests/fixtures/footnotes-real.html, footnotes-real-contexts.html —
+// their headers record the method) and held to it by tests/obsidian-stub.test.ts.
+// Narrowed, like the rest of this file, to what the captures show; not a general
+// footnote implementation:
+//
+//   marker  <sup data-footnote-id="fnref-N[-K]-DOC" class="footnote-ref" id="…">
+//             <a data-footref href="#fn-N-DOC" class="footnote-link" target=_blank rel>[N]</a></sup>
+//           N = order of FIRST reference in this render; a repeat reads [N-K].
+//   notes   one <section class="footnotes"><hr><ol> at the end of the render, li
+//           ordered by N, back-links appended to the LAST paragraph (an inline note
+//           has no <p>); one identical ↩︎ back-link per reference.
+//   orphans destroyed before the DOM exists: a reference with no definition becomes
+//           its bare label (`[^nope]` -> `nope`), an unused definition is not rendered,
+//           and of two definitions for one label the LAST wins.
+//   DOC     a RANDOM 16-hex suffix, NEW ON EVERY render() CALL. This is the property
+//           that matters: real Obsidian's export is not reproducible because of it, and
+//           a stub with stable ids would let an "export twice, same bytes" test pass
+//           for the wrong reason.
+//
+// Fast path: markdown containing neither `[^` nor `^[` is returned untouched, so a
+// footnote-free note renders exactly as it did before this emulation existed.
+
+function randomDocId(): string {
+  const bytes = new Uint8Array(8);
+  globalThis.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+interface FootnoteNote {
+  // A note defined with [^label]: — its raw definition lines, already un-indented.
+  lines?: string[];
+  // A note written inline as ^[text].
+  inline?: string;
+  refs: number;
+}
+
+function footnoteMarker(n: number, k: number, docId: string, footref: string): string {
+  const ref = k > 0 ? `${n}-${k}` : `${n}`;
+  return (
+    `<sup data-footnote-id="fnref-${ref}-${docId}" class="footnote-ref" id="fnref-${ref}-${docId}">` +
+    `<a data-footref="${escapeAttr(footref)}" href="#fn-${n}-${docId}" class="footnote-link" ` +
+    `target="_blank" rel="noopener nofollow">[${ref}]</a></sup>`
+  );
+}
+
+function applyFootnotes(
+  markdown: string,
+  docId: string,
+  app: RenderApp,
+  sourcePath: string,
+  basePath: string
+): { md: string; sectionHtml: string } {
+  if (!markdown.includes("[^") && !markdown.includes("^[")) return { md: markdown, sectionHtml: "" };
+
+  const lines = markdown.split(/\r?\n/);
+
+  // Pass 1 — pull the definitions out (outside fences). A later definition for the
+  // same label replaces an earlier one, as in Obsidian.
+  const defs = new Map<string, string[]>();
+  const body: string[] = [];
+  let inFence = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      body.push(line);
+      continue;
+    }
+    const def = inFence ? null : /^ {0,3}\[\^([^\]\s]+)\]:\s?(.*)$/.exec(line);
+    if (!def) {
+      body.push(line);
+      continue;
+    }
+    const content = [def[2]];
+    let j = i + 1;
+    while (j < lines.length) {
+      if (lines[j].trim() === "") {
+        let k = j;
+        while (k < lines.length && lines[k].trim() === "") k++;
+        if (k < lines.length && /^( {4}|\t)/.test(lines[k])) {
+          for (; j < k; j++) content.push("");
+          continue;
+        }
+        break;
+      }
+      if (/^( {4}|\t)/.test(lines[j])) {
+        content.push(lines[j].replace(/^( {4}|\t)/, ""));
+        j++;
+        continue;
+      }
+      break;
+    }
+    defs.set(def[1].toLowerCase(), content);
+    i = j - 1;
+  }
+
+  // Pass 2 — replace references in document order, numbering notes by first
+  // reference. Code fences and inline code spans are left alone.
+  const notes: FootnoteNote[] = [];
+  const numberByLabel = new Map<string, number>();
+  const replaceRefs = (text: string): string =>
+    text
+      .split(/(`[^`]*`)/)
+      .map((part) => {
+        if (part.startsWith("`") && part.endsWith("`") && part.length > 1) return part;
+        return part.replace(/\[\^([^\]\s]+)\]|\^\[([^\]]*)\]/g, (_m, label?: string, inline?: string) => {
+          if (label !== undefined) {
+            const key = label.toLowerCase();
+            const def = defs.get(key);
+            if (!def) return label; // dangling: Obsidian keeps only the bare label
+            let n = numberByLabel.get(key);
+            if (n === undefined) {
+              notes.push({ lines: def, refs: 0 });
+              n = notes.length;
+              numberByLabel.set(key, n);
+            }
+            return footnoteMarker(n, notes[n - 1].refs++, docId, label);
+          }
+          notes.push({ inline, refs: 1 });
+          const n = notes.length;
+          // Obsidian's own internal value for inline notes: "[inline" + zero-based index.
+          return footnoteMarker(n, 0, docId, `[inline${n - 1}`);
+        });
+      })
+      .join("");
+
+  inFence = false;
+  const outLines = body.map((line) => {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      return line;
+    }
+    return inFence ? line : replaceRefs(line);
+  });
+
+  if (notes.length === 0) return { md: outLines.join("\n"), sectionHtml: "" };
+
+  const items = notes.map((note, idx) => {
+    const n = idx + 1;
+    const back = Array.from({ length: note.refs }, (_v, i) => {
+      const ref = i === 0 ? `${n}` : `${n}-${i}`;
+      return `<a href="#fnref-${ref}-${docId}" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a>`;
+    }).join("");
+    let inner: string;
+    if (note.inline !== undefined) {
+      inner = `${marked.parseInline(transformLine(note.inline, app, sourcePath, basePath), { async: false }) as string}${back}`;
+    } else {
+      const html = (
+        marked.parse(note.lines!.map((l) => transformLine(l, app, sourcePath, basePath)).join("\n"), {
+          async: false,
+        }) as string
+      ).trim();
+      const last = html.lastIndexOf("</p>");
+      inner = last >= 0 ? `${html.slice(0, last)}${back}${html.slice(last)}` : `${html}${back}`;
+    }
+    return `<li data-footnote-id="fn-${n}-${docId}" id="fn-${n}-${docId}" dir="auto">${inner}</li>`;
+  });
+
+  return {
+    md: outLines.join("\n"),
+    sectionHtml: `<section class="footnotes"><hr><ol>${items.join("")}</ol></section>`,
+  };
+}
+
 export class MarkdownRenderer {
   static async render(
     app: RenderApp & { vault: { adapter: FileSystemAdapter } },
@@ -991,8 +1158,10 @@ export class MarkdownRenderer {
     _component: Component
   ): Promise<void> {
     const basePath = app.vault.adapter.getBasePath();
-    const processed = preprocessMarkdown(markdown, app, sourcePath, basePath);
+    const docId = randomDocId();
+    const fn = applyFootnotes(markdown, docId, app, sourcePath, basePath);
+    const processed = preprocessMarkdown(fn.md, app, sourcePath, basePath);
     const html = marked.parse(processed, { async: false }) as string;
-    el.innerHTML = html;
+    el.innerHTML = html + fn.sectionHtml;
   }
 }
