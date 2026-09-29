@@ -1,6 +1,9 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
 import { renderUnitToChapter, setSvgRasterizer } from "../src/render-adapter";
+import { setBaseRenderer, type BaseRenderOutcome } from "../src/bases-adapter";
+import { buildStaticTable, extractBaseTable } from "../src/bases";
+import { buildBasesEmbed, hostWith, type BasesDomOptions } from "./fixtures/bases-dom";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 
 // Deviation from the brief's illustrative `appWith`: the real
@@ -410,27 +413,6 @@ describe("renderUnitToChapter", () => {
     );
     expect(r.xhtmlBody).toContain("[embedded content omitted: doc]");
     expect(r.warnings).toEqual(["unsupported embed type (not a note): doc (referenced by note.md)"]);
-  });
-
-  it("degrades an embed of an Obsidian Bases file with a feature-specific warning and placeholder", async () => {
-    // GitHub issue #2: a note embedding a .base produced the generic
-    // "unsupported embed type" wording, which its reporter read as the
-    // export having failed. The export itself always succeeded — the
-    // Bases-specific messages make both the warning and the in-book
-    // marker say exactly what was left out and why.
-    const r = await renderUnitToChapter(
-      appWith(new TFile("/vault", "61 - Connections.base")),
-      newComponent(),
-      "![[61 - Connections.base]]",
-      "note.md",
-      new Map(),
-      "/vault",
-      0
-    );
-    expect(r.xhtmlBody).toContain("[Bases view omitted: 61 - Connections.base]");
-    expect(r.warnings).toEqual([
-      "bases view omitted (interactive Bases have no EPUB equivalent): 61 - Connections.base (referenced by note.md)",
-    ]);
   });
 
   it("does not leak Obsidian's 'Click to create.' text for an unresolved embed", async () => {
@@ -932,8 +914,8 @@ describe("renderUnitToChapter", () => {
       0
     );
     // render-adapter.ts itself can't resolve a relative image path (that's
-    // main.ts's job) — it can only tag the image with the CONTEXT main.ts
-    // must use. Confirms the image is tagged with the embed's own resolved
+    // chapter-assets.ts's job) — it can only tag the image with the CONTEXT
+    // resolveChapterAssets must use. Confirms the image is tagged with the embed's own resolved
     // path, not left to default to the host chapter's path.
     expect(r.images).toEqual([
       {
@@ -1381,5 +1363,157 @@ describe("renderUnitToChapter footnote warnings (011 US4)", () => {
   it("does not mistake footnote-shaped text in code for a footnote", async () => {
     const r = await render("```\nnot a ref[^x]\n```\n\nand `[^y]` inline.\n");
     expect(r.warnings).toEqual([]);
+  });
+});
+
+// ── Bases embeds (table views become static tables) ─────────────────────────
+//
+// The real renderer (src/bases-adapter.ts) needs a live Obsidian, so these
+// tests inject one through setBaseRenderer, handing back a table built by the
+// production converter from the hand-built fixture DOM. What is under test is
+// everything populateEmbeds and the pure passes do with the outcome.
+
+describe("renderUnitToChapter: an embedded Base", () => {
+  const BASE = new TFile("/vault", "Tasks.base");
+  const okTable = (o: BasesDomOptions = {}, warning: string | null = null): BaseRenderOutcome => ({
+    ok: true,
+    table: buildStaticTable(extractBaseTable(hostWith(buildBasesEmbed(o)))),
+    warning,
+  });
+  const render = (md: string, app: unknown = appWith(BASE), hrefs = new Map<string, string>()) =>
+    renderUnitToChapter(app as never, newComponent(), md, "note.md", hrefs, "/vault", 0);
+
+  afterEach(() => setBaseRenderer(null));
+
+  it("puts the Base's table in the chapter where the embed was, with no warning", async () => {
+    setBaseRenderer(async () => okTable());
+    const r = await render("Before.\n\n![[Tasks.base]]\n\nAfter.\n");
+    expect(r.xhtmlBody).toContain("<table");
+    expect(r.xhtmlBody).toContain("Alpha note");
+    expect(r.xhtmlBody).toContain("Beta note");
+    expect(r.xhtmlBody).not.toMatch(/omitted|internal-embed|bases-/);
+    expect(r.xhtmlBody.indexOf("Before.")).toBeLessThan(r.xhtmlBody.indexOf("<table"));
+    expect(r.xhtmlBody.indexOf("<table")).toBeLessThan(r.xhtmlBody.indexOf("After."));
+    expect(r.warnings).toEqual([]);
+    expect(r.images).toEqual([]);
+  });
+
+  it("hands the renderer the embed's own text, view suffix included, and the note it is written in", async () => {
+    const seen: string[][] = [];
+    setBaseRenderer(async (_app, src, sourcePath) => {
+      seen.push([src, sourcePath]);
+      return okTable();
+    });
+    await render("![[Tasks.base#Open cases]]\n");
+    expect(seen).toEqual([["Tasks.base#Open cases", "note.md"]]);
+  });
+
+  it("renders each Base in the chapter, in order, one call apiece", async () => {
+    const calls: string[] = [];
+    setBaseRenderer(async (_app, src) => {
+      calls.push(src);
+      return okTable({ headers: ["file name", src] });
+    });
+    const r = await render("![[Tasks.base#One]]\n\nMiddle.\n\n![[Tasks.base#Two]]\n");
+    expect(calls).toEqual(["Tasks.base#One", "Tasks.base#Two"]);
+    expect(r.xhtmlBody.indexOf("Tasks.base#One")).toBeLessThan(r.xhtmlBody.indexOf("Middle."));
+    expect(r.xhtmlBody.indexOf("Middle.")).toBeLessThan(r.xhtmlBody.indexOf("Tasks.base#Two"));
+  });
+
+  it("reports a table known to be incomplete as a warning naming the Base and the note, and still ships it", async () => {
+    setBaseRenderer(async () => okTable({}, "bases table incomplete (3 of 500 rows)"));
+    const r = await render("![[Tasks.base]]\n");
+    expect(r.xhtmlBody).toContain("<table");
+    expect(r.warnings).toEqual([
+      "bases table incomplete (3 of 500 rows): Tasks.base (referenced by note.md)",
+    ]);
+  });
+
+  it("points a cell's link at the chapter of the note it names, when that note is in the book", async () => {
+    const noteB = new TFile("/vault", "Alpha note.md");
+    const app = {
+      metadataCache: {
+        getFirstLinkpathDest: (lp: string) =>
+          lp === "Tasks.base" ? BASE : lp === "Alpha note" ? noteB : null,
+        getFileCache: () => null,
+      },
+      vault: { adapter: { getBasePath: () => "/vault" }, cachedRead: () => Promise.resolve("") },
+    };
+    setBaseRenderer(async () => okTable());
+    const r = await render("![[Tasks.base]]\n", app, new Map([["Alpha note.md", "text/chapter_002.xhtml"]]));
+    expect(r.xhtmlBody).toContain('<a href="chapter_002.xhtml">Alpha note</a>');
+    // The other file-name cell names a note that is not in the book: plain text, no dead link.
+    expect(r.xhtmlBody).toContain("Beta note");
+    expect(r.xhtmlBody).not.toContain("data-href");
+    expect(r.xhtmlBody).not.toContain("internal-link");
+  });
+
+  it("links a cell from a Base inside an EMBEDDED note, resolving against that note rather than the chapter's", async () => {
+    // "Alpha note" resolves only from Embedded.md, as a relative link would. If
+    // the link were finalised against the chapter's own path it would degrade to text.
+    const embedded = new TFile("/vault", "Embedded.md");
+    const alpha = new TFile("/vault", "Alpha note.md");
+    const seenFrom: string[] = [];
+    const app = {
+      metadataCache: {
+        getFirstLinkpathDest: (lp: string, from: string) => {
+          seenFrom.push(`${lp}<-${from}`);
+          if (lp === "Embedded") return embedded;
+          if (lp === "Tasks.base") return BASE;
+          return lp === "Alpha note" && from === "Embedded.md" ? alpha : null;
+        },
+        getFileCache: () => null,
+      },
+      vault: {
+        adapter: { getBasePath: () => "/vault" },
+        cachedRead: (f: TFile) =>
+          Promise.resolve(f.path === "Embedded.md" ? "Inside.\n\n![[Tasks.base]]\n" : ""),
+      },
+    };
+    setBaseRenderer(async () => okTable());
+    const r = await render("![[Embedded]]\n", app, new Map([["Alpha note.md", "text/chapter_002.xhtml"]]));
+    expect(r.xhtmlBody).toContain("Inside.");
+    expect(r.xhtmlBody).toContain('<a href="chapter_002.xhtml">Alpha note</a>');
+    expect(seenFrom).toContain("Alpha note<-Embedded.md");
+  });
+
+  it("degrades to the omission marker, with the reason in the warning, when the Base cannot be exported", async () => {
+    setBaseRenderer(async () => ({ ok: false, reason: "cards views are not exported, only table views" }));
+    const r = await render("Before.\n\n![[Tasks.base]]\n\nAfter.\n");
+    expect(r.xhtmlBody).toContain("[Bases view omitted: Tasks.base]");
+    expect(r.xhtmlBody).toContain("Before.");
+    expect(r.xhtmlBody).toContain("After.");
+    expect(r.xhtmlBody).not.toContain("<table");
+    expect(r.warnings).toEqual([
+      "bases view omitted: Tasks.base — cards views are not exported, only table views (referenced by note.md)",
+    ]);
+  });
+
+  it("treats a renderer that throws like one that failed: one marker, one warning, the chapter survives", async () => {
+    setBaseRenderer(async () => {
+      throw new Error("host went away");
+    });
+    const r = await render("Body text.\n\n![[Tasks.base]]\n");
+    expect(r.xhtmlBody).toContain("Body text.");
+    expect(r.xhtmlBody).toContain("[Bases view omitted: Tasks.base]");
+    expect(r.warnings).toEqual(["bases view omitted: Tasks.base — host went away (referenced by note.md)"]);
+  });
+
+  it("does not call the renderer for a note embed or for an unresolved one", async () => {
+    const renderer = vi.fn(async () => okTable());
+    setBaseRenderer(renderer);
+    await render("![[Ghost]]\n", appWith(null));
+    await render("![[Other]]\n", appWith(new TFile("/vault", "Other.md")));
+    expect(renderer).not.toHaveBeenCalled();
+  });
+
+  it("keeps a chapter with a Base and other embedded content well-formed", async () => {
+    setBaseRenderer(async () => okTable({ rows: [[{ file: "A & B <c>", href: "A & B" }, 'x "y"', null]] }));
+    const r = await render("# T\n\n![[Tasks.base]]\n");
+    const doc = new DOMParser().parseFromString(
+      `<body xmlns="http://www.w3.org/1999/xhtml">${r.xhtmlBody}</body>`,
+      "application/xml"
+    );
+    expect(doc.querySelector("parsererror")?.textContent ?? "").toBe("");
   });
 });

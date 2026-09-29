@@ -53,10 +53,12 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["tests/**/*.test.ts"],
-    setupFiles: ["./tests/setup/no-network.ts"],
+    setupFiles: ["./tests/setup/no-network.ts", "./tests/setup/no-live-bases.ts"],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.ts"],
+      // scripts/lib/obsidian-drift.ts is the one non-src file held to the gate: it is
+      // pure decision logic (the drift canary's rules), with no I/O of its own.
+      include: ["src/**/*.ts", "scripts/lib/obsidian-drift.ts"],
       // Interfaces only — emits no JS, so v8 reports 0/0 and would fail any threshold.
       exclude: ["src/types.ts"],
       reporter: ["text", "html", "lcov"],

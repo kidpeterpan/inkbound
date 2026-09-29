@@ -124,6 +124,59 @@ the fixture diff, and read that test's failures as the new manual checklist:
 - The shape of an unresolved wikilink and of an unresolved note embed, which
   `rewriteLinks` and `flattenEmbeds` key on.
 
+**Bases tables (`src/bases.ts`, `src/bases-adapter.ts`) — NOT yet verified by
+hand, and the fixture is hand-built.** A Bases table view is exported by
+rendering the embed into a temporary off-screen element attached to the live
+document (a detached one is never filled in), growing that element until
+Obsidian's virtualization stops cutting rows and columns short, and reading the
+cells. The structure was measured on a live Obsidian 1.13.7 (structure only:
+tag and class names, counts — never cell content), but
+`tests/fixtures/bases-dom.ts` is written by hand from those measurements,
+because the only Bases available held real work records and this repository is
+public. Two consequences:
+
+- The drift canary above cannot see it. It reads `obsidianVersion` from
+  `tests/fixtures/real-render/*.json`, and there is no such file for a Base. If
+  Obsidian renames its `bases-*` classes the failure will not be a red test; it
+  will be the fallback: every Base exports as `[Bases view omitted: …]` with a
+  "timed out" or "unrecognised layout" reason in the report. To close the gap,
+  build a small synthetic vault (a few invented notes and a `.base`), capture
+  the attached, settled DOM into `tests/fixtures/real-render/`, and replace the
+  hand-built builder with it.
+- These need a person, on a real device, before they are trusted:
+  - Desktop: a table Base exports with the same rows Obsidian shows; a Base of
+    a few hundred rows is complete (the report says so if not); a wide Base
+    keeps all its columns; a grouped table, a cards view and a Base with a
+    broken filter each export as a marker with the right reason.
+  - Mobile (iOS WKWebView, Android WebView): the off-screen attached element
+    fills in at all, and the five-second wait is enough. If it is not, the
+    result is safe but unhelpful: every Base exports as the marker.
+  - The assumed shapes named in `bases-dom.ts` (a checkbox cell, a group
+    heading) against a real Base that has them.
+
+**The Obsidian drift canary.** Nothing in CI can tell that the fixtures have
+gone stale, because CI cannot run Obsidian; each fixture records the version it
+came from as `obsidianVersion`, and `.github/workflows/obsidian-drift.yml` checks
+those against the newest Obsidian release every Monday. When any fixture is
+older, it opens ONE issue titled `[obsidian-drift] …` telling you to re-capture,
+and opens no second one while that issue is open. Close it by running the
+capture and committing the fixture diff.
+
+- `npm run check-obsidian-drift` runs the same check locally. Without a
+  `GITHUB_TOKEN` it is a dry run that changes nothing on GitHub; add
+  `--dry-run` to force that even with one, `--latest 1.14.0` to skip the
+  lookup. GitHub limits unauthenticated reads per IP, so if you hit that:
+  `GITHUB_TOKEN=$(gh auth token) npm run check-obsidian-drift -- --dry-run`.
+- What counts as "behind" is one function, `isDrifted` in
+  `scripts/lib/obsidian-drift.ts`. Today ANY newer release counts, patch
+  releases included. To only react to minor and major releases, change that
+  function; its tests say what the current rule is.
+- A run that cannot do its job (GitHub unreachable, no fixtures, a fixture
+  whose `obsidianVersion` is `unknown`) FAILS rather than passing quietly, so a
+  red weekly run means the canary itself needs attention.
+- The `schedule` trigger only runs from the default branch, and GitHub pauses
+  scheduled workflows after 60 days without repository activity.
+
 **Verified by hand (September 2026), on a real Boox and in real Obsidian
 rendering.** Each item below was at one point believed-correct-but-unchecked;
 all of them have since been exercised on the device and passed. The list stays

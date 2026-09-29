@@ -1,0 +1,42 @@
+name: Obsidian drift
+
+# The real-render fixtures (tests/fixtures/real-render/) are markup captured
+# from ONE Obsidian version, and CI cannot run Obsidian to notice it has moved
+# on. This checks the fixtures against the newest Obsidian release each week
+# and opens a single GitHub issue asking for a re-capture when they are behind.
+# It opens no second issue while one is open. See scripts/check-obsidian-drift.ts.
+#
+# Two GitHub behaviours worth knowing:
+#  - a `schedule` trigger only ever runs from the DEFAULT branch, so this does
+#    nothing until it is merged to main (workflow_dispatch works from anywhere);
+#  - GitHub pauses scheduled workflows in a repository with no activity for 60
+#    days. A red run here is the signal that something needs attention, so an
+#    error talking to GitHub fails the job instead of being swallowed.
+
+on:
+  schedule:
+    # Mondays 06:17 UTC. Off the hour on purpose: the top of the hour is when
+    # GitHub's scheduler is busiest and runs get delayed or dropped.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/check-obsidian-drift.ts
+        env:
+          # The workflow's own token: it can open issues here (see `permissions`)
+          # and it lifts the rate limit on reading Obsidian's releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -14,6 +14,7 @@ import { errorMessage } from "./error-text";
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
 import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "./footnotes";
+import type { ChapterImage } from "./types";
 import {
   stripFrontmatter,
   stripDynamicBlocks,
@@ -37,6 +38,7 @@ import {
   type ListItemInfo,
 } from "./render";
 import { protectMath, renderMath, type MathSpan } from "./math";
+import { getBaseRenderer } from "./bases-adapter";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
 // into the plain arrays render.ts's pure heading/block functions expect —
@@ -144,6 +146,32 @@ async function populateEmbeds(
     const dest = app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
     if (!(dest instanceof TFile)) {
       wrapper.setAttribute("data-embed-reason", "unresolved");
+      continue;
+    }
+    if (dest.extension === "base") {
+      // A Bases TABLE view becomes a static table; anything else about a Base
+      // (a card view, a grouped table, an error, a timeout) degrades through the
+      // same "unsupported-type" marker it always did, now with the reason.
+      let outcome;
+      try {
+        outcome = await getBaseRenderer()(app, src, sourcePath);
+      } catch (e) {
+        outcome = { ok: false as const, reason: errorMessage(e) };
+      }
+      if (outcome.ok) {
+        const ourDiv = wrapper.createDiv();
+        ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
+        ourDiv.appendChild(outcome.table);
+        // No rewriteLinks here: a cell's link to a note is finalised by the pass
+        // of whatever encloses this embed (the embedded note's own, or the
+        // chapter's), resolving against the note the Base is written in. It
+        // points at that note's chapter if the note is in the book, and
+        // degrades to plain text if not.
+        if (outcome.warning) warnings.push(`${outcome.warning}: ${src} (referenced by ${sourcePath})`);
+      } else {
+        wrapper.setAttribute("data-embed-reason", "unsupported-type");
+        wrapper.setAttribute("data-embed-detail", outcome.reason);
+      }
       continue;
     }
     if (dest.extension !== "md") {
@@ -283,18 +311,7 @@ export type { SvgRasterizer } from "./render";
 
 export interface ChapterRender {
   xhtmlBody: string;
-  // sourcePath: set only for images that came from embedded content, naming
-  // the note they actually came from (FR-006) — main.ts uses it instead of
-  // the chapter's own path when resolving a relative (non-app://) image
-  // reference, so a relative path written inside an embedded note resolves
-  // against that note's folder, not the host chapter's.
-  images: {
-    newHref: string;
-    vaultPath?: string;
-    bytes?: Uint8Array;
-    mediaType?: string;
-    sourcePath?: string;
-  }[];
+  images: ChapterImage[];
   warnings: string[];
   // Heading-level TOC entries (004-heading-toc): collected from the final
   // rendered DOM when tocDepth > 0; [] at depth 0, where no ids are stamped

@@ -508,7 +508,7 @@ function embedOmissionMessage(reason: string | null, name: string, detail: strin
       return `circular embed skipped: ${name}`;
     case "unsupported-type":
       return isBasesSrc(name)
-        ? `bases view omitted (interactive Bases have no EPUB equivalent): ${name}`
+        ? basesOmittedMessage(name, detail)
         : `unsupported embed type (not a note): ${name}`;
     case "heading-not-found":
       return `heading not found: ${name}`;
@@ -517,6 +517,33 @@ function embedOmissionMessage(reason: string | null, name: string, detail: strin
     default:
       return `missing embed: ${name}`;
   }
+}
+
+// With a reason (a Base that WAS attempted and could not be exported) the message
+// says what went wrong; without one it is the general "no EPUB equivalent" text,
+// which is all that is true of an inline ```base block.
+const basesOmittedMessage = (name: string, reason?: string | null): string =>
+  reason
+    ? `bases view omitted: ${name} — ${reason}`
+    : `bases view omitted (interactive Bases have no EPUB equivalent): ${name}`;
+
+// An inline ```base code block is a Bases view too, and Obsidian renders its
+// toolbar (buttons, a search <input>, icons) into the DOM even when the render
+// target is detached — which is how the export renders. Left alone, that chrome
+// goes into the book with no warning. (A .base FILE embed never reaches here:
+// flattenEmbeds discards its wrapper's content and leaves a marker.) With the
+// Bases core plugin off, Obsidian renders an ordinary <pre><code>, which has no
+// such wrapper and is correctly left alone.
+function omitBasesBlocks(root: HTMLElement): string[] {
+  const warnings: string[] = [];
+  root.querySelectorAll(".block-language-base").forEach((block) => {
+    const marker = createEl("p");
+    marker.className = "omitted";
+    marker.textContent = "[Bases view omitted: inline base block]";
+    block.replaceWith(marker);
+    warnings.push(basesOmittedMessage("inline base block"));
+  });
+  return warnings;
 }
 
 // The omission marker an embed degrades to when it has no rendered content
@@ -666,7 +693,12 @@ export function cleanupDom(root: HTMLElement): string[] {
     span.textContent = a.textContent ?? "";
     a.replaceWith(span);
   });
-  return flattenEmbeds(root);
+  const warnings = flattenEmbeds(root);
+  // AFTER flattenEmbeds, not before: it discards Obsidian's own async-populated
+  // preview of each embed (which can hold a base block of its own), and a
+  // warning about content that never ships would be noise in the report.
+  warnings.push(...omitBasesBlocks(root));
+  return warnings;
 }
 
 export function rewriteLinks(

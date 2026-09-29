@@ -1,5 +1,5 @@
 // Pure media-type allowlist — zero "obsidian" imports so vitest can load this
-// module directly. src/main.ts's per-image loop uses this instead of
+// module directly. src/chapter-assets.ts uses this instead of
 // defaulting unrecognised extensions to "image/png", which used to embed and
 // mislabel unsupported files (.bmp, .tiff, .avif, .md, ...) as PNGs and made
 // epubcheck flag malformed images / non-core media types.

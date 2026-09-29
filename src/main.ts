@@ -18,7 +18,7 @@ import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
 import { resolveDestination, type ExportDestination, type PlatformKind } from "./output";
 import { canShareEpub, shareEpub, type ShareTarget } from "./share";
-import { mediaTypeForExt } from "./media-types";
+import { resolveChapterAssets, type AssetVault } from "./chapter-assets";
 import { BooxDropClient } from "./booxdrop";
 import { obsidianHttp } from "./http";
 import {
@@ -33,7 +33,7 @@ import { resolveMeta, MetaDefaults } from "./metadata";
 import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "./cover";
 import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
-import { createWarningCollector, buildReport, type ExportReport } from "./report";
+import { createWarningCollector, buildReport, type ExportReport, type WarningCollector } from "./report";
 import { openExportReport } from "./report-view";
 import { errorMessage } from "./error-text";
 
@@ -447,32 +447,7 @@ export default class EpubExportPlugin extends Plugin {
       const hrefByPath = new Map(job.files.map((f, i) => [f.path, chapterHref(i)]));
       const builder = new EpubBuilder(job.meta);
 
-      // Backlink trail: which chapters in THIS book link to each chapter,
-      // in book order. Sources come from the same resolvedLinks graph the
-      // linked-notes collector consumed, so anything bfsLinked counted as a
-      // link is guaranteed to show up as a backlink here.
-      const fileByPath = new Map(job.files.map((f) => [f.path, f]));
-      const backlinks = computeBacklinks(
-        this.app.metadataCache.resolvedLinks,
-        job.files.map((f) => f.path)
-      );
-      const backlinkPosition = coerceBacklinkPosition(this.settings.backlinkPosition);
-      const withBacklinks = (file: TFile, xhtmlBody: string): string => {
-        // "none" restores pre-feature output exactly — no trail on any chapter.
-        if (backlinkPosition === "none") return xhtmlBody;
-        const entries = (backlinks.get(file.path) ?? []).flatMap((path) => {
-          const source = fileByPath.get(path);
-          const href = hrefByPath.get(path);
-          // Chapters live side by side in text/, so link by filename only
-          // (same convention as rewriteLinks in render.ts).
-          return source && href ? [{ title: this.titleFor(source), href: href.replace(/^text\//, "") }] : [];
-        });
-        const fragment = renderBacklinksFragment(entries);
-        if (!fragment) return xhtmlBody;
-        if (backlinkPosition === "end") return xhtmlBody + fragment;
-        if (backlinkPosition === "both") return fragment + xhtmlBody + fragment;
-        return fragment + xhtmlBody;
-      };
+      const withBacklinks = this.backlinkDecorator(job.files, hrefByPath);
       // Running total of images rewriteImages has STAMPED into chapter HTML
       // so far — not the count that later loaded as assets. The <img> hrefs
       // are burned into r.xhtmlBody the moment renderUnitToChapter returns,
@@ -486,6 +461,22 @@ export default class EpubExportPlugin extends Plugin {
       // book for font embedding — decided AFTER the loop, when the setting
       // is consulted, so detection alone never changes output.
       let hasThai = false;
+
+      // How resolveChapterAssets finds and reads a vault image. The one place
+      // the obsidian types (TFile, the link resolver) meet that pure module.
+      const assetVault: AssetVault<TFile> = {
+        locate: (vaultPath, fromPath) => {
+          const direct = this.app.vault.getAbstractFileByPath(vaultPath);
+          if (direct instanceof TFile) return direct;
+          // Not a vault-rooted path (or app://-derived path didn't match
+          // as-is) — fall back to Obsidian's own link resolver, which
+          // handles paths relative to the source note and bare
+          // filenames (same resolver render-adapter.ts uses for links).
+          const resolved = this.app.metadataCache.getFirstLinkpathDest(vaultPath, fromPath);
+          return resolved instanceof TFile ? resolved : null;
+        },
+        read: (file) => this.app.vault.readBinary(file),
+      };
 
       for (const [chapterIndex, file] of job.files.entries()) {
         // Everything recorded inside this iteration is about THIS chapter.
@@ -512,53 +503,13 @@ export default class EpubExportPlugin extends Plugin {
           // Bump immediately, before the asset loop below: these numbers are
           // already burned into r.xhtmlBody regardless of what happens next.
           imageCount += r.images.length;
-          for (const img of r.images) {
-            try {
-              if (img.bytes) {
-                // Rasterized mermaid diagram or math: bytes were produced
-                // directly by renderUnitToChapter, not read from a vault file
-                // — skip vault resolution entirely. Inside the try so that a
-                // builder that rejects the asset costs one warning, not the
-                // chapter (the href is already burned into the HTML either way).
-                builder.addAsset(img.newHref.replace(/^\.\.\//, ""), img.bytes, img.mediaType!);
-                continue;
-              }
-              let af = this.app.vault.getAbstractFileByPath(img.vaultPath!);
-              if (!(af instanceof TFile)) {
-                // Not a vault-rooted path (or app://-derived path didn't match
-                // as-is) — fall back to Obsidian's own link resolver, which
-                // handles paths relative to the source note and bare
-                // filenames (same resolver render-adapter.ts uses for links).
-                // img.sourcePath is set only for images that came from
-                // embedded content (FR-006, render-adapter.ts's
-                // populateEmbeds) — a relative path written inside an
-                // embedded note must resolve against THAT note's folder, not
-                // this chapter's own file.
-                af = this.app.metadataCache.getFirstLinkpathDest(img.vaultPath!, img.sourcePath ?? file.path);
-              }
-              if (!(af instanceof TFile)) throw new Error("not found in vault");
-              const ext = img.newHref.split(".").pop()!;
-              const mediaType = mediaTypeForExt(ext);
-              if (!mediaType) {
-                // Outside the allowlist (e.g. .bmp/.tiff/.avif/.md): embedding
-                // it would mislabel the asset and epubcheck flags malformed
-                // images / non-core media types. Skip, don't embed.
-                warnForChapter(`unsupported image type: ${img.vaultPath} (referenced by ${file.path})`);
-                continue;
-              }
-              const bytes = new Uint8Array(await this.app.vault.readBinary(af));
-              builder.addAsset(img.newHref.replace(/^\.\.\//, ""), bytes, mediaType);
-            } catch (e) {
-              // Missing image: export continues (spec's error table) — this
-              // one image's href stays dangling in the chapter HTML, but the
-              // chapter itself is still added below.
-              warnForChapter(
-                img.bytes
-                  ? `image could not be added: ${img.newHref} — ${errorMessage(e)} (referenced by ${file.path})`
-                  : `missing image: ${img.vaultPath} (referenced by ${file.path})`
-              );
-            }
-          }
+          await resolveChapterAssets(
+            r.images,
+            file.path,
+            assetVault,
+            (href, bytes, mediaType) => builder.addAsset(href, bytes, mediaType),
+            warnForChapter
+          );
           builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody), r.toc);
         } catch (e) {
           warnForChapter(`chapter skipped: ${file.path} — ${String(e)}`);
@@ -577,109 +528,12 @@ export default class EpubExportPlugin extends Plugin {
         }
       }
 
-      // 006-thai-font FR-002/FR-008/FR-009: embed only when the setting is
-      // ON and Thai was detected; an unusable font asset degrades to a valid
-      // fontless book with a warning — never a failure (constitution II).
-      if (this.settings.embedThaiFont && hasThai) {
-        try {
-          const asset = getThaiFontLoader()();
-          if (asset) {
-            builder.setThaiFont(asset);
-          } else {
-            collector.forBook()("Thai font unavailable — exporting without embedded font");
-          }
-        } catch (e) {
-          collector.forBook()(`Thai font embedding skipped: ${errorMessage(e)}`);
-        }
-      }
+      this.applyThaiFont(builder, hasThai, collector);
 
-      // 009-index-order-parts: set AFTER the chapter loop so every slot —
-      // including failed-chapter placeholders — exists to be referenced. A
-      // tree the builder rejects degrades to the flat nav with a warning;
-      // the book itself is unaffected (constitution II).
-      if (job.nav) {
-        try {
-          builder.setNavTree(job.nav);
-        } catch (e) {
-          collector.forBook()(`table of contents fell back to a flat list: ${errorMessage(e)}`);
-        }
-      }
+      this.applyNavTree(builder, job.nav, collector);
 
       const bytes = await builder.build();
-      const kind = this.platformKind();
-      const dest = resolveDestination(
-        kind,
-        this.settings,
-        slugify(job.meta.title),
-        // Desktop-only input. Called unconditionally because desktopHomedir
-        // carries the platform guard itself and answers "" on mobile — one
-        // guard, in the place that owns the node import, instead of the same
-        // condition written twice and drifting.
-        await this.desktopHomedir()
-      );
-      await this.writeBook(dest, bytes); // save ALWAYS precedes push (spec)
-      this.lastShareTarget =
-        dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
-
-      let pushMsg = "";
-      if (this.settings.pushAfterExport && this.settings.booxUrl) {
-        try {
-          notice.setMessage("Pushing to Boox…");
-          // dest.fileName, not a path split at the call site: BooxDrop must
-          // upload under the same name on both platforms (FR-010).
-          await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
-          pushMsg = " and pushed to Boox ✓";
-        } catch (e) {
-          const msg = errorMessage(e);
-          pushMsg = ` — saved locally, push failed: ${msg}`;
-          collector.forBook()(`push to Boox failed: ${msg}`);
-        }
-      }
-      const warnMsg = summarizeWarnings(collector.messages());
-      const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
-
-      // 010-export-report. Built and wired in its own try: everything above
-      // has already succeeded and the book IS on disk, so a bug in the report
-      // must not fall through to the outer catch and tell the reader the
-      // export failed (FR-019, Constitution II). Worst case is a saved book
-      // shown with the plain notice — exactly the pre-feature behavior.
-      let report: ExportReport | null = null;
-      try {
-        report = buildReport(
-          job.meta.title,
-          job.files.map((f) => f.path),
-          collector.scoped()
-        );
-        this.lastReport = report;
-      } catch (e) {
-        console.error("[inkbound] could not build the export report", e);
-      }
-
-      if (report && report.total > 0) {
-        // WHY A DocumentFragment AND NOT Notice.noticeEl: the report needs a
-        // tap target on the notice, and Notice exposes exactly two element
-        // members — `messageEl` (@since 1.8.7, which manifest.json's
-        // minAppVersion of 1.5.0 forbids: undefined on 1.5.0 through 1.8.6,
-        // and the no-unsupported-api lint rule fails the build for it) and
-        // `noticeEl` (available since 0.9.7 but deprecated, and this repo's
-        // lint config forbids disabling @typescript-eslint/no-deprecated at
-        // all). The constructor's DocumentFragment overload predates both and
-        // is flagged by neither: we build the notice body ourselves and make
-        // it clickable, so no Notice member is touched. See
-        // specs/010-export-report/research.md R3.
-        const openReport = report;
-        new Notice(
-          createFragment((frag) => {
-            const body = frag.createDiv({ text: savedText });
-            body.addEventListener("click", () => openExportReport(this.app, openReport));
-          }),
-          8000
-        );
-      } else {
-        // FR-003: a warning-free export's notice is byte-identical to what it
-        // was before this feature, and nothing about it is clickable.
-        new Notice(savedText, 8000);
-      }
+      await this.finishExport(job, bytes, collector, notice);
     } catch (e) {
       console.error("[inkbound] export failed", e);
       new Notice(`EPUB export failed: ${errorMessage(e)}`);
@@ -690,6 +544,157 @@ export default class EpubExportPlugin extends Plugin {
       // scripts/local-export.ts parses these lines (FR-020).
       collector.messages().forEach((w) => console.warn("[inkbound]", w));
       notice?.hide();
+    }
+  }
+
+  // Builds the function that adds a chapter's backlink trail to its body.
+  private backlinkDecorator(
+    files: TFile[],
+    hrefByPath: Map<string, string>
+  ): (file: TFile, xhtmlBody: string) => string {
+    // Backlink trail: which chapters in THIS book link to each chapter,
+    // in book order. Sources come from the same resolvedLinks graph the
+    // linked-notes collector consumed, so anything bfsLinked counted as a
+    // link is guaranteed to show up as a backlink here.
+    const fileByPath = new Map(files.map((f) => [f.path, f]));
+    const backlinks = computeBacklinks(
+      this.app.metadataCache.resolvedLinks,
+      files.map((f) => f.path)
+    );
+    const backlinkPosition = coerceBacklinkPosition(this.settings.backlinkPosition);
+    const withBacklinks = (file: TFile, xhtmlBody: string): string => {
+      // "none" restores pre-feature output exactly — no trail on any chapter.
+      if (backlinkPosition === "none") return xhtmlBody;
+      const entries = (backlinks.get(file.path) ?? []).flatMap((path) => {
+        const source = fileByPath.get(path);
+        const href = hrefByPath.get(path);
+        // Chapters live side by side in text/, so link by filename only
+        // (same convention as rewriteLinks in render.ts).
+        return source && href ? [{ title: this.titleFor(source), href: href.replace(/^text\//, "") }] : [];
+      });
+      const fragment = renderBacklinksFragment(entries);
+      if (!fragment) return xhtmlBody;
+      if (backlinkPosition === "end") return xhtmlBody + fragment;
+      if (backlinkPosition === "both") return fragment + xhtmlBody + fragment;
+      return fragment + xhtmlBody;
+    };
+    return withBacklinks;
+  }
+
+  private applyThaiFont(builder: EpubBuilder, hasThai: boolean, collector: WarningCollector): void {
+    // 006-thai-font FR-002/FR-008/FR-009: embed only when the setting is
+    // ON and Thai was detected; an unusable font asset degrades to a valid
+    // fontless book with a warning — never a failure (constitution II).
+    if (this.settings.embedThaiFont && hasThai) {
+      try {
+        const asset = getThaiFontLoader()();
+        if (asset) {
+          builder.setThaiFont(asset);
+        } else {
+          collector.forBook()("Thai font unavailable — exporting without embedded font");
+        }
+      } catch (e) {
+        collector.forBook()(`Thai font embedding skipped: ${errorMessage(e)}`);
+      }
+    }
+  }
+
+  private applyNavTree(builder: EpubBuilder, nav: NavItem[] | undefined, collector: WarningCollector): void {
+    // 009-index-order-parts: set AFTER the chapter loop so every slot —
+    // including failed-chapter placeholders — exists to be referenced. A
+    // tree the builder rejects degrades to the flat nav with a warning;
+    // the book itself is unaffected (constitution II).
+    if (nav) {
+      try {
+        builder.setNavTree(nav);
+      } catch (e) {
+        collector.forBook()(`table of contents fell back to a flat list: ${errorMessage(e)}`);
+      }
+    }
+  }
+
+  // Everything after the book is built: write it, push it, and tell the reader.
+  // Runs inside runExport's try, so a throw here is still reported as a failed
+  // export and the collected warnings still reach the console.
+  private async finishExport(
+    job: Job,
+    bytes: Uint8Array,
+    collector: WarningCollector,
+    notice: Notice
+  ): Promise<void> {
+    const kind = this.platformKind();
+    const dest = resolveDestination(
+      kind,
+      this.settings,
+      slugify(job.meta.title),
+      // Desktop-only input. Called unconditionally because desktopHomedir
+      // carries the platform guard itself and answers "" on mobile — one
+      // guard, in the place that owns the node import, instead of the same
+      // condition written twice and drifting.
+      await this.desktopHomedir()
+    );
+    await this.writeBook(dest, bytes); // save ALWAYS precedes push (spec)
+    this.lastShareTarget =
+      dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
+
+    let pushMsg = "";
+    if (this.settings.pushAfterExport && this.settings.booxUrl) {
+      try {
+        notice.setMessage("Pushing to Boox…");
+        // dest.fileName, not a path split at the call site: BooxDrop must
+        // upload under the same name on both platforms (FR-010).
+        await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
+        pushMsg = " and pushed to Boox ✓";
+      } catch (e) {
+        const msg = errorMessage(e);
+        pushMsg = ` — saved locally, push failed: ${msg}`;
+        collector.forBook()(`push to Boox failed: ${msg}`);
+      }
+    }
+    const warnMsg = summarizeWarnings(collector.messages());
+    const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
+
+    // 010-export-report. Built and wired in its own try: everything above
+    // has already succeeded and the book IS on disk, so a bug in the report
+    // must not fall through to the outer catch and tell the reader the
+    // export failed (FR-019, Constitution II). Worst case is a saved book
+    // shown with the plain notice — exactly the pre-feature behavior.
+    let report: ExportReport | null = null;
+    try {
+      report = buildReport(
+        job.meta.title,
+        job.files.map((f) => f.path),
+        collector.scoped()
+      );
+      this.lastReport = report;
+    } catch (e) {
+      console.error("[inkbound] could not build the export report", e);
+    }
+
+    if (report && report.total > 0) {
+      // WHY A DocumentFragment AND NOT Notice.noticeEl: the report needs a
+      // tap target on the notice, and Notice exposes exactly two element
+      // members — `messageEl` (@since 1.8.7, which manifest.json's
+      // minAppVersion of 1.5.0 forbids: undefined on 1.5.0 through 1.8.6,
+      // and the no-unsupported-api lint rule fails the build for it) and
+      // `noticeEl` (available since 0.9.7 but deprecated, and this repo's
+      // lint config forbids disabling @typescript-eslint/no-deprecated at
+      // all). The constructor's DocumentFragment overload predates both and
+      // is flagged by neither: we build the notice body ourselves and make
+      // it clickable, so no Notice member is touched. See
+      // specs/010-export-report/research.md R3.
+      const openReport = report;
+      new Notice(
+        createFragment((frag) => {
+          const body = frag.createDiv({ text: savedText });
+          body.addEventListener("click", () => openExportReport(this.app, openReport));
+        }),
+        8000
+      );
+    } else {
+      // FR-003: a warning-free export's notice is byte-identical to what it
+      // was before this feature, and nothing about it is clickable.
+      new Notice(savedText, 8000);
     }
   }
 
