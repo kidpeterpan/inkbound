@@ -112,6 +112,13 @@ const SNIPPETS: Snippet[] = [
       "an unresolved wikilink (rewriteLinks) and an unresolved note embed (flattenEmbeds' placeholder path)",
     markdown: "See [[No Such Note Zzz]] and:\n\n![[No Such Embed Zzz]]\n\nAfter.\n",
   },
+  {
+    name: "base-block",
+    covers:
+      "an inline ```base code block: Obsidian puts the Bases toolbar (inputs, icons) into even a DETACHED render, which is what the export sees, and none of it may reach the book. The filter matches nothing, so the capture holds no vault content",
+    markdown:
+      'Before.\n\n```base\nfilters:\n  and:\n    - file.name == "zzz-no-such-file-zzz"\nviews:\n  - type: table\n    name: T\n```\n\nAfter.\n',
+  },
 ];
 
 /** What renderUnitToChapter does to the source before MarkdownRenderer sees it. */

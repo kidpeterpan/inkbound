@@ -1,6 +1,13 @@
+// FIRST, and in this order: the DOM globals, then the Obsidian stub's createEl
+// shims (which only install if a DOM exists), then the modules that use them.
+import "./lib/install-dom";
+import "../tests/fixtures/obsidian-stub";
 import { writeFileSync } from "fs";
 import { EpubBuilder, type NavItem } from "../src/epub";
 import { renderMathToSvg } from "../src/math";
+import { buildStaticTable, extractBaseTable } from "../src/bases";
+import { rewriteLinks, serializeBody } from "../src/render";
+import { buildBasesEmbed, hostWith } from "../tests/fixtures/bases-dom";
 
 // A real 1×1 transparent PNG (base64) so the sample's cover page and
 // manifest cover get validated against the EPUB 3.3 spec by epubcheck.
@@ -47,6 +54,33 @@ b.addChapter(
   `<p>inline: ${inlineMath.svg} in prose</p><p class="math-block">${displayMath.svg}</p>` +
     `<p>broken: ${errorMath.svg}</p>`
 );
+// Bases tables: the REAL production converter (extractBaseTable → buildStaticTable
+// → rewriteLinks → serializeBody) run over the hand-built Bases DOM, so
+// epubcheck judges the exact markup a Bases embed becomes: caption, th scope,
+// Thai text in cells, an internal link retargeted to a chapter, comma-joined
+// multi-values, and the colspan "No results" row of an empty base.
+const basesChapter = (): string => {
+  const holder = document.createElement("div");
+  const filled = buildStaticTable(
+    extractBaseTable(
+      hostWith(
+        buildBasesEmbed({
+          viewName: "งานที่เปิดอยู่ & <รายการ>",
+          headers: ["file name", "สถานะ", "แท็ก"],
+          rows: [
+            [{ file: "บทที่หนึ่ง", href: "Chapter one" }, "กำลังทำ", { pills: ["a", "b"] }],
+            [{ file: "Not in the book", href: "Nowhere" }, 'say "hi" & <go>', { links: ["Dana", "Eli"] }],
+          ],
+        })
+      )
+    )
+  );
+  const empty = buildStaticTable(extractBaseTable(hostWith(buildBasesEmbed({ rows: [], count: "0" }))));
+  holder.append(filled, empty);
+  rewriteLinks(holder, new Map([["Chapter one", "text/chapter_001.xhtml"]]), (lp) => lp);
+  return serializeBody(holder);
+};
+b.addChapter("Bases", basesChapter());
 // Thai font (006-thai-font): fixture bytes (the real TTFs are esbuild-binary
 // inlined; this sample only needs non-empty font/ttf assets so epubcheck
 // validates the manifest media types, @font-face rules, and the OFL
@@ -79,6 +113,7 @@ b.setNavTree([
       },
     ],
   },
+  ch(4),
 ]);
 b.build().then((bytes) => {
   writeFileSync("sample.epub", bytes);

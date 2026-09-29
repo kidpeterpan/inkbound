@@ -6,6 +6,9 @@ import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/render-adapter";
 import { setThaiFontLoader } from "../src/font-assets";
+import { setBaseRenderer, type BaseRenderOutcome } from "../src/bases-adapter";
+import { buildStaticTable, extractBaseTable } from "../src/bases";
+import { buildBasesEmbed, hostWith } from "./fixtures/bases-dom";
 import { EpubBuilder } from "../src/epub";
 import {
   TFile,
@@ -568,6 +571,25 @@ describe("folder export: subfolders become Parts (US2)", () => {
     expect(await epub.chapter(3)).toContain("chapter failed to render");
     expect(await epub.chapter(4)).toContain("marker-ch3");
     expect(warnings.some((w) => w.includes("chapter skipped"))).toBe(true);
+  });
+
+  it("a nav tree the builder rejects degrades to the flat list with a warning; the book still exports", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# The Book\n\nintro\n",
+      "book/Part I/ch1.md": "# Ch1\n\nmarker-ch1\n",
+    });
+    const navSpy = vi.spyOn(EpubBuilder.prototype, "setNavTree").mockImplementationOnce(() => {
+      throw new Error("bad tree");
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(olCount(epub.nav)).toBe(1);
+    expect(await epub.chapter(2)).toContain("marker-ch1");
+    expect(warnings).toEqual(["[inkbound] table of contents fell back to a flat list: bad tree"]);
+    navSpy.mockRestore();
   });
 
   it("FR-013: a flat folder still gets the flat nav — one <ol>, no Parts", async () => {
@@ -1722,6 +1744,107 @@ describe("failure paths", () => {
     expect(chapter1).not.toContain("chapter failed to render");
     expect(chapter1).toContain("Body text survives.");
     expect(warnings.some((w) => /missing image: photo\.png/.test(w))).toBe(true);
+  });
+
+  it("F5b: an image that is not at the vault-rooted path is found through Obsidian's link resolver", async () => {
+    // getAbstractFileByPath("photo.png") misses (the file lives in media/), so
+    // assetVault.locate must fall back to getFirstLinkpathDest. This is the
+    // path a bare-filename or note-relative image reference takes in real use.
+    const { app, root } = await buildVault({
+      "notes/with_photo.md": "# Note\n\nBody. ![](photo.png)\n",
+      "media/photo.png": new Uint8Array([137, 80, 78, 71]),
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "notes/with_photo.md"));
+
+    const epub = await readEpub("with_photo.epub");
+    expect(epub.names).toContain("OEBPS/images/img_001.png");
+    expect(warnings).toEqual([]);
+  });
+
+  describe("F5c: an embedded Base", () => {
+    // The real renderer needs a live Obsidian; tests/setup/no-live-bases.ts
+    // installs a stand-in that fails at once, and these tests replace it.
+    const tableOutcome = (): BaseRenderOutcome => ({
+      ok: true,
+      table: buildStaticTable(extractBaseTable(hostWith(buildBasesEmbed()))),
+      warning: null,
+    });
+
+    it("puts a Bases table into the book, with no warning", async () => {
+      setBaseRenderer(async () => tableOutcome());
+      const { app, root } = await buildVault({
+        "tasks.md": "# Tasks\n\nBefore.\n\n![[Tasks.base]]\n\nAfter.\n",
+        "Tasks.base": "views:\n  - type: table\n",
+      });
+
+      await makePlugin(app).exportSingle(tfile(root, "tasks.md"));
+
+      const epub = await readEpub("tasks.epub");
+      const chapter = await epub.chapter(1);
+      expect(chapter).toContain("<table");
+      expect(chapter).toContain("Alpha note");
+      expect(chapter).toContain("Before.");
+      expect(chapter).toContain("After.");
+      expect(chapter).not.toMatch(/omitted|bases-/);
+      // A chapter file is a whole XHTML document, so it parses as XML directly.
+      const doc = new DOMParser().parseFromString(chapter, "application/xml");
+      expect(doc.querySelector("parsererror")?.textContent ?? "").toBe("");
+      expect(doc.querySelectorAll("table th")).toHaveLength(3);
+      expect(warnings).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    it("links a cell to the chapter of the note it names when that note is in the book", async () => {
+      setBaseRenderer(async () => tableOutcome());
+      const { app, root } = await buildVault({
+        "book/index.md": "---\ntags: [book, main]\n---\n\n# Index\n\n![[Tasks.base]]\n",
+        "book/Alpha note.md": "# Alpha note\n\nalpha body\n",
+        "book/Tasks.base": "views:\n  - type: table\n",
+      });
+
+      await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+      // The book is named after its title, which is not what this test is about.
+      const [file] = (await fs.readdir(outDir)).filter((f) => f.endsWith(".epub"));
+      const epub = await readEpub(file!);
+      const chapter = await epub.chapter(1);
+      expect(chapter).toMatch(/<a href="chapter_\d+\.xhtml">Alpha note<\/a>/);
+      // The other row names a note that is not in this book: plain text, not a dead link.
+      expect(chapter).toContain("Beta note");
+      expect(chapter).not.toMatch(/<a [^>]*>Beta note<\/a>/);
+    });
+
+    it("degrades one unexportable Base to a marker and a warning, and keeps the rest of the chapter", async () => {
+      setBaseRenderer(async () => ({ ok: false, reason: "cards views are not exported, only table views" }));
+      const { app, root } = await buildVault({
+        "tasks.md": "# Tasks\n\nBody text survives.\n\n![[Tasks.base]]\n",
+        "Tasks.base": "views:\n  - type: cards\n",
+      });
+
+      await makePlugin(app).exportSingle(tfile(root, "tasks.md"));
+
+      const epub = await readEpub("tasks.epub");
+      const chapter = await epub.chapter(1);
+      expect(chapter).toContain("Body text survives.");
+      expect(chapter).toContain("[Bases view omitted: Tasks.base]");
+      expect(chapter).not.toContain("<table");
+      expect(warnings).toEqual([
+        "[inkbound] bases view omitted: Tasks.base — cards views are not exported, only table views (referenced by tasks.md)",
+      ]);
+      expect(successNotices().some((n) => n.includes("Exported with 1 warning"))).toBe(true);
+    });
+
+    it("does not consult the Bases renderer for a book with no Base in it", async () => {
+      const renderer = vi.fn(async () => tableOutcome());
+      setBaseRenderer(renderer);
+      const { app, root } = await buildVault({ "plain.md": "# Plain\n\nJust text.\n" });
+
+      await makePlugin(app).exportSingle(tfile(root, "plain.md"));
+
+      expect(renderer).not.toHaveBeenCalled();
+      expect(warnings).toEqual([]);
+    });
   });
 
   it("F6: a non-200 cover response degrades to a coverless, still-successful export", async () => {

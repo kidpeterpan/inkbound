@@ -187,6 +187,96 @@ describe("cleanupDom", () => {
   });
 });
 
+describe("cleanupDom: inline Bases blocks", () => {
+  // What Obsidian puts in the DOM for a ```base code block, reduced to the parts
+  // that matter: the block wrapper and the toolbar chrome it carries even when
+  // rendered detached (tests/fixtures/real-render/base-block.json is the real one).
+  const baseBlock = () =>
+    '<div class="block-language-base bases-embed interactive-child">' +
+    '<div class="bases-header"><div class="bases-toolbar"><span>Sort</span><svg></svg></div>' +
+    '<div class="bases-search-row"><input type="text" placeholder="Search"></div></div>' +
+    '<div class="bases-view"><div class="bases-tr"></div></div></div>';
+
+  const OMITTED = "[Bases view omitted: inline base block]";
+
+  it("replaces the block, toolbar and all, with the omission marker", () => {
+    const el = div(`<p>Before.</p>${baseBlock()}<p>After.</p>`);
+    cleanupDom(el);
+    expect(el.querySelector(".block-language-base")).toBeNull();
+    expect(el.querySelector(".bases-toolbar, .bases-view, input, svg")).toBeNull();
+    expect(el.textContent).not.toContain("Sort");
+    const kids = Array.from(el.children).map((c) => c.textContent);
+    expect(kids).toEqual(["Before.", OMITTED, "After."]);
+  });
+
+  it('uses the same <p class="omitted"> marker the other omissions use, so it is styled the same', () => {
+    const el = div(baseBlock());
+    cleanupDom(el);
+    const p = el.querySelector("p");
+    expect(p?.className).toBe("omitted");
+    expect(p?.textContent).toBe(OMITTED);
+  });
+
+  it("warns once per block, saying it is a Bases view, so the export report can list it", () => {
+    const one = cleanupDom(div(baseBlock()));
+    expect(one).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): inline base block",
+    ]);
+    const three = cleanupDom(div(baseBlock() + "<p>x</p>" + baseBlock() + baseBlock()));
+    expect(three).toHaveLength(3);
+  });
+
+  it("catches a block inside an embedded note's own rendered copy", () => {
+    const el = div("<p>Host.</p>");
+    el.appendChild(realEmbedWrapper({ src: "Other Note", ourHtml: `<h2>Section</h2>${baseBlock()}` }));
+    const warnings = cleanupDom(el);
+    expect(el.querySelector("input, svg, .bases-toolbar")).toBeNull();
+    expect(el.querySelector("h2")?.textContent).toBe("Section");
+    expect(el.textContent).toContain(OMITTED);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("ignores a block in Obsidian's own async preview of an embed: that copy is discarded, so it must not warn", () => {
+    const el = div("<p>Host.</p>");
+    el.appendChild(
+      realEmbedWrapper({ src: "Other Note", ourHtml: "<p>Body</p>", obsidianPreview: baseBlock() })
+    );
+    const warnings = cleanupDom(el);
+    expect(warnings).toEqual([]);
+    expect(el.textContent).not.toContain("Bases view omitted");
+    expect(el.textContent).toContain("Body");
+  });
+
+  it("does not double-warn for a .base FILE embed, which already has its own marker and warning", () => {
+    const el = div("<p>Host.</p>");
+    el.appendChild(realEmbedWrapper({ src: "Tasks.base", reason: "unsupported-type" }));
+    const warnings = cleanupDom(el);
+    expect(warnings).toEqual(["bases view omitted (interactive Bases have no EPUB equivalent): Tasks.base"]);
+    expect(el.textContent).toContain("[Bases view omitted: Tasks.base]");
+  });
+
+  it("leaves an ordinary code block whose language happens to be base alone (Bases plugin off)", () => {
+    const el = div('<pre><code class="language-base">views:\n  - type: table</code></pre>');
+    const warnings = cleanupDom(el);
+    expect(warnings).toEqual([]);
+    expect(el.querySelector("pre code")?.textContent).toContain("type: table");
+  });
+
+  it("is idempotent: a second pass finds nothing left to do", () => {
+    const el = div(baseBlock());
+    cleanupDom(el);
+    const html = el.innerHTML;
+    expect(cleanupDom(el)).toEqual([]);
+    expect(el.innerHTML).toBe(html);
+  });
+
+  it("does nothing to a chapter with no Bases block", () => {
+    const el = div("<p>Plain.</p>");
+    expect(cleanupDom(el)).toEqual([]);
+    expect(el.innerHTML).toBe("<p>Plain.</p>");
+  });
+});
+
 describe("flattenEmbeds (wrapper-based — the confirmed real-Obsidian shape)", () => {
   it("replaces the wrapper with OUR rendered copy, discarding the title and Obsidian's own async preview", () => {
     const el = document.createElement("div");
