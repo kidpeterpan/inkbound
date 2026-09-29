@@ -3,6 +3,33 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.9.1
+
+Every problem an export survives now shows up in the export report.
+
+- **Cover failures are in the report.** A `cover:` that points at a missing or
+  unsupported file, a cover URL that fails to download, or a cover file that
+  cannot be read used to be logged to the developer console only, which mobile
+  does not have. Each is now a warning under "The book as a whole", counted in
+  the completion notice like any other.
+- **A failed Boox push is in the report.** The notice still says "saved locally,
+  push failed", and the report now keeps the reason.
+- **Warnings survive a failed export.** If writing the book fails, the warnings
+  gathered before that point are still written to the console instead of lost.
+- **Malformed image references are warned about.** An image whose path cannot be
+  decoded (a literal `%` in the name, for instance) was skipped silently; it now
+  produces a warning under the note that references it.
+- **One bad embed no longer costs the whole chapter.** An embed whose note cannot
+  be read or rendered becomes an "embedded content omitted" placeholder with a
+  warning that says why; the rest of the chapter exports as before. Until now the
+  entire chapter was replaced with "chapter failed to render".
+- **A diagram or expression that fails to rasterize stays in the book.** A
+  rasterizer that throws is treated the same as one that reports failure: the
+  inline SVG is kept and a warning is recorded. A rasterized image the book
+  builder rejects is one warning, not a lost chapter.
+- **A math expression MathJax cannot parse is reported as such,** with the error,
+  instead of being mislabelled as containing non-Latin characters.
+
 ## 1.9.0
 
 Footnotes now work as footnotes in the book, instead of arriving as ordinary links.

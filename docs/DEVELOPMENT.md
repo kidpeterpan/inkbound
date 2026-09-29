@@ -96,22 +96,40 @@ See the design doc's "Risks and honest limits" section
 (`docs/superpowers/specs/2026-07-29-production-grade-coverage-design.md`) for
 the full reasoning.
 
+**Covered by captured real markup (since 2026-09-29).** These used to be on
+the verified-by-hand list below. They are now exercised by
+`tests/real-render.test.ts` against `tests/fixtures/real-render/*.json`, which
+`npm run capture-real-render` produces from a live Obsidian (the same
+`obsidian … eval` + dataview `renderValue` route 011-footnote-semantics used
+for `footnotes-real.html`; the header of `scripts/capture-real-render.ts`
+lists the requirements). The pure passes run over the real markup and the
+test says what broke. After an Obsidian upgrade, re-run the capture, commit
+the fixture diff, and read that test's failures as the new manual checklist:
+
+- The `app://` image-`src` branch (images Obsidian serves through an
+  `app://` URL rather than a plain vault-relative path). The fixtures replace
+  the vault's absolute path with `/VAULT`, so they carry no home directory.
+- The `CHROME_SELECTORS` cleanup list in `src/render.ts`, as far as
+  `MarkdownRenderer` can show it: the code-block copy button is proven
+  present and removed. The frontmatter selectors never fire in production
+  (`stripFrontmatter` runs on the markdown first) and the collapse, pusher
+  and metadata ones come from the full reading VIEW, so those three stay
+  hand-checked safety nets.
+- Non-Latin tags (e.g. Thai-language `#tags`), for the inline-tag-to-plain-text
+  rewrite in `cleanupDom`.
+- Math placeholder survival: the real renderer preserves the
+  `<span data-inkbound-math>` inline-HTML placeholders the math pipeline
+  (005-latex-math) relies on, inline and display. The missing-placeholder
+  guard that degrades to a warning stays in place as a safety net.
+- The shape of an unresolved wikilink and of an unresolved note embed, which
+  `rewriteLinks` and `flattenEmbeds` key on.
+
 **Verified by hand (September 2026), on a real Boox and in real Obsidian
 rendering.** Each item below was at one point believed-correct-but-unchecked;
 all of them have since been exercised on the device and passed. The list stays
 as a record of what the manual check covers, so a change to any of these areas
 knows what to re-check:
 
-- The `app://` image-`src` branch (images Obsidian serves through an
-  `app://` URL rather than a plain vault-relative path).
-- The `CHROME_SELECTORS` cleanup list in `src/render.ts` (UI chrome elements
-  stripped from rendered HTML), confirmed against a live Obsidian render.
-- Non-Latin tags (e.g. Thai-language `#tags`), for the inline-tag-to-plain-text
-  rewrite in `cleanupDom`.
-- Math placeholder survival in real Obsidian: the real renderer preserves the
-  `<span data-inkbound-math>` inline-HTML placeholders the math pipeline
-  (005-latex-math) relies on. The missing-placeholder guard that degrades to a
-  warning stays in place as a safety net.
 - Thai font rendering on the actual Boox (006-thai-font): the embedded Noto
   Sans Thai renders compound vowels correctly in NeoReader.
 

@@ -1,0 +1,11 @@
+{
+  "name": "math-placeholders",
+  "covers": "the <span data-inkbound-math> placeholders protectMath writes before rendering survive the real renderer, inline and display",
+  "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
+  "obsidianVersion": "1.13.7",
+  "capturedAt": "2026-09-29",
+  "basePath": "/VAULT",
+  "sourceMarkdown": "Euler: $e^{i\\pi} + 1 = 0$ inline.\n\n$$\\int_0^1 x\\,dx$$\n\nAfter.\n",
+  "renderedMarkdown": "Euler: <span data-inkbound-math=\"0\"></span> inline.\n\n<span data-inkbound-math=\"1\"></span>\n\nAfter.\n",
+  "html": "<p dir=\"auto\">Euler: <span data-inkbound-math=\"0\"></span> inline.</p>\n<p dir=\"auto\"><span data-inkbound-math=\"1\"></span></p>\n<p dir=\"auto\">After.</p>"
+}

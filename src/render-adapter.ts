@@ -5,6 +5,7 @@
 // declarations only, no runtime JS (node_modules/obsidian/package.json has
 // "main": ""). MarkdownRenderer.render(...) and `instanceof TFile` are real
 // VALUE usages, not just type positions, so that import can't be elided —
+import { errorMessage } from "./error-text";
 // bundling it into render.ts would make Vite try to eagerly resolve the
 // "obsidian" package the moment anything in render.ts is loaded, which
 // breaks every pure-function test in tests/render.test.ts (verified: it
@@ -158,92 +159,115 @@ async function populateEmbeds(
       continue;
     }
 
-    const rawMd = await app.vault.cachedRead(dest);
-    let sectionMd: string;
-    if (target.heading || target.block) {
-      const mdLines = rawMd.split(/\r?\n/);
-      const cache = app.metadataCache.getFileCache(dest);
-      const loc = target.heading
-        ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
-        : findBlockRange(toSectionInfo(cache?.sections), toListItemInfo(cache?.listItems), target.block!);
-      if (!loc) {
-        wrapper.setAttribute("data-embed-reason", target.heading ? "heading-not-found" : "block-not-found");
-        continue;
+    // Item 2 of the 2026-09-29 review: everything from here to the end of
+    // the iteration can throw (a note that cannot be read, a renderer that
+    // rejects, a rasterizer that throws inside the recursive call). Before
+    // this try, any of those escaped renderUnitToChapter and cost the WHOLE
+    // host chapter; now it costs this one embed, which degrades through the
+    // same data-embed-reason path as an unresolved one. The snapshots let
+    // the catch undo what a partly-rendered embed already recorded: its
+    // div is removed, so the image hrefs and math placeholders stamped into
+    // it no longer exist and must not be counted.
+    const imagesBefore = images.length;
+    const spansBefore = mathSpans.length;
+    const indexBefore = index;
+    try {
+      const rawMd = await app.vault.cachedRead(dest);
+      let sectionMd: string;
+      if (target.heading || target.block) {
+        const mdLines = rawMd.split(/\r?\n/);
+        const cache = app.metadataCache.getFileCache(dest);
+        const loc = target.heading
+          ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
+          : findBlockRange(toSectionInfo(cache?.sections), toListItemInfo(cache?.listItems), target.block!);
+        if (!loc) {
+          wrapper.setAttribute("data-embed-reason", target.heading ? "heading-not-found" : "block-not-found");
+          continue;
+        }
+        // No stripFrontmatter here: frontmatter always sits before any heading/
+        // block worth embedding, so slicing against the RAW (frontmatter-
+        // included) line array — matching how the cache's own line numbers are
+        // computed — naturally excludes it without a separate strip step (see
+        // research.md's Unknown 2).
+        let sliced = mdLines.slice(loc.startLine, loc.endLine + 1).join("\n");
+        if (target.block) {
+          // Dedent ONLY a list-item range. A root-level section either starts at
+          // column 0 (no-op) or is an indented-style code block, whose leading
+          // whitespace is what makes it code — dedenting that would silently
+          // demote it to a paragraph (002 research R3a).
+          if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
+          sliced = stripBlockMarker(sliced, target.block);
+        }
+        sectionMd = stripDynamicBlocks(sliced);
+      } else {
+        sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
       }
-      // No stripFrontmatter here: frontmatter always sits before any heading/
-      // block worth embedding, so slicing against the RAW (frontmatter-
-      // included) line array — matching how the cache's own line numbers are
-      // computed — naturally excludes it without a separate strip step (see
-      // research.md's Unknown 2).
-      let sliced = mdLines.slice(loc.startLine, loc.endLine + 1).join("\n");
-      if (target.block) {
-        // Dedent ONLY a list-item range. A root-level section either starts at
-        // column 0 (no-op) or is an indented-style code block, whose leading
-        // whitespace is what makes it code — dedenting that would silently
-        // demote it to a paragraph (002 research R3a).
-        if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
-        sliced = stripBlockMarker(sliced, target.block);
+      // 011-footnote-semantics: an embed's slice is where a footnote most often loses its
+      // partner (a heading- or block-scoped embed copies the reference but not the definition
+      // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
+      // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
+      // Named for the embedded note (`dest.path`), whose source holds it.
+      warnings.push(...footnoteSourceWarnings(scanFootnoteSource(sectionMd), dest.path));
+
+      const ourDiv = wrapper.createDiv();
+      ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
+      // 005-latex-math: protect math in the embed's source the same way the
+      // host note is protected, with chapter-unique placeholder indices
+      // re-keyed against the shared counter (protectMath numbers from 0).
+      const protectedMd = protectMath(sectionMd);
+      let embedMd = protectedMd.md;
+      const offset = mathCounter.next;
+      if (offset > 0 && protectedMd.spans.length > 0) {
+        embedMd = embedMd.replace(/data-inkbound-math="(\d+)"/g, (_m, n: string) => {
+          return `data-inkbound-math="${Number(n) + offset}"`;
+        });
       }
-      sectionMd = stripDynamicBlocks(sliced);
-    } else {
-      sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
+      mathSpans.push(
+        ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
+      );
+      mathCounter.next += protectedMd.spans.length;
+      await MarkdownRenderer.render(app, embedMd, ourDiv, dest.path, component);
+
+      const childVisited = new Set(visited);
+      childVisited.add(dest.path);
+      const child = await populateEmbeds(
+        app,
+        component,
+        ourDiv,
+        dest.path,
+        hrefByPath,
+        basePath,
+        index,
+        childVisited,
+        mathCounter,
+        mathSpans
+      );
+      warnings.push(...child.warnings);
+      images.push(...child.images);
+      index += child.images.length;
+
+      const resolve = (linkpath: string): string | null => {
+        const f = app.metadataCache.getFirstLinkpathDest(linkpath, dest.path);
+        return f instanceof TFile ? f.path : null;
+      };
+      rewriteLinks(ourDiv, hrefByPath, resolve);
+      const found = rewriteImages(ourDiv, basePath, index, (w) =>
+        warnings.push(`${w} (referenced by ${dest.path})`)
+      );
+      // Tagged with the embed's own resolved path — a relative (non-app://)
+      // image reference inside this embed's content must resolve against the
+      // note it came from, not the host chapter (FR-006), and this is the only
+      // point that still has that context before it flows into main.ts.
+      images.push(...found.map((f) => ({ ...f, sourcePath: dest.path })));
+      index += found.length;
+    } catch (e) {
+      wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`)?.remove();
+      images.length = imagesBefore;
+      mathSpans.length = spansBefore;
+      index = indexBefore;
+      wrapper.setAttribute("data-embed-reason", "render-failed");
+      wrapper.setAttribute("data-embed-detail", errorMessage(e));
     }
-    // 011-footnote-semantics: an embed's slice is where a footnote most often loses its
-    // partner (a heading- or block-scoped embed copies the reference but not the definition
-    // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
-    // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
-    // Named for the embedded note (`dest.path`), whose source holds it.
-    warnings.push(...footnoteSourceWarnings(scanFootnoteSource(sectionMd), dest.path));
-
-    const ourDiv = wrapper.createDiv();
-    ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-    // 005-latex-math: protect math in the embed's source the same way the
-    // host note is protected, with chapter-unique placeholder indices
-    // re-keyed against the shared counter (protectMath numbers from 0).
-    const protectedMd = protectMath(sectionMd);
-    let embedMd = protectedMd.md;
-    const offset = mathCounter.next;
-    if (offset > 0 && protectedMd.spans.length > 0) {
-      embedMd = embedMd.replace(/data-inkbound-math="(\d+)"/g, (_m, n: string) => {
-        return `data-inkbound-math="${Number(n) + offset}"`;
-      });
-    }
-    mathSpans.push(
-      ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
-    );
-    mathCounter.next += protectedMd.spans.length;
-    await MarkdownRenderer.render(app, embedMd, ourDiv, dest.path, component);
-
-    const childVisited = new Set(visited);
-    childVisited.add(dest.path);
-    const child = await populateEmbeds(
-      app,
-      component,
-      ourDiv,
-      dest.path,
-      hrefByPath,
-      basePath,
-      index,
-      childVisited,
-      mathCounter,
-      mathSpans
-    );
-    warnings.push(...child.warnings);
-    images.push(...child.images);
-    index += child.images.length;
-
-    const resolve = (linkpath: string): string | null => {
-      const f = app.metadataCache.getFirstLinkpathDest(linkpath, dest.path);
-      return f instanceof TFile ? f.path : null;
-    };
-    warnings.push(...rewriteLinks(ourDiv, hrefByPath, resolve));
-    const found = rewriteImages(ourDiv, basePath, index);
-    // Tagged with the embed's own resolved path — a relative (non-app://)
-    // image reference inside this embed's content must resolve against the
-    // note it came from, not the host chapter (FR-006), and this is the only
-    // point that still has that context before it flows into main.ts.
-    images.push(...found.map((f) => ({ ...f, sourcePath: dest.path })));
-    index += found.length;
   }
 
   return { warnings, images };
@@ -331,8 +355,10 @@ export async function renderUnitToChapter(
     };
     // Only touches whatever's left — embed-internal links/images were
     // already finalized above and are skipped here (idempotence guards).
-    warnings.push(...rewriteLinks(el, hrefByPath, resolve));
-    const images = rewriteImages(el, basePath, startImageIndex + embedRewrite.images.length);
+    rewriteLinks(el, hrefByPath, resolve);
+    const images = rewriteImages(el, basePath, startImageIndex + embedRewrite.images.length, (w) =>
+      warnings.push(`${w} (referenced by ${sourcePath})`)
+    );
     // Composes with rewriteImages's numbering: mermaid PNGs continue where
     // the regular images left off, so run this AFTER rewriteImages and offset
     // by how many it already stamped.
