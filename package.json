@@ -15,6 +15,7 @@
     "check-review-safe": "node scripts/check-review-safe.mjs",
     "check-export-works": "tsx scripts/check-export-works.ts",
     "capture-real-render": "tsx scripts/capture-real-render.ts",
+    "check-obsidian-drift": "tsx scripts/check-obsidian-drift.ts",
     "dev": "node esbuild.config.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

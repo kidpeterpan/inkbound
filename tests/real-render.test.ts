@@ -134,6 +134,29 @@ describe("real Obsidian markup: chrome", () => {
   });
 });
 
+describe("real Obsidian markup: an inline base block", () => {
+  it("really does put the Bases toolbar into a detached render", () => {
+    // If this fails after a re-capture, Obsidian stopped emitting the toolbar
+    // (or renamed the wrapper class) and omitBasesBlocks may be dead code.
+    const raw = mount(loadFixture("base-block").html);
+    expect(raw.querySelector(".block-language-base")).not.toBeNull();
+    expect(raw.querySelector(".block-language-base input")).not.toBeNull();
+    expect(raw.querySelector(".block-language-base svg")).not.toBeNull();
+  });
+
+  it("becomes one omission marker and one warning, with none of the toolbar left in the book", async () => {
+    const { el, warnings, xhtml } = await runPurePipeline(loadFixture("base-block"));
+    expect(el.textContent).toContain("Before.");
+    expect(el.textContent).toContain("After.");
+    expect(el.textContent).toContain("[Bases view omitted: inline base block]");
+    expect(el.textContent).not.toMatch(/Sort|Filter|Properties|Search|results/);
+    expect(xhtml).not.toMatch(/bases-|<input|<svg/);
+    expect(warnings).toEqual([
+      "bases view omitted (interactive Bases have no EPUB equivalent): inline base block",
+    ]);
+  });
+});
+
 describe("real Obsidian markup: tags", () => {
   it("renders #tags as a.tag without data-href, which rewriteLinks would otherwise miss", () => {
     const raw = mount(loadFixture("tags").html);
