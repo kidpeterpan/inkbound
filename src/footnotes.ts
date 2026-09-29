@@ -245,7 +245,7 @@ function describeNote(note: Note): string {
 }
 
 // Gathers every note in the chapter into ONE section of EPUB 3 footnotes and rewrites
-// each marker to point at it. Returns warnings, like rewriteLinks does.
+// each marker to point at it. Returns warnings, like rasterizeMermaidDiagrams does.
 //
 // Leaves the DOM untouched — and returns [] — when there is no footnote structure, and
 // when the chapter has already been processed, so a footnote-free chapter's serialization

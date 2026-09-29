@@ -1,0 +1,11 @@
+{
+  "name": "links-and-embeds",
+  "covers": "an unresolved wikilink (rewriteLinks) and an unresolved note embed (flattenEmbeds' placeholder path)",
+  "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
+  "obsidianVersion": "1.13.7",
+  "capturedAt": "2026-09-29",
+  "basePath": "/VAULT",
+  "sourceMarkdown": "See [[No Such Note Zzz]] and:\n\n![[No Such Embed Zzz]]\n\nAfter.\n",
+  "renderedMarkdown": "See [[No Such Note Zzz]] and:\n\n![[No Such Embed Zzz]]\n\nAfter.\n",
+  "html": "<p dir=\"auto\">See <a data-href=\"No Such Note Zzz\" href=\"No Such Note Zzz\" class=\"internal-link\" target=\"_blank\" rel=\"noopener nofollow\">No Such Note Zzz</a> and:</p>\n<p dir=\"auto\"><span alt=\"No Such Embed Zzz\" src=\"No Such Embed Zzz\" class=\"internal-embed is-loaded file-embed mod-empty\">“No Such Embed Zzz” is not created yet. Click to create.</span></p>\n<p dir=\"auto\">After.</p>"
+}

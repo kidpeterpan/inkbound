@@ -917,16 +917,14 @@ describe("rewriteLinks", () => {
   it("links inside the export set become chapter hrefs", () => {
     const el = div('<a class="internal-link" data-href="Chapter Two" href="Chapter Two">next</a>');
     const map = new Map([["book/02_two.md", "text/chapter_002.xhtml"]]);
-    const warnings = rewriteLinks(el, map, resolve);
+    rewriteLinks(el, map, resolve);
     expect(el.querySelector("a")?.getAttribute("href")).toBe("chapter_002.xhtml");
-    expect(warnings).toEqual([]);
   });
   it("links outside the set degrade to spans keeping text", () => {
     const el = div('<a class="internal-link" data-href="Elsewhere" href="Elsewhere">see this</a>');
-    const warnings = rewriteLinks(el, new Map(), resolve);
+    rewriteLinks(el, new Map(), resolve);
     expect(el.querySelector("a")).toBeNull();
     expect(el.textContent).toBe("see this");
-    expect(warnings.length).toBe(0);
   });
   it("external links are left untouched", () => {
     const el = div('<a href="https://example.com">ext</a>');
@@ -1526,5 +1524,40 @@ describe("collectHeadingToc and footnotes (011)", () => {
       { level: 2, text: "บทที่ 1", id: "บทที่-1" },
       { level: 3, text: "a & b?", id: "a-b" },
     ]);
+  });
+});
+
+describe("rewriteImages: references that cannot be decoded", () => {
+  it("reports a malformed src through the sink and leaves the img untouched", () => {
+    const el = div('<img src="bad%zz.png"><img src="fine.png">');
+    const warned: string[] = [];
+    const found = rewriteImages(el, "", 0, (m) => warned.push(m));
+    expect(warned).toEqual(["malformed image reference skipped: bad%zz.png"]);
+    expect(el.querySelectorAll("img")[0].getAttribute("src")).toBe("bad%zz.png");
+    expect(found).toEqual([{ vaultPath: "fine.png", newHref: "../images/img_001.png" }]);
+  });
+  it("reports a malformed app:// src the same way", () => {
+    const el = div('<img src="app://abc/Users/pan/vault/bad%zz.png">');
+    const warned: string[] = [];
+    rewriteImages(el, "/Users/pan/vault", 0, (m) => warned.push(m));
+    expect(warned).toEqual(["malformed image reference skipped: app://abc/Users/pan/vault/bad%zz.png"]);
+  });
+});
+
+describe("rasterizeMermaidDiagrams: a rasterizer that throws", () => {
+  afterEach(() => setSvgRasterizer(null));
+  it("is treated like one that returns null — inline SVG kept, one warning", async () => {
+    setSvgRasterizer(async () => {
+      throw new Error("canvas exploded");
+    });
+    const root = div(
+      '<div class="mermaid"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg></div>'
+    );
+    const r = await rasterizeMermaidDiagrams(root, 0);
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      "mermaid rasterization unavailable — kept inline SVG (may not render on e-ink)",
+    ]);
+    expect(root.querySelector("svg")).not.toBeNull();
   });
 });

@@ -261,3 +261,33 @@ describe("renderMath", () => {
     expect(r.images.map((i) => i.newHref)).toEqual(["../images/img_010.png", "../images/img_011.png"]);
   });
 });
+
+describe("renderMath: failures inside one expression stay inside it", () => {
+  afterEach(() => setSvgRasterizer(null));
+  it("a rasterizer that throws is treated like one that returns null", async () => {
+    setSvgRasterizer(async () => {
+      throw new Error("canvas exploded");
+    });
+    const root = div('<span data-inkbound-math="0"></span>');
+    const r = await renderMath(root, [{ tex: "x", display: false, index: 0 }], 0, "Note.md");
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toEqual([
+      "math rasterization unavailable — kept inline SVG (may not render on e-ink)",
+    ]);
+    expect(root.querySelector("svg")).not.toBeNull();
+  });
+  it("an expression MathJax itself throws on is reported as unrenderable, not as non-Latin", async () => {
+    // 5000 nested braces overflow MathJax's parser (verified against
+    // mathjax-full 3.2.1); renderMathToSvg's catch returns an empty svg, which
+    // used to be indistinguishable from the non-Latin charset case.
+    const tex = "{".repeat(5000) + "x" + "}".repeat(5000);
+    const root = div('<span data-inkbound-math="0"></span>');
+    const r = await renderMath(root, [{ tex, display: false, index: 0 }], 0, "Note.md");
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toHaveLength(1);
+    expect(r.warnings[0]).toContain("math could not be rendered");
+    expect(r.warnings[0]).not.toContain("non-Latin");
+    expect(r.warnings[0]).toContain("Note.md");
+    expect(root.textContent).toBe(`$${tex}$`);
+  });
+});
