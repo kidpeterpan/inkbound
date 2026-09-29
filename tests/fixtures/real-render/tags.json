@@ -1,0 +1,11 @@
+{
+  "name": "tags",
+  "covers": "inline #tags, Latin, nested and Thai, for the tag-to-plain-text rewrite in cleanupDom",
+  "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
+  "obsidianVersion": "1.13.7",
+  "capturedAt": "2026-09-29",
+  "basePath": "/VAULT",
+  "sourceMarkdown": "Tagged #alpha and #alpha/nested and Thai #แท็ก here.\n",
+  "renderedMarkdown": "Tagged #alpha and #alpha/nested and Thai #แท็ก here.\n",
+  "html": "Tagged <a href=\"#alpha\" class=\"tag\" target=\"_blank\" rel=\"noopener nofollow\">#alpha</a> and <a href=\"#alpha/nested\" class=\"tag\" target=\"_blank\" rel=\"noopener nofollow\">#alpha/nested</a> and Thai <a href=\"#แท็ก\" class=\"tag\" target=\"_blank\" rel=\"noopener nofollow\">#แท็ก</a> here."
+}

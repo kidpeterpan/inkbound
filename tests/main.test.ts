@@ -1829,7 +1829,7 @@ describe("failure paths", () => {
   });
 
   it("a push that rejects with a non-Error value still reports a readable failure", async () => {
-    // Review finding: `e instanceof Error ? e.message : String(e)` (src/main.ts:232)
+    // Review finding: `errorMessage(e)` in src/main.ts (the push catch in runExport)
     // has a real, reachable non-Error branch — the throw site is this
     // suite's OWN injected network fake. `setRequestUrlImpl` rejecting with a
     // bare string propagates unchanged through obsidianHttp (no try/catch
@@ -2680,5 +2680,135 @@ describe("footnote problems degrade, they do not fail the export (011 US4)", () 
     expect(assertChapterFootnoteInvariants(await epub.chapter(3))).toEqual({ markers: 1, notes: 1 });
     expect(successNotices()).toHaveLength(1);
     expect(errors).toEqual([]);
+  });
+});
+
+// Item 1 of the 2026-09-29 review: every failure the export survives must
+// reach the same collector the report and the notice count are fed from.
+// Before this, a cover failure, a push failure and the warnings gathered
+// before a failed write each took a private route (console only, notice
+// text only, or nowhere) — invisible to a mobile reader, who has no console.
+describe("every survivable failure reaches the report", () => {
+  const notFound = async () => ({
+    status: 404,
+    headers: {},
+    arrayBuffer: new ArrayBuffer(0),
+    text: "",
+    json: null,
+  });
+
+  it("a failed remote cover download is a book-level warning in the report", async () => {
+    const { app, root } = await buildVault({
+      "cover_404.md": ["---", 'cover: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    setRequestUrlImpl(notFound);
+    await makePlugin(app).exportSingle(tfile(root, "cover_404.md"));
+
+    expect(successNotices()[0]).toContain("1 warning");
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual([BOOK_GROUP_LABEL]);
+    expect(openedReports()[0].text).toContain(
+      "cover download failed: https://example.com/cover.jpg (status 404)"
+    );
+  });
+
+  it("a missing local cover is a book-level warning in the report", async () => {
+    const { app, root } = await buildVault({
+      "cover_missing.md": ["---", "cover: missing.png", "---", "", "Body.", ""].join("\n"),
+    });
+    await makePlugin(app).exportSingle(tfile(root, "cover_missing.md"));
+
+    expect(successNotices()[0]).toContain("1 warning");
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual([BOOK_GROUP_LABEL]);
+    expect(openedReports()[0].text).toContain("cover not found: missing.png (cover: missing.png)");
+  });
+
+  it("a failed Boox push is a book-level warning in the report, and the notice still says so", async () => {
+    const { app, root } = await buildVault({ "push_500.md": "Body.\n" });
+    setRequestUrlImpl(async () => ({
+      status: 500,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    }));
+    await makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox:8085" }).exportSingle(
+      tfile(root, "push_500.md")
+    );
+
+    const notice = successNotices()[0];
+    expect(notice).toMatch(/saved locally, push failed/);
+    expect(notice).toContain("1 warning");
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual([BOOK_GROUP_LABEL]);
+    expect(openedReports()[0].text).toMatch(/push to Boox failed: .*500/);
+  });
+
+  it("warnings collected before a failed write are still written to the console", async () => {
+    const { app, root } = await buildVault({ "Book/Ch1.md": "# Ch1\n\n![missing](nope.png)\n" });
+    const buildSpy = vi.spyOn(EpubBuilder.prototype, "build").mockRejectedValueOnce(new Error("disk full"));
+
+    await makePlugin(app).exportSingle(tfile(root, "Book/Ch1.md"));
+
+    expect(NOTICES).toContain("EPUB export failed: disk full");
+    expect(warnings).toEqual(["[inkbound] missing image: nope.png (referenced by Book/Ch1.md)"]);
+    buildSpy.mockRestore();
+  });
+
+  it("an image reference that cannot be decoded is a warning under its note, not a silent skip", async () => {
+    const { app, root } = await buildVault({ "Book/Ch1.md": "# Ch1\n\n![bad](bad%zz.png)\n" });
+    await makePlugin(app).exportSingle(tfile(root, "Book/Ch1.md"));
+
+    expect(successNotices()[0]).toContain("1 warning");
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual(["Book/Ch1.md"]);
+    expect(openedReports()[0].text).toContain("malformed image reference skipped: bad%zz.png");
+  });
+});
+
+// Item 2 of the 2026-09-29 review: a failure inside ONE embed, diagram or
+// expression must cost that one thing, not the whole chapter. Before this,
+// an embed whose note could not be read threw out of renderUnitToChapter and
+// the chapter loop replaced the entire chapter with "[chapter failed to render]".
+describe("one bad embed costs one placeholder, not the chapter", () => {
+  it("an embed whose note cannot be read becomes a placeholder and the host chapter survives", async () => {
+    const { app, root } = await buildVault({
+      "Host.md": "# Host\n\n![[Inner]]\n\nafter the embed\n",
+      "Inner.md": "Inner body.\n",
+    });
+    failFor(app.vault, "cachedRead", "Inner.md", new Error("disk error"));
+
+    await makePlugin(app).exportSingle(tfile(root, "Host.md"));
+
+    const epub = await readEpub("host.epub");
+    const body = await epub.chapter(1);
+    expect(body).toContain("after the embed");
+    expect(body).toContain("[embedded content omitted: Inner]");
+    expect(body).not.toContain("chapter failed to render");
+    expect(warnings).toEqual([
+      "[inkbound] embed could not be rendered: Inner — disk error (referenced by Host.md)",
+    ]);
+  });
+
+  it("a rasterized diagram the builder rejects is one warning, and the chapter is kept", async () => {
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([9, 9]), width: 10, height: 10 }));
+    const { app, root } = await buildVault({
+      "with_diagram.md": "# Diagram\n\ntext before\n\n```mermaid\ngraph TD; A-->B;\n```\n",
+    });
+    const addSpy = vi.spyOn(EpubBuilder.prototype, "addAsset").mockImplementationOnce(() => {
+      throw new Error("zip full");
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "with_diagram.md"));
+
+    const epub = await readEpub("with_diagram.epub");
+    const body = await epub.chapter(1);
+    expect(body).toContain("text before");
+    expect(body).not.toContain("chapter failed to render");
+    expect(warnings).toEqual([
+      "[inkbound] image could not be added: ../images/img_001.png — zip full (referenced by with_diagram.md)",
+    ]);
+    addSpy.mockRestore();
   });
 });

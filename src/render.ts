@@ -30,7 +30,7 @@
 // (no-explicit-any, no-unused-vars, ...) for no benefit. This comment is the
 // intentional substitute.
 
-const CHROME_SELECTORS = [
+export const CHROME_SELECTORS = [
   ".edit-block-button",
   ".copy-code-button",
   ".collapse-indicator",
@@ -500,8 +500,10 @@ export function stripBlockMarker(md: string, blockId: string): string {
 // attempts real resolution (findHeadingSection/findSupportedBlock above), so
 // nothing stamps that reason anymore — see spec.md's Scoped Note Embeds
 // feature and its FR-005/FR-006.
-function embedOmissionMessage(reason: string | null, name: string): string {
+function embedOmissionMessage(reason: string | null, name: string, detail: string | null = null): string {
   switch (reason) {
+    case "render-failed":
+      return `embed could not be rendered: ${name}${detail ? ` — ${detail}` : ""}`;
     case "circular":
       return `circular embed skipped: ${name}`;
     case "unsupported-type":
@@ -619,7 +621,7 @@ export function flattenEmbeds(root: HTMLElement): string[] {
     } else {
       const reason = wrapper.getAttribute("data-embed-reason");
       target.replaceWith(embedOmissionPlaceholder(reason, name));
-      warnings.push(embedOmissionMessage(reason, name));
+      warnings.push(embedOmissionMessage(reason, name, wrapper.getAttribute("data-embed-detail")));
     }
   }
 
@@ -671,8 +673,7 @@ export function rewriteLinks(
   root: HTMLElement,
   hrefByPath: Map<string, string>,
   resolve: (linkpath: string) => string | null
-): string[] {
-  const warnings: string[] = [];
+): void {
   root.querySelectorAll("a").forEach((a) => {
     const dataHref = a.getAttribute("data-href");
     const isInternal = a.classList.contains("internal-link") || dataHref !== null;
@@ -692,13 +693,13 @@ export function rewriteLinks(
       a.replaceWith(span);
     }
   });
-  return warnings;
 }
 
 export function rewriteImages(
   root: HTMLElement,
   basePath: string,
-  startIndex = 0
+  startIndex = 0,
+  warn?: (message: string) => void
 ): { vaultPath: string; newHref: string }[] {
   const found: { vaultPath: string; newHref: string }[] = [];
   root.querySelectorAll("img").forEach((img) => {
@@ -724,7 +725,9 @@ export function rewriteImages(
       try {
         decoded = decodeURIComponent(noQueryOrFragment);
       } catch {
-        // Malformed URI (e.g., literal % in filename): skip this image.
+        // Malformed URI (e.g., literal % in filename): skip this image, but
+        // say so — the src stays as it was, which no reader can open.
+        warn?.(`malformed image reference skipped: ${src}`);
         return;
       }
       // 008-mobile-support — INVARIANT: the empty check is NOT redundant with
@@ -754,7 +757,8 @@ export function rewriteImages(
       try {
         vaultPath = decodeURIComponent(noQueryOrFragment);
       } catch {
-        // Malformed URI (e.g., literal % in filename): skip this image.
+        // Same as the app:// branch above.
+        warn?.(`malformed image reference skipped: ${src}`);
         return;
       }
     }
@@ -877,6 +881,22 @@ async function defaultRasterizeSvg(
 let svgRasterizer: SvgRasterizer = defaultRasterizeSvg;
 
 /** Install a deterministic rasterizer for tests. `null` restores the default (real) one. */
+/**
+ * The contract is "null on failure", but an injected rasterizer (or a browser
+ * API under it) may throw instead. Either way the caller keeps the inline SVG
+ * and warns — a diagram must never cost the chapter it sits in.
+ */
+export async function rasterizeOrNull(
+  rasterize: SvgRasterizer,
+  svg: SVGSVGElement
+): Promise<{ bytes: Uint8Array; width: number; height: number } | null> {
+  try {
+    return await rasterize(svg);
+  } catch {
+    return null;
+  }
+}
+
 export function setSvgRasterizer(fn: SvgRasterizer | null): void {
   svgRasterizer = fn ?? defaultRasterizeSvg;
 }
@@ -944,7 +964,7 @@ export async function rasterizeMermaidDiagrams(
     ) as SVGSVGElement | null;
     if (!svg) continue;
 
-    const result = await svgRasterizer(svg);
+    const result = await rasterizeOrNull(svgRasterizer, svg);
     if (result) {
       const index = startIndex + images.length + 1;
       const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;

@@ -1,0 +1,11 @@
+{
+  "name": "app-image",
+  "covers": "the app:// image src branch of rewriteImages, for a wikilink embed and a markdown image",
+  "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
+  "obsidianVersion": "1.13.7",
+  "capturedAt": "2026-09-29",
+  "basePath": "/VAULT",
+  "sourceMarkdown": "![[05. assets/week_aug_17-1786959135199.png]]\n\n![caption](05.%20assets/week_aug_17-1786959135199.png)\n",
+  "renderedMarkdown": "![[05. assets/week_aug_17-1786959135199.png]]\n\n![caption](05.%20assets/week_aug_17-1786959135199.png)\n",
+  "html": "<p dir=\"auto\"><span alt=\"05. assets/week_aug_17-1786959135199.png\" src=\"05. assets/week_aug_17-1786959135199.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"05. assets/week_aug_17-1786959135199.png\" src=\"app://433ca917ba6bac8b74f2dd73d31de69b2431/VAULT/05.%20assets/week_aug_17-1786959135199.png?1786959135205\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"05. assets/week_aug_17-1786959135199.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://433ca917ba6bac8b74f2dd73d31de69b2431/VAULT/05.%20assets/week_aug_17-1786959135199.png?1786959135205\"></span></p>"
+}

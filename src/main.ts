@@ -35,6 +35,7 @@ import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
 import { createWarningCollector, buildReport, type ExportReport } from "./report";
 import { openExportReport } from "./report-view";
+import { errorMessage } from "./error-text";
 
 interface Job {
   meta: ExportMeta;
@@ -186,7 +187,11 @@ export default class EpubExportPlugin extends Plugin {
   // in the metadata note's source (fallback, FR-003). Every failure mode
   // degrades to a coverless export with a warning — never fails an export
   // over artwork (spec + constitution II).
-  private async metaFromNote(file: TFile | null, fallbackBasename: string): Promise<ExportMeta> {
+  private async metaFromNote(
+    file: TFile | null,
+    fallbackBasename: string,
+    warn: (message: string) => void
+  ): Promise<ExportMeta> {
     const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
     const resolved = resolveMeta(fm, file ? file.basename : fallbackBasename, this.metaDefaults());
     const meta: ExportMeta = {
@@ -197,11 +202,11 @@ export default class EpubExportPlugin extends Plugin {
 
     const coverValue = parseCoverValue(fm?.cover);
     if (coverValue?.kind === "url") {
-      await this.downloadCover(meta, coverValue.url);
+      await this.downloadCover(meta, coverValue.url, warn);
     } else if (coverValue?.kind === "path") {
-      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`);
+      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`, warn);
     } else if (resolved.coverUrl) {
-      await this.downloadCover(meta, resolved.coverUrl);
+      await this.downloadCover(meta, resolved.coverUrl, warn);
     } else if (file) {
       // No cover frontmatter at all — fall back to the first image embed of
       // the metadata note itself (code-fence-aware scan in cover.ts). Keep
@@ -214,7 +219,7 @@ export default class EpubExportPlugin extends Plugin {
           // embed is a gif or a stale link but whose second is a fine png
           // gets a cover with no noise. Warnings are reserved for the
           // explicitly declared `cover:` (US4).
-          if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, true)) break;
+          if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, null)) break;
         }
       }
     }
@@ -223,7 +228,7 @@ export default class EpubExportPlugin extends Plugin {
 
   // Remote cover: fetch and sniff png/webp from the content-type; anything
   // else is treated as jpeg (existing coverUrl behavior, extended with webp).
-  private async downloadCover(meta: ExportMeta, url: string): Promise<void> {
+  private async downloadCover(meta: ExportMeta, url: string, warn: (message: string) => void): Promise<void> {
     try {
       const res = await requestUrl({ url, throw: false });
       if (res.status === 200) {
@@ -231,10 +236,10 @@ export default class EpubExportPlugin extends Plugin {
         meta.coverBytes = new Uint8Array(res.arrayBuffer);
         meta.coverExt = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
       } else {
-        console.warn("[inkbound] cover download failed", url, `status ${res.status}`);
+        warn(`cover download failed: ${url} (status ${res.status})`);
       }
     } catch (e) {
-      console.warn("[inkbound] cover download failed", url, e);
+      warn(`cover download failed: ${url} (${errorMessage(e)})`);
     }
   }
 
@@ -242,13 +247,14 @@ export default class EpubExportPlugin extends Plugin {
   // Obsidian's link resolver for bare filenames / note-relative paths),
   // accept only the cover allowlist, and read the bytes. Returns whether a
   // cover was attached, so the fallback loop can stop at the first usable
-  // image. Warnings name the reference for every failure mode (FR-006).
+  // image. Warnings name the reference for every failure mode (FR-006); a
+  // null sink means the caller wants silence (the first-image fallback scan).
   private async embedLocalCover(
     meta: ExportMeta,
     target: string,
     sourceFile: TFile | null,
     ref: string,
-    silent = false
+    warn: ((message: string) => void) | null
   ): Promise<boolean> {
     let af: TAbstractFile | null = null;
     if (sourceFile) {
@@ -258,12 +264,12 @@ export default class EpubExportPlugin extends Plugin {
       }
     }
     if (!(af instanceof TFile)) {
-      if (!silent) console.warn(`[inkbound] cover not found: ${target} (${ref})`);
+      warn?.(`cover not found: ${target} (${ref})`);
       return false;
     }
     const ext = af.extension.toLowerCase();
     if (!isSupportedCoverExt(ext)) {
-      if (!silent) console.warn(`[inkbound] unsupported cover type: ${target} (${ref})`);
+      warn?.(`unsupported cover type: ${target} (${ref})`);
       return false;
     }
     try {
@@ -273,13 +279,15 @@ export default class EpubExportPlugin extends Plugin {
       meta.coverExt = ext === "jpeg" ? "jpg" : (ext as "jpg" | "png" | "webp");
       return true;
     } catch (e) {
-      if (!silent) console.warn("[inkbound] cover read failed", target, e);
+      warn?.(`cover read failed: ${target} (${errorMessage(e)})`);
       return false;
     }
   }
 
   async exportSingle(file: TFile) {
-    await this.runExport({ meta: await this.metaFromNote(file, file.basename), files: [file] });
+    const warnings: string[] = [];
+    const meta = await this.metaFromNote(file, file.basename, (m) => warnings.push(m));
+    await this.runExport({ meta, files: [file], warnings });
   }
 
   async exportLinked(file: TFile) {
@@ -287,7 +295,9 @@ export default class EpubExportPlugin extends Plugin {
     const files = paths
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
-    await this.runExport({ meta: await this.metaFromNote(file, file.basename), files });
+    const warnings: string[] = [];
+    const meta = await this.metaFromNote(file, file.basename, (m) => warnings.push(m));
+    await this.runExport({ meta, files, warnings });
   }
 
   // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
@@ -392,16 +402,14 @@ export default class EpubExportPlugin extends Plugin {
     } catch (e) {
       // Constitution II / FR-016: ordering is structure, not content — a bug
       // here degrades to the pre-009 flat order and says so, never aborts.
-      warnings.push(
-        `chapter ordering fell back to filename order: ${e instanceof Error ? e.message : String(e)}`
-      );
+      warnings.push(`chapter ordering fell back to filename order: ${errorMessage(e)}`);
       if (files.length === 0) {
         new Notice("Folder has no Markdown notes.");
         return;
       }
     }
 
-    const meta = await this.metaFromNote(legacy.index, folder.name);
+    const meta = await this.metaFromNote(legacy.index, folder.name, (m) => warnings.push(m));
     await this.runExport({ meta, files, nav, warnings });
   }
 
@@ -505,14 +513,16 @@ export default class EpubExportPlugin extends Plugin {
           // already burned into r.xhtmlBody regardless of what happens next.
           imageCount += r.images.length;
           for (const img of r.images) {
-            if (img.bytes) {
-              // Rasterized mermaid diagram: bytes were produced directly by
-              // renderUnitToChapter, not read from a vault file — skip vault
-              // resolution entirely.
-              builder.addAsset(img.newHref.replace(/^\.\.\//, ""), img.bytes, img.mediaType!);
-              continue;
-            }
             try {
+              if (img.bytes) {
+                // Rasterized mermaid diagram or math: bytes were produced
+                // directly by renderUnitToChapter, not read from a vault file
+                // — skip vault resolution entirely. Inside the try so that a
+                // builder that rejects the asset costs one warning, not the
+                // chapter (the href is already burned into the HTML either way).
+                builder.addAsset(img.newHref.replace(/^\.\.\//, ""), img.bytes, img.mediaType!);
+                continue;
+              }
               let af = this.app.vault.getAbstractFileByPath(img.vaultPath!);
               if (!(af instanceof TFile)) {
                 // Not a vault-rooted path (or app://-derived path didn't match
@@ -538,11 +548,15 @@ export default class EpubExportPlugin extends Plugin {
               }
               const bytes = new Uint8Array(await this.app.vault.readBinary(af));
               builder.addAsset(img.newHref.replace(/^\.\.\//, ""), bytes, mediaType);
-            } catch {
+            } catch (e) {
               // Missing image: export continues (spec's error table) — this
               // one image's href stays dangling in the chapter HTML, but the
               // chapter itself is still added below.
-              warnForChapter(`missing image: ${img.vaultPath} (referenced by ${file.path})`);
+              warnForChapter(
+                img.bytes
+                  ? `image could not be added: ${img.newHref} — ${errorMessage(e)} (referenced by ${file.path})`
+                  : `missing image: ${img.vaultPath} (referenced by ${file.path})`
+              );
             }
           }
           builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody), r.toc);
@@ -575,7 +589,7 @@ export default class EpubExportPlugin extends Plugin {
             collector.forBook()("Thai font unavailable — exporting without embedded font");
           }
         } catch (e) {
-          collector.forBook()(`Thai font embedding skipped: ${e instanceof Error ? e.message : String(e)}`);
+          collector.forBook()(`Thai font embedding skipped: ${errorMessage(e)}`);
         }
       }
 
@@ -587,9 +601,7 @@ export default class EpubExportPlugin extends Plugin {
         try {
           builder.setNavTree(job.nav);
         } catch (e) {
-          collector.forBook()(
-            `table of contents fell back to a flat list: ${e instanceof Error ? e.message : String(e)}`
-          );
+          collector.forBook()(`table of contents fell back to a flat list: ${errorMessage(e)}`);
         }
       }
 
@@ -618,12 +630,12 @@ export default class EpubExportPlugin extends Plugin {
           await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
           pushMsg = " and pushed to Boox ✓";
         } catch (e) {
-          pushMsg = ` — saved locally, push failed: ${e instanceof Error ? e.message : String(e)}`;
+          const msg = errorMessage(e);
+          pushMsg = ` — saved locally, push failed: ${msg}`;
+          collector.forBook()(`push to Boox failed: ${msg}`);
         }
       }
-      const warnings = collector.messages();
-      warnings.forEach((w) => console.warn("[inkbound]", w));
-      const warnMsg = summarizeWarnings(warnings);
+      const warnMsg = summarizeWarnings(collector.messages());
       const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
 
       // 010-export-report. Built and wired in its own try: everything above
@@ -670,8 +682,13 @@ export default class EpubExportPlugin extends Plugin {
       }
     } catch (e) {
       console.error("[inkbound] export failed", e);
-      new Notice(`EPUB export failed: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(`EPUB export failed: ${errorMessage(e)}`);
     } finally {
+      // In `finally`, not on the success path: a write that fails must not
+      // take the warnings gathered before it down with it — on mobile the
+      // console is all a failed export leaves behind for the developer, and
+      // scripts/local-export.ts parses these lines (FR-020).
+      collector.messages().forEach((w) => console.warn("[inkbound]", w));
       notice?.hide();
     }
   }
