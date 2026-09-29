@@ -43,14 +43,18 @@ jobs:
           # Keeps a copy of the book the shipped bundle just exported — the
           # script's own temp dir is gone by the time the next step runs.
           INKBOUND_KEEP_EPUB: ${{ runner.temp }}/exported.epub
+          # 011-footnote-semantics: the second book — every footnote form and the
+          # degradation cases, exported by the same shipped bundle.
+          INKBOUND_KEEP_FOOTNOTE_EPUB: ${{ runner.temp }}/footnotes.epub
 
       # EPUB 3 spec validation. This is the only gate whose pass/fail criteria
       # come from OUTSIDE this repo: every gate above asserts what this code
       # believes a book should be, and agrees with itself by construction.
       # epubcheck is what a reader's parser would say. It runs over BOTH the
       # hand-built sample (edge cases: nested nav Parts, Thai fragment ids,
-      # MathJax SVG, embedded fonts) and the book the shipped main.js just
-      # exported from the fixture vault.
+      # MathJax SVG, embedded fonts) and the two books the shipped main.js just
+      # exported from the fixture vault — the second is the footnote book, where
+      # the spec's rules on note references, notes and roles are exercised.
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -64,7 +68,7 @@ jobs:
           # The jar resolves its dependencies from a sibling lib/ through its
           # manifest classpath, so it is used where it was unpacked.
           echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-$EPUBCHECK_VERSION/epubcheck.jar" >> "$GITHUB_ENV"
-      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub"
+      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub" "$RUNNER_TEMP/footnotes.epub"
 
       # A spec violation is far easier to diagnose with the book in hand than
       # from a log line naming a file that no longer exists.
@@ -72,7 +76,9 @@ jobs:
         if: failure()
         with:
           name: exported-epub
-          path: ${{ runner.temp }}/exported.epub
+          path: |
+            ${{ runner.temp }}/exported.epub
+            ${{ runner.temp }}/footnotes.epub
           if-no-files-found: ignore
 
       - run: npm run version:check

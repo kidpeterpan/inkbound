@@ -3,6 +3,32 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.9.0
+
+Footnotes now work as footnotes in the book, instead of arriving as ordinary links.
+
+- **Real EPUB footnotes.** `[^1]`, `[^name]` and inline `^[…]` notes are marked up
+  as note references and notes, so an e-reader that shows footnotes as pop-ups can
+  show them that way. On any other reader a marker is still an ordinary link and
+  the note ends with an arrow that brings you back. Whether a particular reader
+  shows a pop-up is that reader's choice.
+- **One numbered notes section per chapter.** A chapter's notes are gathered at its
+  end and numbered in the order you meet them — including notes that arrive through
+  embedded notes, which used to each restart at 1. A note referred to more than
+  once gets a back-arrow for each reference (`↩︎1`, `↩︎2`).
+- **Footnote books are reproducible.** Obsidian gives every footnote a random
+  identifier on every render, so the same note used to export to different bytes
+  each time. Identifiers now come from position alone.
+- **Broken footnotes are reported.** A reference with no note, a note nothing refers
+  to, and a scoped embed (`![[Note#Heading]]`) that keeps a reference but loses its
+  note each add a warning to the export report, naming the note. The book matches
+  Obsidian's own reading view: the label shows as plain text, and an unused note is
+  left out.
+- **A footnote in a heading no longer leaks.** Its number used to end up in the
+  table-of-contents entry, and `[^x]` in the chapter's title.
+- **Books without footnotes are unchanged.** Every part of them is what 1.8.1
+  produced, apart from the package identifier and date that every export sets anew.
+
 ## 1.8.1
 
 An export that had to leave something out now tells you what, inside Obsidian,

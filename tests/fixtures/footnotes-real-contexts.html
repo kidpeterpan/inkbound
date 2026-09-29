@@ -1,0 +1,73 @@
+<!--
+  REAL Obsidian footnote markup, second capture — contexts the first capture lacked.
+  Ground truth for 011-footnote-semantics FR-003 / FR-030.
+
+  Captured 2026-09-29 from a live Obsidian 1.13.7 (macOS), same method as
+  footnotes-real.html: `obsidian vault=pan_vault eval` driving dataview's
+  api.renderValue(markdown, detachedDiv, ...), i.e. the real MarkdownRenderer. Each
+  case below was a SEPARATE render (so each has its own random docId). The
+  <div data-capture="..."> wrappers are added by this file's author to delimit cases;
+  everything inside a wrapper, minus dataview's outer <span>, is Obsidian's output.
+
+  Source markdown per case (Python repr):
+    [table]  '| a | b |\n|---|---|\n| cell[^t] | x |\n\n[^t]: Table note.'
+    [callout]  '> [!note] Title\n> body with ref[^c]\n\n[^c]: Callout note.'
+    [blockquote]  '> quote with ref[^q]\n\n[^q]: Quote note.'
+    [duplicateDefinition]  'Ref[^d] here.\n\n[^d]: first definition.\n\n[^d]: second definition.'
+    [sameLabelTwoRefsAndUnusedAfter]  'One[^s] two[^s].\n\n[^s]: Shared note.\n[^z]: Unused.'
+
+  What it proves (see specs/011-footnote-semantics/research.md):
+   - markers inside a table cell, a callout and a blockquote are ordinary
+     sup.footnote-ref elements in place; the notes section is a TOP-LEVEL sibling
+     that follows the table / callout / blockquote, never nested inside it;
+   - with two definitions for one label, Obsidian keeps the LAST ("second definition")
+     and renders ONE note;
+   - two references to one note read [1] and [1-1], with two identical back-links.
+-->
+<div data-capture="table"><table>
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cell<sup data-footnote-id="fnref-1-282545278ceddce7" class="footnote-ref" id="fnref-1-282545278ceddce7"><a data-footref="t" href="#fn-1-282545278ceddce7" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup></td>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-282545278ceddce7" id="fn-1-282545278ceddce7" dir="auto"><p>Table note.<a href="#fnref-1-282545278ceddce7" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></div>
+<div data-capture="callout"><div data-callout-metadata="" data-callout-fold="" data-callout="note" class="callout node-insert-event"><div class="callout-title" dir="auto"><div class="callout-icon"><svg width="16" height="16"></svg></div><div class="callout-title-inner">Title</div></div><div class="callout-content">
+<p dir="auto">body with ref<sup data-footnote-id="fnref-1-315e78a4525b3eca" class="footnote-ref" id="fnref-1-315e78a4525b3eca"><a data-footref="c" href="#fn-1-315e78a4525b3eca" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup></p>
+</div></div>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-315e78a4525b3eca" id="fn-1-315e78a4525b3eca" dir="auto"><p>Callout note.<a href="#fnref-1-315e78a4525b3eca" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></div>
+<div data-capture="blockquote"><blockquote dir="auto">
+<p>quote with ref<sup data-footnote-id="fnref-1-8f0d07f901496a15" class="footnote-ref" id="fnref-1-8f0d07f901496a15"><a data-footref="q" href="#fn-1-8f0d07f901496a15" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup></p>
+</blockquote>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-8f0d07f901496a15" id="fn-1-8f0d07f901496a15" dir="auto"><p>Quote note.<a href="#fnref-1-8f0d07f901496a15" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></div>
+<div data-capture="duplicateDefinition"><p dir="auto">Ref<sup data-footnote-id="fnref-1-d43283f811bc6fc0" class="footnote-ref" id="fnref-1-d43283f811bc6fc0"><a data-footref="d" href="#fn-1-d43283f811bc6fc0" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup> here.</p>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-d43283f811bc6fc0" id="fn-1-d43283f811bc6fc0" dir="auto"><p>second definition.<a href="#fnref-1-d43283f811bc6fc0" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></div>
+<div data-capture="sameLabelTwoRefsAndUnusedAfter"><p dir="auto">One<sup data-footnote-id="fnref-1-454da1014648179b" class="footnote-ref" id="fnref-1-454da1014648179b"><a data-footref="s" href="#fn-1-454da1014648179b" class="footnote-link" target="_blank" rel="noopener nofollow">[1]</a></sup> two<sup data-footnote-id="fnref-1-1-454da1014648179b" class="footnote-ref" id="fnref-1-1-454da1014648179b"><a data-footref="s" href="#fn-1-454da1014648179b" class="footnote-link" target="_blank" rel="noopener nofollow">[1-1]</a></sup>.</p>
+
+
+<section class="footnotes"><hr><ol>
+<li data-footnote-id="fn-1-454da1014648179b" id="fn-1-454da1014648179b" dir="auto"><p>Shared note.<a href="#fnref-1-454da1014648179b" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a><a href="#fnref-1-1-454da1014648179b" class="footnote-backref footnote-link" target="_blank" rel="noopener nofollow">↩︎</a></p></li>
+</ol></section></div>
