@@ -33,7 +33,8 @@ import { SVG } from "mathjax-full/js/output/svg.js";
 import { liteAdaptor } from "mathjax-full/js/adaptors/liteAdaptor.js";
 import { RegisterHTMLHandler } from "mathjax-full/js/handlers/html.js";
 import { AllPackages } from "mathjax-full/js/input/tex/AllPackages.js";
-import { getSvgRasterizer } from "./render";
+import { getSvgRasterizer, rasterizeOrNull } from "./render";
+import { errorMessage } from "./error-text";
 
 // One shared headless document: convert() creates a fresh math tree per
 // call, and output is deterministic (verified: byte-identical repeats).
@@ -170,10 +171,14 @@ export function protectMath(md: string): ProtectResult {
 export interface MathRenderResult {
   svg: string;
   ok: boolean;
+  /** Why `svg` is empty: input this renderer cannot typeset at all, or MathJax threw. */
+  reason?: "charset" | "error";
+  /** The thrown error's message when `reason` is "error". */
+  detail?: string;
 }
 
 export function renderMathToSvg(tex: string, display: boolean): MathRenderResult {
-  if (UNRENDERABLE_CHARSET_RE.test(tex)) return { svg: "", ok: false };
+  if (UNRENDERABLE_CHARSET_RE.test(tex)) return { svg: "", ok: false, reason: "charset" };
   try {
     // containerWidth huge = never line-break (single-line SVG math). The
     // explicit casts silence @typescript-eslint/no-unsafe-* on mathjax-full's
@@ -189,8 +194,8 @@ export function renderMathToSvg(tex: string, display: boolean): MathRenderResult
     // MathJax's SVG error rendering: unknown commands/broken syntax come out
     // as red text (fill="red"), not as merror markup in this version.
     return { svg, ok: !svg.includes("merror") && !svg.includes('fill="red"') };
-  } catch {
-    return { svg: "", ok: false };
+  } catch (e) {
+    return { svg: "", ok: false, reason: "error", detail: errorMessage(e) };
   }
 }
 
@@ -250,15 +255,19 @@ export async function renderMath(
       continue;
     }
 
-    const { svg, ok } = renderMathToSvg(span.tex, span.display);
+    const { svg, ok, reason, detail } = renderMathToSvg(span.tex, span.display);
 
-    // Unrenderable charset: restore the original source text — the readable
-    // fallback per constitution II.
+    // Nothing to typeset (unrenderable charset, or MathJax itself threw):
+    // restore the original source text — the readable fallback per
+    // constitution II. The two are told apart in the warning so a parser
+    // crash is not reported as a Thai-text limitation.
     if (!ok && svg === "") {
       const source = span.display ? `$$${span.tex}$$` : `$${span.tex}$`;
       placeholder.replaceWith(createTextNodeSafe(source));
       warnings.push(
-        `math contains non-Latin characters that cannot be rendered — kept as source text (referenced by ${sourcePath})`
+        reason === "error"
+          ? `math could not be rendered: ${span.tex} — ${detail ?? "unknown error"} — kept as source text (referenced by ${sourcePath})`
+          : `math contains non-Latin characters that cannot be rendered — kept as source text (referenced by ${sourcePath})`
       );
       continue;
     }
@@ -275,7 +284,7 @@ export async function renderMath(
     }
     normalizeMathSvg(svgEl);
 
-    const result = await getSvgRasterizer()(svgEl);
+    const result = await rasterizeOrNull(getSvgRasterizer(), svgEl);
     if (result) {
       const index = startIndex + images.length + 1;
       const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;
