@@ -66,6 +66,7 @@ jobs:
       - run: npm run check-export-works
         env:
           INKBOUND_KEEP_EPUB: ${{ runner.temp }}/exported.epub
+          INKBOUND_KEEP_FOOTNOTE_EPUB: ${{ runner.temp }}/footnotes.epub
 
       # Must follow check-export-works — validates the book that run exported,
       # alongside the hand-built sample, against the EPUB 3 spec. A release is
@@ -81,7 +82,7 @@ jobs:
             "https://github.com/w3c/epubcheck/releases/download/v$EPUBCHECK_VERSION/epubcheck-$EPUBCHECK_VERSION.zip"
           unzip -q "$RUNNER_TEMP/epubcheck.zip" -d "$RUNNER_TEMP"
           echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-$EPUBCHECK_VERSION/epubcheck.jar" >> "$GITHUB_ENV"
-      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub"
+      - run: npm run epubcheck -- "$RUNNER_TEMP/exported.epub" "$RUNNER_TEMP/footnotes.epub"
 
       - run: npm run version:check
 

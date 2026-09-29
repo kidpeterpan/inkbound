@@ -57,3 +57,35 @@ describe("deriveChapterTitle (default rule: basename)", () => {
     }
   });
 });
+
+// 011-footnote-semantics: the chapter title comes from Obsidian's metadata cache, which
+// keeps the heading's SOURCE text — so "Title[^h]" reached the book as a literal title.
+describe("deriveChapterTitle and footnote references (011 FR-012)", () => {
+  it("strips a numbered, named or inline footnote reference from the heading", () => {
+    expect(deriveChapterTitle("n", undefined, "Title with note[^h]")).toBe("Title with note");
+    expect(deriveChapterTitle("n", undefined, "Title[^1]")).toBe("Title");
+    expect(deriveChapterTitle("n", undefined, "Title^[an inline note]")).toBe("Title");
+  });
+
+  it("strips several references and tidies the whitespace they leave", () => {
+    expect(deriveChapterTitle("n", undefined, "A[^1] and [^two] B")).toBe("A and B");
+    expect(deriveChapterTitle("n", undefined, "[^1] Leading")).toBe("Leading");
+  });
+
+  it("falls through to the alias, then the basename, when the heading was only a reference", () => {
+    expect(deriveChapterTitle("base", ["Alias"], "[^1]")).toBe("Alias");
+    expect(deriveChapterTitle("base", undefined, "[^1]")).toBe("base");
+  });
+
+  it("returns ordinary headings exactly as before, including brackets, carets and markdown", () => {
+    for (const h1 of ["[link] text", "a^b", "**bold** and _it_", "Array[0]", "x ^ y", "[^]", "[^ spaced]"]) {
+      expect(deriveChapterTitle("n", undefined, h1)).toBe(h1);
+    }
+  });
+
+  it("never throws on odd input", () => {
+    for (const h1 of ["[^", "^[", "[^]]", "^[[[", "[^a]^[b]^[", "\u0000[^x]", " [^x] "]) {
+      expect(() => deriveChapterTitle("n", undefined, h1)).not.toThrow();
+    }
+  });
+});

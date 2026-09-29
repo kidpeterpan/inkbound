@@ -161,6 +161,47 @@ only a phone can settle are the parts that matter:
 - Whether a report with warnings from ~50 chapters scrolls acceptably as a
   mobile sheet.
 
+**Footnotes (011-footnote-semantics) — not yet checked on a device.** What was
+verified, and what only a reader can settle:
+
+_Verified (2026-09-29)._ Obsidian's real footnote markup was captured from a live
+**1.13.7** and is kept as a fixture — `tests/fixtures/footnotes-real.html` and
+`footnotes-real-contexts.html`, each with its provenance in a header comment. The
+test stand-in renderer now reproduces that markup, including the per-render random
+id suffix that makes Obsidian's own output non-reproducible, and
+`tests/obsidian-stub.test.ts` holds it to the capture so it cannot drift into a
+fiction. The markup the pass emits was chosen by running candidates through
+epubcheck 5.3.0 `--failonwarnings`: `role="doc-endnote"` is a deprecation warning,
+`doc-footnote` on an `li` is an error, and `epub:type` without `xmlns:epub` is
+fatal. Both fixture books validate with 0 fatals, 0 errors, 0 warnings, and the
+exported chapter and stylesheet were viewed in Chrome.
+
+_Not verified — record the outcome, whatever it is:_
+
+- **Does a Boox show a note as a popup when its marker is tapped?** The markup
+  is the standard `noteref` / `footnote` pair, and the fallback on a reader with
+  no popup is an ordinary link with a way back — but which of those a given
+  reader does is only visible on the reader. Note the reader, firmware, and
+  whether the back-link returns to the same place.
+- **Other readers.** Some hide an `aside[epub:type=footnote]` from the text flow;
+  a reader that hid it without offering a popup would strand the note.
+- **Other Obsidian versions.** The plugin supports 1.5.0+; only 1.13.7 was
+  captured. The pass tolerates an older shape (proved with synthetic markup) and
+  refuses to guess when a fragment matches several notes, but neither has been
+  seen against those versions. To re-capture: render the markdown in the fixture
+  header through `app.plugins.plugins.dataview.api.renderValue(md, div, plugin,
+"", false)` and return `div.innerHTML` — `obsidian vault=<name> eval
+code="$(cat script.js)"` runs it (`require("obsidian")` is not available in that
+  context, which is why dataview is the route).
+- **Thai text inside a note**, on a real e-ink screen. The fixture is English.
+
+How "unchanged" is checked: **no book is byte-identical between two exports**
+even before this feature — every export writes a fresh package `urn:uuid` and a
+fresh `dcterms:modified` into `package.opf`. Identity is therefore judged entry
+by entry with those two values normalised (`tests/fixtures/epub-fingerprint.ts`),
+and `tests/footnote-free-identity.test.ts` pins the exact hashes a footnote-free
+book had before footnotes existed.
+
 Note two things that WERE fixed rather than merely being listed, because they
 were provably broken:
 

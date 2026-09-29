@@ -12,6 +12,7 @@
 // adapter out mirrors the same fix already applied to settings.ts/
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
+import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "./footnotes";
 import {
   stripFrontmatter,
   stripDynamicBlocks,
@@ -187,6 +188,12 @@ async function populateEmbeds(
     } else {
       sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
     }
+    // 011-footnote-semantics: an embed's slice is where a footnote most often loses its
+    // partner (a heading- or block-scoped embed copies the reference but not the definition
+    // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
+    // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
+    // Named for the embedded note (`dest.path`), whose source holds it.
+    warnings.push(...footnoteSourceWarnings(scanFootnoteSource(sectionMd), dest.path));
 
     const ourDiv = wrapper.createDiv();
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
@@ -283,6 +290,9 @@ export async function renderUnitToChapter(
 ): Promise<ChapterRender> {
   const warnings: string[] = [];
   const md = stripDynamicBlocks(stripFrontmatter(markdown));
+  // 011-footnote-semantics: orphan footnotes in the host note itself. See the matching call
+  // in populateEmbeds for why this reads the source rather than the rendered DOM.
+  warnings.push(...footnoteSourceWarnings(scanFootnoteSource(md), sourcePath));
   // 005-latex-math: swap math for placeholders BEFORE rendering, so neither
   // the real renderer's MathJax output nor the stub's raw $...$ text leaks
   // into the DOM. Indices stay chapter-unique via mathCounter as embeds
@@ -341,6 +351,18 @@ export async function renderUnitToChapter(
       sourcePath
     );
     warnings.push(...math.warnings);
+    // 011-footnote-semantics: gather every note in the chapter into one section of EPUB 3
+    // footnotes. The POSITION is load-bearing (research R9):
+    //   - after cleanupDom's flattenEmbeds, so each embed's own `section.footnotes` (one
+    //     per render, each numbered from 1) is already in this DOM;
+    //   - after rewriteLinks / rewriteImages / renderMath, so a link, image or expression
+    //     INSIDE a note is processed as body content before the note is moved;
+    //   - before collectHeadingToc, so heading text can exclude markers and heading ids
+    //     can avoid the footnote ids minted here.
+    // Moving nodes does not disturb the image-href numbering invariant (main.ts's
+    // imageCount): numbers are stamped into `src` attributes above, not derived from
+    // position. A chapter with no footnotes is returned untouched (FR-023).
+    warnings.push(...processFootnotes(el));
     // Depth-0 identity (FR-006): collectHeadingToc is NOT called at all when
     // tocDepth is 0, so no ids are stamped and the serialized body is
     // byte-identical to pre-feature output. It runs after embeds are
