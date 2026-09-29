@@ -1018,19 +1018,40 @@ export function sanitizeHeadingId(text: string): string {
   return /^[a-z\u00A0-\uFFFF_]/.test(cleaned) ? cleaned : `h-${cleaned}`;
 }
 
+// A heading's own text for the TOC. A footnote marker inside it is part of the page but
+// not of the heading: "Part A" + marker "1" would otherwise become the entry "Part A1" and
+// the id "part-a1" (011-footnote-semantics FR-012). Headings without a marker take the
+// untouched textContent path, so every existing book's TOC is unchanged.
+function headingText(el: Element): string {
+  if (!el.querySelector("sup.footnote-ref")) return (el.textContent ?? "").trim();
+  const clone = el.cloneNode(true) as Element;
+  clone.querySelectorAll("sup.footnote-ref").forEach((n) => n.remove());
+  return (clone.textContent ?? "").trim();
+}
+
 export function collectHeadingToc(root: HTMLElement, maxDepth: number): TocEntry[] {
   const entries: TocEntry[] = [];
+  // Seeded with ids already on NON-heading elements (the footnote pass mints fn-N /
+  // fnref-N ids before this runs), so a heading whose text sanitizes to one of them is
+  // renamed instead of producing a duplicate id — an invalid book. Where nothing clashes
+  // this changes nothing, so existing output is byte-identical.
   const used = new Set<string>();
+  for (const el of Array.from(root.querySelectorAll("[id]"))) {
+    if (!/^h[1-6]$/i.test(el.tagName)) used.add(el.id);
+  }
   if (maxDepth <= 0) return entries;
   const headings = Array.from(root.querySelectorAll("h1,h2,h3,h4,h5,h6"));
   headings.forEach((el, i) => {
+    // A heading inside a footnote is part of a note, not of the chapter's outline
+    // (011-footnote-semantics FR-012: the notes section adds nothing to the TOC).
+    if (el.closest(".footnotes")) return;
     const level = parseInt(el.tagName.slice(1), 10);
     if (level > maxDepth) return;
     // The chapter's first heading, when it is an H1, is its title — the
     // nav already lists the chapter itself, so the H1 would be a duplicate
     // entry (FR-004).
     if (i === 0 && level === 1) return;
-    const text = (el.textContent ?? "").trim();
+    const text = headingText(el);
     if (text === "") return;
     let id = sanitizeHeadingId(text);
     let n = 2;

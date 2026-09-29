@@ -57,6 +57,16 @@ ships inside the book; Latin text keeps the reader's normal reading font.
 Books without Thai stay fontless and byte-stable, and the **Embed Thai font**
 setting turns the whole behavior off if you ever want it.
 
+**Footnotes work as footnotes.** Numbered `[^1]`, named `[^note]` and inline
+`^[…]` notes become real EPUB footnotes: tap the small raised number to reach the
+note, and the arrow at the end of the note to come back. Readers that show
+footnotes as pop-ups can show them that way. A chapter's notes are gathered at its
+end and numbered in the order you meet them — including notes that arrive through
+embedded notes — and a note you refer to more than once gets a back-arrow for each
+reference (`↩︎1`, `↩︎2`). A footnote that cannot be carried across, such as a
+reference with no note or a note nothing refers to, is left out just as Obsidian's
+own reading view leaves it out, and the export report says which note it was in.
+
 ## From note to e-reader
 
 A book's index note in Obsidian, with its chapters as linked notes:
@@ -357,6 +367,16 @@ from note to e-reader without a computer anywhere in the loop.
   equivalent. The chapter shows `[Bases view omitted: …]` where the embed
   was, the export logs a warning naming the file, and the export itself
   succeeds.
+- **A scoped embed does not bring its footnotes along.** `![[Note#Heading]]` and
+  `![[Note^block]]` embed only that part of the note. If a paragraph you embed
+  refers to a footnote whose text lives elsewhere in the note, Obsidian shows just
+  the label and so does the book; the export report names the note and the
+  footnote. Embed a slice that includes the footnote's text, or the whole note,
+  to keep it.
+- **Whether a footnote pops up is up to your reader.** Inkbound writes the
+  standard footnote markup and an ordinary link back, so it works everywhere; but
+  whether a given e-reader shows the note as a pop-up or jumps to the end of the
+  chapter is the reader's choice.
 - **Math typesets as images.** Expressions are rendered at export time and
   embedded as pictures (like Mermaid diagrams), which means they are no
   longer selectable or searchable text inside the EPUB. Math containing

@@ -30,11 +30,22 @@
 //
 // Set INKBOUND_KEEP_EPUB=<path> to also copy the exported book out of the
 // temp dir before it is cleaned up, so another gate can inspect it.
+//
+// 011-footnote-semantics: after the book above, the same shipped bundle exports a SECOND
+// fixture folder (tests/fixtures/smoke-vault/Footnotes) containing every footnote form
+// and the degradation cases. It is a second book, not extra notes in the first, so the
+// first book's bytes — the reference for "a footnote-free book did not change" — stay
+// exactly what they were. The footnote book is exported twice (a build-time-only
+// transform could make the shipped bundle non-deterministic where src/ is not), each
+// chapter is judged by the independent invariants oracle the unit tests use, and
+// INKBOUND_KEEP_FOOTNOTE_EPUB=<path> keeps a copy for `npm run epubcheck`.
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import JSZip from "jszip";
+import { assertChapterFootnoteInvariants } from "../tests/fixtures/footnote-fixtures";
+import { epubEntryFingerprints } from "../tests/fixtures/epub-fingerprint";
 import { DEFAULT_SETTINGS } from "../src/settings-core";
 import {
   REPO_ROOT,
@@ -48,6 +59,14 @@ import {
 const BUNDLE = path.join(REPO_ROOT, "main.js");
 const VAULT_ROOT = path.join(REPO_ROOT, "tests", "fixtures", "smoke-vault");
 const BOOK_FOLDER = "Book";
+const FOOTNOTE_FOLDER = "Footnotes";
+// The footnote warnings the Footnotes fixture is built to provoke, one per problem:
+//   03 Scoped.md  — a reference with no definition anywhere (1), an unused definition (2),
+//                   an embedded slice whose reference lost its definition (3), and an
+//                   embedded note with an unused definition (4);
+//   Unused.md     — that same unused definition, again, because it is also a chapter of
+//                   its own in a folder export (5).
+const EXPECTED_FOOTNOTE_WARNINGS = 5;
 
 function fail(message: string, details: string[] = []): never {
   console.error(`check-export-works: FAIL — ${message}`);
@@ -169,9 +188,20 @@ async function main(): Promise<void> {
     const problems = await checkBook(epubPath);
     if (problems.length > 0) fail(`the exported EPUB is not a usable book (${epubPath}).`, problems);
 
+    const footnoteProblems = await checkFootnoteBook({
+      createVaultStub,
+      PluginClass,
+      notices: NOTICES,
+      outDir,
+    });
+    if (footnoteProblems.length > 0) {
+      fail("the shipped bundle's footnote book is not right.", footnoteProblems);
+    }
+
     console.log(
       "check-export-works: PASS — the shipped main.js exported the fixture book end to end " +
-        "(3 chapters incl. a nested Part, image, Thai fonts, typeset math, rewritten wikilink)."
+        "(3 chapters incl. a nested Part, image, Thai fonts, typeset math, rewritten wikilink), " +
+        "and a second, footnote-heavy book with valid, reproducible footnotes."
     );
   } finally {
     console.error = originalError;
@@ -266,6 +296,156 @@ async function checkBook(epubPath: string): Promise<string[]> {
     }
   }
 
+  return problems;
+}
+
+interface ExportDeps {
+  createVaultStub: (vaultRoot: string, scanRoot: string) => { app: unknown };
+  PluginClass: ReturnType<typeof loadPluginClass>;
+  notices: string[];
+  outDir: string;
+}
+
+// One folder export through the shipped bundle. Its OWN vault stub is scoped to the folder
+// being exported (the stub resolves links and embeds only inside its scan root), which is
+// also why exporting this fixture cannot change what the first book contains.
+async function exportFolderBook(
+  deps: ExportDeps,
+  folderName: string
+): Promise<{ epubPath: string; warnings: string[] }> {
+  const { app } = deps.createVaultStub(VAULT_ROOT, folderName);
+  const folder = (
+    app as { vault: { getAbstractFileByPath(p: string): unknown } }
+  ).vault.getAbstractFileByPath(folderName);
+  if (!folder) fail(`fixture folder "${folderName}" not found under ${VAULT_ROOT}`);
+
+  const plugin = new deps.PluginClass(app, {
+    id: "inkbound",
+    name: "Inkbound",
+    version: "0.0.0-check",
+    minAppVersion: "1.5.0",
+    description: "check-export-works",
+    author: "ci",
+    isDesktopOnly: false,
+  });
+  plugin.settings = { ...DEFAULT_SETTINGS, outputFolder: deps.outDir, booxUrl: "", pushAfterExport: false };
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => (a instanceof Error ? (a.stack ?? a.message) : String(a))).join(" "));
+  };
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((a) => String(a)).join(" "));
+  };
+  deps.notices.length = 0;
+  try {
+    await plugin.exportFolder(folder);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+
+  const failureNotice = deps.notices.find((n) => n.startsWith("EPUB export failed"));
+  if (failureNotice || errors.length > 0) {
+    fail(`the shipped bundle could not export "${folderName}".`, [
+      ...(failureNotice ? [`notice: ${failureNotice}`] : []),
+      ...errors,
+    ]);
+  }
+  const epubPath = savedPathFromNotices(deps.notices);
+  if (!epubPath || !existsSync(epubPath)) {
+    fail(
+      `no saved book for "${folderName}".`,
+      deps.notices.map((n) => `notice: ${n}`)
+    );
+  }
+  return { epubPath, warnings };
+}
+
+// Exports the Footnotes fixture twice and judges the result the way a reader — and the
+// EPUB spec — would, using the same independent oracle as the unit tests.
+async function checkFootnoteBook(deps: ExportDeps): Promise<string[]> {
+  const problems: string[] = [];
+  const first = await exportFolderBook(deps, FOOTNOTE_FOLDER);
+  const firstBytes = readFileSync(first.epubPath);
+
+  const keepAt = process.env.INKBOUND_KEEP_FOOTNOTE_EPUB;
+  if (keepAt) {
+    mkdirSync(path.dirname(path.resolve(keepAt)), { recursive: true });
+    copyFileSync(first.epubPath, keepAt);
+    console.log(`  [kept] footnote book copied to ${keepAt}`);
+  }
+
+  // Reproducible: a second export differs only in the two values every export sets afresh
+  // (see tests/fixtures/epub-fingerprint.ts), which the fingerprint normalises.
+  const second = await exportFolderBook(deps, FOOTNOTE_FOLDER);
+  const a = await epubEntryFingerprints(firstBytes);
+  const b = await epubEntryFingerprints(readFileSync(second.epubPath));
+  const changed = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((n) => a[n] !== b[n]);
+  if (changed.length > 0) {
+    problems.push(`two exports of the footnote fixture differ in: ${changed.join(", ")}`);
+  }
+
+  const footnoteWarnings = first.warnings.filter((w) => /footnote/i.test(w));
+  if (footnoteWarnings.length !== EXPECTED_FOOTNOTE_WARNINGS) {
+    problems.push(
+      `expected ${EXPECTED_FOOTNOTE_WARNINGS} footnote warnings, got ${footnoteWarnings.length}: ` +
+        JSON.stringify(footnoteWarnings)
+    );
+  }
+
+  const zip = await JSZip.loadAsync(firstBytes);
+  const chapters = Object.keys(zip.files)
+    .filter((n) => /^OEBPS\/text\/chapter_\d+\.xhtml$/.test(n))
+    .sort();
+  let withFootnotes = 0;
+  for (const name of chapters) {
+    const doc = await zip.file(name)!.async("string");
+    if (!doc.includes('role="doc-noteref"')) {
+      // A chapter with no footnotes must carry none of the machinery. Judged by MARKUP —
+      // an attribute inside a tag — not by the word "footnote", which legitimately appears in
+      // prose (this fixture has a chapter titled "Broken footnotes" and a backlink to it).
+      if (
+        /<[^<>]*\s(?:epub:type="(?:footnotes?|noteref)"|role="doc-(?:noteref|footnote|backlink)"|class="footnotes?")/.test(
+          doc
+        )
+      ) {
+        problems.push(`${name} has no footnotes but carries footnote markup`);
+      }
+      continue;
+    }
+    withFootnotes += 1;
+    if (!doc.includes('xmlns:epub="http://www.idpf.org/2007/ops"')) {
+      problems.push(`${name} uses epub:type without declaring xmlns:epub`);
+    }
+    try {
+      assertChapterFootnoteInvariants(doc);
+    } catch (e) {
+      problems.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  if (withFootnotes < 6) problems.push(`expected at least 6 chapters with footnotes, found ${withFootnotes}`);
+
+  // The forms chapter is the most demanding: numbered, named, inline, repeated, and a
+  // marker in a list, table cell, callout, quotation and heading.
+  try {
+    const forms = assertChapterFootnoteInvariants(
+      await zip.file("OEBPS/text/chapter_001.xhtml")!.async("string")
+    );
+    if (forms.markers !== 14 || forms.notes !== 12) {
+      problems.push(`chapter 1 should hold 14 markers and 12 notes, has ${forms.markers} and ${forms.notes}`);
+    }
+  } catch (e) {
+    problems.push(`chapter 1: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // The stylesheet gained the footnote rules only because this book has footnotes.
+  const css = (await zip.file("OEBPS/style/epub.css")?.async("string")) ?? "";
+  if (!css.includes(".footnotes"))
+    problems.push("epub.css has no footnote rules although the book has footnotes");
   return problems;
 }
 

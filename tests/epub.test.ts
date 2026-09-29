@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
 import { EpubBuilder, type NavItem, chapterHref, escapeXml } from "../src/epub";
+import { EPUB_CSS, FOOTNOTE_CSS } from "../src/epub-css";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 
@@ -450,5 +451,152 @@ describe("nav tree: Parts (009-index-order-parts)", () => {
     b.setNavTree([ch(0), ch(1), ch(2), ch(3)]);
     b.addChapter("Late", "<p>4</p>");
     await expect(b.build()).rejects.toThrow(/chapter 5|missing/i);
+  });
+});
+
+// 011-footnote-semantics: footnote markup needs the EPUB structural-semantics namespace
+// and some styling, but ONLY the chapters/books that carry footnotes may change —
+// everything else must stay byte-identical (FR-023, FR-024).
+describe("EpubBuilder footnote support (011)", () => {
+  const FOOTNOTE_BODY =
+    '<p>x<sup class="footnote-ref"><a id="fnref-1" href="#fn-1" role="doc-noteref" epub:type="noteref">1</a></sup></p>' +
+    '<section class="footnotes" epub:type="footnotes"><aside id="fn-1" class="footnote" epub:type="footnote" role="doc-footnote">' +
+    '<p><span class="footnote-num">1.</span> n<a class="footnote-backref" href="#fnref-1" role="doc-backlink">\u21a9\ufe0e</a></p></aside></section>';
+  const PLAIN_BODY = "<p>plain chapter</p>";
+  const THAI = {
+    regular: new Uint8Array([0, 1, 2]),
+    bold: new Uint8Array([0, 1, 2]),
+    license: "OFL fixture",
+  };
+
+  async function build(bodies: string[], withThai = false) {
+    const b = new EpubBuilder(META);
+    bodies.forEach((body, i) => b.addChapter(`Ch ${i + 1}`, body));
+    if (withThai) b.setThaiFont(THAI);
+    const zip = await JSZip.loadAsync(await b.build());
+    return {
+      css: await zip.file("OEBPS/style/epub.css")!.async("string"),
+      chapter: (n: number) =>
+        zip.file(`OEBPS/text/chapter_${String(n).padStart(3, "0")}.xhtml`)!.async("string"),
+    };
+  }
+
+  it("declares xmlns:epub on a chapter that uses epub:type, and only on that chapter", async () => {
+    const book = await build([PLAIN_BODY, FOOTNOTE_BODY]);
+    expect(await book.chapter(2)).toContain(
+      '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+    );
+    expect(await book.chapter(1)).toContain('<html xmlns="http://www.w3.org/1999/xhtml">');
+    expect(await book.chapter(1)).not.toContain("xmlns:epub");
+  });
+
+  it("leaves a chapter byte-identical when it merely MENTIONS epub:type in its text", async () => {
+    const mention = '<p>Use <code>epub:type="noteref"</code> for note references.</p>';
+    const book = await build([mention]);
+    const doc = await book.chapter(1);
+    expect(doc).not.toContain("xmlns:epub");
+    expect((await build([mention, FOOTNOTE_BODY])).css).toContain(FOOTNOTE_CSS);
+    expect((await build([mention])).css).toBe(EPUB_CSS);
+  });
+
+  it("writes exactly EPUB_CSS when no chapter carries footnote markup", async () => {
+    expect((await build([PLAIN_BODY, PLAIN_BODY])).css).toBe(EPUB_CSS);
+  });
+
+  it("appends FOOTNOTE_CSS, after EPUB_CSS, when any chapter carries footnote markup", async () => {
+    expect((await build([PLAIN_BODY, FOOTNOTE_BODY])).css).toBe(`${EPUB_CSS}\n${FOOTNOTE_CSS}`);
+  });
+
+  it("orders the stylesheet EPUB_CSS, footnote CSS, then the Thai font CSS", async () => {
+    const css = (await build([FOOTNOTE_BODY], true)).css;
+    expect(css.startsWith(EPUB_CSS)).toBe(true);
+    const footnotes = css.indexOf(FOOTNOTE_CSS);
+    expect(footnotes).toBeGreaterThanOrEqual(EPUB_CSS.length);
+    expect(css.indexOf("@font-face")).toBeGreaterThan(footnotes);
+  });
+
+  it("keeps a plain chapter byte-identical whether or not the book also has a footnote chapter", async () => {
+    const plainOnly = await build([PLAIN_BODY]);
+    const mixed = await build([PLAIN_BODY, FOOTNOTE_BODY]);
+    expect(await mixed.chapter(1)).toBe(await plainOnly.chapter(1));
+  });
+});
+
+// 011 US5 (FR-019…FR-022): how footnotes look. A stylesheet cannot be judged by eye in a
+// unit test, so this pins what the requirements make checkable — which rules exist and what
+// they promise — and the real-reader check in the task list covers the rest.
+describe("FOOTNOTE_CSS (011 US5)", () => {
+  // Parses "selector { a: b; c: d }" blocks (comments removed) into selector -> declarations.
+  function rules(css: string): Record<string, Record<string, string>> {
+    const out: Record<string, Record<string, string>> = {};
+    for (const m of css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const decls: Record<string, string> = {};
+      for (const d of m[2].split(";")) {
+        const [prop, ...value] = d.split(":");
+        if (prop.trim()) decls[prop.trim()] = value.join(":").trim();
+      }
+      out[m[1].trim()] = decls;
+    }
+    return out;
+  }
+  const css = rules(FOOTNOTE_CSS);
+
+  it("is well-formed: every block is closed and every rule has declarations", () => {
+    expect((FOOTNOTE_CSS.match(/\{/g) ?? []).length).toBe((FOOTNOTE_CSS.match(/\}/g) ?? []).length);
+    expect(Object.keys(css).length).toBeGreaterThanOrEqual(6);
+    for (const decls of Object.values(css)) expect(Object.keys(decls).length).toBeGreaterThan(0);
+  });
+
+  it("makes the notes read as a distinct section after the body (FR-019)", () => {
+    expect(css[".footnotes"]["border-top"]).toMatch(/^1px solid #/);
+    expect(css[".footnotes"]["margin-top"]).toBeDefined();
+    expect(css[".footnotes"]["font-size"]).toBeDefined();
+  });
+
+  it("keeps a marker small and raised without opening up its line (FR-020)", () => {
+    const marker = css["sup.footnote-ref"];
+    expect(parseFloat(marker["font-size"])).toBeLessThan(1);
+    expect(marker["vertical-align"]).toBe("super");
+    // Without this a raised marker pushes the lines around it apart.
+    expect(marker["line-height"]).toBe("0");
+  });
+
+  it("gives markers and back-links room to be tapped without hitting a neighbour (FR-021)", () => {
+    for (const selector of ["sup.footnote-ref a", ".footnote-backref"]) {
+      expect(css[selector]["padding"], selector).toMatch(/\d/);
+      expect(css[selector]["text-decoration"], selector).toBe("none");
+    }
+  });
+
+  it("shows each note's number in bold and keeps a note's paragraphs tight but separate", () => {
+    expect(css[".footnote-num"]["font-weight"]).toBe("bold");
+    expect(css[".footnote p"]["margin"]).toBeDefined();
+    expect(css[".footnote"]["margin"]).toBeDefined();
+  });
+
+  it("adds no assets and overrides no font, so a Thai note keeps the book's fonts (FR-020, FR-022)", () => {
+    expect(FOOTNOTE_CSS).not.toMatch(/@font-face|url\(|@import|\bsrc\s*:/i);
+    expect(FOOTNOTE_CSS).not.toMatch(/font-family/i);
+    for (const decls of Object.values(css)) expect(Object.keys(decls)).not.toContain("font-family");
+  });
+
+  it("carries no meaning in colour, which an e-ink screen cannot show (house rule in epub-css.ts)", () => {
+    for (const [selector, decls] of Object.entries(css)) {
+      expect(
+        Object.keys(decls).filter((p) => p === "color" || p === "background-color" || p === "background"),
+        selector
+      ).toEqual([]);
+    }
+  });
+
+  it("is appended to the stylesheet exactly once per book, however many chapters have footnotes", async () => {
+    const body =
+      '<p>x<sup class="footnote-ref"><a id="fnref-1" href="#fn-1" role="doc-noteref" epub:type="noteref">1</a></sup></p>';
+    const b = new EpubBuilder(META);
+    b.addChapter("One", body);
+    b.addChapter("Two", body);
+    const zip = await JSZip.loadAsync(await b.build());
+    const shipped = await zip.file("OEBPS/style/epub.css")!.async("string");
+    expect(shipped.split(FOOTNOTE_CSS).length - 1).toBe(1);
   });
 });

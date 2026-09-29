@@ -28,3 +28,21 @@ th, td { border: 1px solid #888; padding: 0.25em 0.5em; }
 .math-block img { max-width: 100%; height: auto; }
 /* ── PAN (Task 11): tune the reading experience for your Boox below ── */
 `;
+
+// 011-footnote-semantics: appended to epub.css ONLY for books that carry footnotes, so a
+// footnote-free book's stylesheet stays byte-identical (FR-023). Same e-ink rules as the
+// rest of this file: no colour-dependent meaning, no assets, no font override (a Thai
+// note keeps whatever font the book already chose).
+export const FOOTNOTE_CSS = `
+/* Footnotes: a raised number that leads to the note, and one section of notes at the
+   chapter's end. The marker must not open up its line: line-height 0 keeps the
+   superscript from pushing neighbouring lines apart. Padding gives a finger something
+   to hit on e-ink without changing how the line reads. */
+sup.footnote-ref { font-size: 0.75em; line-height: 0; vertical-align: super; }
+sup.footnote-ref a { text-decoration: none; padding: 0 0.15em; }
+.footnotes { border-top: 1px solid #888; margin-top: 2em; padding-top: 0.4em; font-size: 0.9em; }
+.footnote { margin: 0.6em 0; }
+.footnote p { margin: 0.25em 0; }
+.footnote-num { font-weight: bold; }
+.footnote-backref { text-decoration: none; padding: 0 0.4em; }
+`;

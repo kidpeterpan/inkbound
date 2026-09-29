@@ -8,6 +8,7 @@ export function slugify(title: string): string {
 }
 
 import { firstNonEmptyString } from "./metadata";
+import { stripFootnoteRefs } from "./footnotes";
 
 // Chapter-title precedence (007-chapter-titles, resolved from the original
 // plan's Task 11): first usable H1 → first usable frontmatter alias → basename.
@@ -17,7 +18,10 @@ import { firstNonEmptyString } from "./metadata";
 // title aborts the whole export). Resolution is total — every input maps to a
 // string, so the placeholder-chapter path can always produce a title.
 export function deriveChapterTitle(basename: string, aliases: unknown, firstH1: string | undefined): string {
-  const h1 = typeof firstH1 === "string" ? firstH1.trim() : "";
+  // 011-footnote-semantics: the H1 comes from Obsidian's metadata cache, which keeps the
+  // heading's SOURCE text, so a footnote reference in it ("Title[^h]") is stripped here.
+  // A heading that was only a reference falls through to the alias, then the basename.
+  const h1 = typeof firstH1 === "string" ? stripFootnoteRefs(firstH1).trim() : "";
   if (h1 !== "") return h1;
   return firstNonEmptyString(aliases) ?? basename;
 }
