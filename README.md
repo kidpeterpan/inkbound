@@ -361,12 +361,18 @@ from note to e-reader without a computer anywhere in the loop.
 - **Where mobile can save.** On a phone or tablet, books are saved inside your
   vault rather than to a folder of your choosing anywhere on the device —
   that's a platform restriction, not a setting. See "On a phone or tablet".
-- **Obsidian Bases export as an omission marker.** Embedding a Bases file
-  (`![[Connections.base]]`) cannot become book content — Bases are live,
-  interactive views of note properties, and an EPUB page has no static
-  equivalent. The chapter shows `[Bases view omitted: …]` where the embed
-  was, the export logs a warning naming the file, and the export itself
-  succeeds.
+- **Bases: only table views come through.** Embedding a Bases file whose view
+  is a table (`![[Tasks.base]]`, or `![[Tasks.base#Open]]` for a named view)
+  puts a static snapshot of that table in the book: the rows Obsidian shows at
+  the moment you export, as a plain table. Cells with several values are
+  comma-separated, and a link to a note that is in the book works. Nothing
+  else about a Base can be exported. A cards or list view, a grouped table, a
+  Base that shows an error, and a ` ```base ` block written directly in a note
+  each become `[Bases view omitted: …]`; the export report says why, and the
+  export itself succeeds. Obsidian only fills in a Base while the app is
+  running, so this needs the Bases core plugin enabled. A Base too big to
+  render in full is exported as far as it goes, and the report says how many
+  rows are missing.
 - **A scoped embed does not bring its footnotes along.** `![[Note#Heading]]` and
   `![[Note^block]]` embed only that part of the note. If a paragraph you embed
   refers to a footnote whose text lives elsewhere in the note, Obsidian shows just

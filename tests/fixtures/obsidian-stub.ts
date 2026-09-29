@@ -76,6 +76,26 @@ if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
   });
 }
 
+// Two more Obsidian-provided globals src/bases-adapter.ts uses: `activeDocument`
+// (the document of the focused window; the only one there is under jsdom) and
+// HTMLElement.setCssStyles (assigns style properties by their camelCase names).
+if (typeof document !== "undefined" && !("activeDocument" in globalThis)) {
+  Object.defineProperty(globalThis, "activeDocument", {
+    value: document,
+    writable: true,
+    configurable: true,
+  });
+}
+if (typeof HTMLElement !== "undefined" && !("setCssStyles" in HTMLElement.prototype)) {
+  Object.defineProperty(HTMLElement.prototype, "setCssStyles", {
+    value: function (this: HTMLElement, styles: Partial<CSSStyleDeclaration>): void {
+      Object.assign(this.style, styles);
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
 // createDiv()/createSpan() shortcuts on Node.prototype — same append-to-this
 // semantics as createEl (Obsidian's plugin-review lint prefers these over
 // createEl("div")/createEl("span"), so render.ts/render-adapter.ts call
