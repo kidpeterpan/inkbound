@@ -301,14 +301,23 @@ export class EpubBuilder {
   // child. Either way: one <a>, at most one <ol> — see wrapOl.
   private renderNavItem(item: NavItem): string {
     if (item.kind === "chapter") return this.chapterLi(this.chapters[item.chapter]);
-    const childLis = item.children.map((c) => this.renderNavItem(c));
+    return this.renderPartNavItem(item);
+  }
+
+  private renderPartNavItem(item: Extract<NavItem, { kind: "part" }>): string {
+    const childListItems = item.children.map((child) => this.renderNavItem(child));
     if (item.indexChapter !== null) {
-      const c = this.chapters[item.indexChapter];
-      const lis = [...tocNodeLis(buildTocTree(c.toc), c.href), ...childLis];
-      return `<li><a href="${c.href}">${escapeXml(c.title)}</a>${lis.length ? wrapOl(lis) : ""}</li>`;
+      const indexChapter = this.chapters[item.indexChapter];
+      const nestedListItems = [
+        ...tocNodeLis(buildTocTree(indexChapter.toc), indexChapter.href),
+        ...childListItems,
+      ];
+      return `<li><a href="${indexChapter.href}">${escapeXml(indexChapter.title)}</a>${
+        nestedListItems.length ? wrapOl(nestedListItems) : ""
+      }</li>`;
     }
-    const target = this.chapters[firstChapterOf(item)!];
-    return `<li><a href="${target.href}">${escapeXml(item.title)}</a>${wrapOl(childLis)}</li>`;
+    const firstChapter = this.chapters[firstChapterOf(item)!];
+    return `<li><a href="${firstChapter.href}">${escapeXml(item.title)}</a>${wrapOl(childListItems)}</li>`;
   }
 
   private nav(): string {
