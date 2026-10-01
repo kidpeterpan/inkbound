@@ -32,6 +32,7 @@ import {
   serializeBody,
   EMBED_RENDERED_ATTR,
   EMBED_WRAPPER_CLASS,
+  type EmbedTarget,
   type TocEntry,
   type HeadingInfo,
   type SectionInfo,
@@ -107,71 +108,72 @@ function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] 
 // the internal-link marker / renumbering an image src), and idempotence
 // guards (see render.ts) mean an already-finalized nested region is safely
 // skipped when a shallower pass later scans over it.
+
+// State threaded through an embed expansion that does not change between
+// recursion levels: the Obsidian runtime, the chapter's link/image bookkeeping,
+// and the chapter-wide math accumulator (005-latex-math: placeholder indices
+// stay unique across the host note and every embed it pulls in, so a single
+// renderMath pass over the final DOM can resolve them all).
+interface EmbedPipeline {
+  app: App;
+  component: Component;
+  hrefByPath: Map<string, string>;
+  basePath: string;
+  mathCounter: { next: number };
+  mathSpans: MathSpan[];
+}
+
+interface EmbeddedImage {
+  vaultPath: string;
+  newHref: string;
+  sourcePath: string;
+}
+
+interface EmbedExpansion {
+  warnings: string[];
+  images: EmbeddedImage[];
+}
+
 async function populateEmbeds(
-  app: App,
-  component: Component,
   container: HTMLElement,
   sourcePath: string,
-  hrefByPath: Map<string, string>,
-  basePath: string,
   startIndex: number,
   visited: ReadonlySet<string>,
-  // 005-latex-math: chapter-wide accumulator so placeholder indices are
-  // unique across the host note and every embed it pulls in (a single
-  // renderMath pass over the final DOM resolves them all).
-  mathCounter: { next: number },
-  mathSpans: MathSpan[]
-): Promise<{ warnings: string[]; images: { vaultPath: string; newHref: string; sourcePath: string }[] }> {
+  pipeline: EmbedPipeline
+): Promise<EmbedExpansion> {
   const warnings: string[] = [];
-  const images: { vaultPath: string; newHref: string; sourcePath: string }[] = [];
+  const images: EmbeddedImage[] = [];
   let index = startIndex;
 
-  const wrappers = Array.from(container.querySelectorAll<HTMLElement>(`.${EMBED_WRAPPER_CLASS}`)).filter(
-    (w) => {
-      // Nested wrappers are someone else's job: ones inside a div this
-      // function rendered are handled by the recursive call on that div, and
-      // ones inside Obsidian's own async-populated `.markdown-embed-content`
-      // preview are discarded wholesale by flattenEmbeds along with their
-      // host wrapper.
-      const enclosing = w.parentElement?.closest(`.${EMBED_WRAPPER_CLASS}`);
-      return !enclosing || !container.contains(enclosing);
-    }
-  );
-
-  for (const wrapper of wrappers) {
+  for (const wrapper of topLevelEmbedWrappers(container)) {
     const src = (wrapper.getAttribute("src") ?? "").trim();
     if (!src || isImageEmbedSrc(src)) continue; // image embed: rewriteImages' job
 
     const target = splitEmbedTarget(src);
-    const dest = app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
+    const dest = pipeline.app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
     if (!(dest instanceof TFile)) {
       wrapper.setAttribute("data-embed-reason", "unresolved");
       continue;
     }
     if (dest.extension === "base") {
-      // A Bases TABLE view becomes a static table; anything else about a Base
-      // (a card view, a grouped table, an error, a timeout) degrades through the
-      // same "unsupported-type" marker it always did, now with the reason.
-      let outcome;
-      try {
-        outcome = await getBaseRenderer()(app, src, sourcePath);
-      } catch (e) {
-        outcome = { ok: false as const, reason: errorMessage(e) };
-      }
-      if (outcome.ok) {
-        const ourDiv = wrapper.createDiv();
-        ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-        ourDiv.appendChild(outcome.table);
-        // No rewriteLinks here: a cell's link to a note is finalised by the pass
-        // of whatever encloses this embed (the embedded note's own, or the
-        // chapter's), resolving against the note the Base is written in. It
-        // points at that note's chapter if the note is in the book, and
-        // degrades to plain text if not.
-        if (outcome.warning) warnings.push(`${outcome.warning}: ${src} (referenced by ${sourcePath})`);
-      } else {
+      const base = await expandBaseEmbed(pipeline.app, src, sourcePath);
+      if (base.kind === "unsupported") {
+        // A card view, a grouped table, an error, a timeout: the same
+        // "unsupported-type" marker as any other non-note embed, now with
+        // Obsidian's reason attached.
         wrapper.setAttribute("data-embed-reason", "unsupported-type");
-        wrapper.setAttribute("data-embed-detail", outcome.reason);
+        wrapper.setAttribute("data-embed-detail", base.reason);
+        continue;
       }
+      // A Bases TABLE view becomes a static table. No rewriteLinks here: a
+      // cell's link to a note is finalised by the pass of whatever encloses
+      // this embed (the embedded note's own, or the chapter's), resolving
+      // against the note the Base is written in. It points at that note's
+      // chapter if the note is in the book, and degrades to plain text if not.
+      const ourDiv = wrapper.createDiv();
+      ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
+      ourDiv.appendChild(base.table);
+      if (base.warning) warnings.push(`${base.warning}: ${src} (referenced by ${sourcePath})`);
       continue;
     }
     if (dest.extension !== "md") {
@@ -187,118 +189,163 @@ async function populateEmbeds(
       continue;
     }
 
-    // Item 2 of the 2026-09-29 review: everything from here to the end of
-    // the iteration can throw (a note that cannot be read, a renderer that
-    // rejects, a rasterizer that throws inside the recursive call). Before
-    // this try, any of those escaped renderUnitToChapter and cost the WHOLE
-    // host chapter; now it costs this one embed, which degrades through the
-    // same data-embed-reason path as an unresolved one. The snapshots let
-    // the catch undo what a partly-rendered embed already recorded: its
-    // div is removed, so the image hrefs and math placeholders stamped into
-    // it no longer exist and must not be counted.
-    const imagesBefore = images.length;
-    const spansBefore = mathSpans.length;
-    const indexBefore = index;
-    try {
-      const rawMd = await app.vault.cachedRead(dest);
-      let sectionMd: string;
-      if (target.heading || target.block) {
-        const mdLines = rawMd.split(/\r?\n/);
-        const cache = app.metadataCache.getFileCache(dest);
-        const loc = target.heading
-          ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
-          : findBlockRange(toSectionInfo(cache?.sections), toListItemInfo(cache?.listItems), target.block!);
-        if (!loc) {
-          wrapper.setAttribute("data-embed-reason", target.heading ? "heading-not-found" : "block-not-found");
-          continue;
-        }
-        // No stripFrontmatter here: frontmatter always sits before any heading/
-        // block worth embedding, so slicing against the RAW (frontmatter-
-        // included) line array — matching how the cache's own line numbers are
-        // computed — naturally excludes it without a separate strip step (see
-        // research.md's Unknown 2).
-        let sliced = mdLines.slice(loc.startLine, loc.endLine + 1).join("\n");
-        if (target.block) {
-          // Dedent ONLY a list-item range. A root-level section either starts at
-          // column 0 (no-op) or is an indented-style code block, whose leading
-          // whitespace is what makes it code — dedenting that would silently
-          // demote it to a paragraph (002 research R3a).
-          if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
-          sliced = stripBlockMarker(sliced, target.block);
-        }
-        sectionMd = stripDynamicBlocks(sliced);
-      } else {
-        sectionMd = stripDynamicBlocks(stripFrontmatter(rawMd));
-      }
-      // 011-footnote-semantics: an embed's slice is where a footnote most often loses its
-      // partner (a heading- or block-scoped embed copies the reference but not the definition
-      // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
-      // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
-      // Named for the embedded note (`dest.path`), whose source holds it.
-      warnings.push(...footnoteSourceWarnings(scanFootnoteSource(sectionMd), dest.path));
-
-      const ourDiv = wrapper.createDiv();
-      ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-      // 005-latex-math: protect math in the embed's source the same way the
-      // host note is protected, with chapter-unique placeholder indices
-      // re-keyed against the shared counter (protectMath numbers from 0).
-      const protectedMd = protectMath(sectionMd);
-      let embedMd = protectedMd.md;
-      const offset = mathCounter.next;
-      if (offset > 0 && protectedMd.spans.length > 0) {
-        embedMd = embedMd.replace(/data-inkbound-math="(\d+)"/g, (_m, n: string) => {
-          return `data-inkbound-math="${Number(n) + offset}"`;
-        });
-      }
-      mathSpans.push(
-        ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
-      );
-      mathCounter.next += protectedMd.spans.length;
-      await MarkdownRenderer.render(app, embedMd, ourDiv, dest.path, component);
-
-      const childVisited = new Set(visited);
-      childVisited.add(dest.path);
-      const child = await populateEmbeds(
-        app,
-        component,
-        ourDiv,
-        dest.path,
-        hrefByPath,
-        basePath,
-        index,
-        childVisited,
-        mathCounter,
-        mathSpans
-      );
-      warnings.push(...child.warnings);
-      images.push(...child.images);
-      index += child.images.length;
-
-      const resolve = (linkpath: string): string | null => {
-        const f = app.metadataCache.getFirstLinkpathDest(linkpath, dest.path);
-        return f instanceof TFile ? f.path : null;
-      };
-      rewriteLinks(ourDiv, hrefByPath, resolve);
-      const found = rewriteImages(ourDiv, basePath, index, (w) =>
-        warnings.push(`${w} (referenced by ${dest.path})`)
-      );
-      // Tagged with the embed's own resolved path — a relative (non-app://)
-      // image reference inside this embed's content must resolve against the
-      // note it came from, not the host chapter (FR-006), and this is the only
-      // point that still has that context before it flows into main.ts.
-      images.push(...found.map((f) => ({ ...f, sourcePath: dest.path })));
-      index += found.length;
-    } catch (e) {
-      wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`)?.remove();
-      images.length = imagesBefore;
-      mathSpans.length = spansBefore;
-      index = indexBefore;
-      wrapper.setAttribute("data-embed-reason", "render-failed");
-      wrapper.setAttribute("data-embed-detail", errorMessage(e));
-    }
+    // The render below can throw (a note that cannot be read, a renderer that
+    // rejects, a rasterizer that throws inside the recursive call).
+    // expandMarkdownEmbed catches that, so it costs this one embed and never
+    // the host chapter; on failure nothing is added to `images`, so the next
+    // wrapper still numbers its own from `index`.
+    const expanded = await expandMarkdownEmbed(wrapper, dest, target, sourcePath, index, visited, pipeline);
+    warnings.push(...expanded.warnings);
+    images.push(...expanded.images);
+    index += expanded.images.length;
   }
 
   return { warnings, images };
+}
+
+function topLevelEmbedWrappers(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(`.${EMBED_WRAPPER_CLASS}`)).filter((w) => {
+    // Nested wrappers are someone else's job: ones inside a div this function
+    // rendered are handled by the recursive call on that div, and ones inside
+    // Obsidian's own async-populated `.markdown-embed-content` preview are
+    // discarded wholesale by flattenEmbeds along with their host wrapper.
+    const enclosing = w.parentElement?.closest(`.${EMBED_WRAPPER_CLASS}`);
+    return !enclosing || !container.contains(enclosing);
+  });
+}
+
+type BaseEmbedExpansion =
+  { kind: "rendered"; table: HTMLElement; warning: string | null } | { kind: "unsupported"; reason: string };
+
+async function expandBaseEmbed(app: App, src: string, sourcePath: string): Promise<BaseEmbedExpansion> {
+  try {
+    const outcome = await getBaseRenderer()(app, src, sourcePath);
+    return outcome.ok
+      ? { kind: "rendered", table: outcome.table, warning: outcome.warning }
+      : { kind: "unsupported", reason: outcome.reason };
+  } catch (e) {
+    return { kind: "unsupported", reason: errorMessage(e) };
+  }
+}
+
+type EmbedSource = { ok: true; md: string } | { ok: false; reason: "heading-not-found" | "block-not-found" };
+
+// The markdown an embed renders: the whole note, or the cached line range a
+// heading/block-scoped embed (`![[Note#Heading]]`, `![[Note^block]]`) selects.
+function embedSource(app: App, dest: TFile, target: EmbedTarget, rawMd: string): EmbedSource {
+  if (!target.heading && !target.block) {
+    return { ok: true, md: stripDynamicBlocks(stripFrontmatter(rawMd)) };
+  }
+  const mdLines = rawMd.split(/\r?\n/);
+  const cache = app.metadataCache.getFileCache(dest);
+  const loc = target.heading
+    ? findHeadingSection(toHeadingInfo(cache?.headings), target.heading, mdLines.length)
+    : findBlockRange(toSectionInfo(cache?.sections), toListItemInfo(cache?.listItems), target.block!);
+  if (!loc) return { ok: false, reason: target.heading ? "heading-not-found" : "block-not-found" };
+  // No stripFrontmatter here: frontmatter always sits before any heading/
+  // block worth embedding, so slicing against the RAW (frontmatter-
+  // included) line array — matching how the cache's own line numbers are
+  // computed — naturally excludes it without a separate strip step (see
+  // research.md's Unknown 2).
+  let sliced = mdLines.slice(loc.startLine, loc.endLine + 1).join("\n");
+  if (target.block) {
+    // Dedent ONLY a list-item range. A root-level section either starts at
+    // column 0 (no-op) or is an indented-style code block, whose leading
+    // whitespace is what makes it code — dedenting that would silently
+    // demote it to a paragraph (002 research R3a).
+    if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
+    sliced = stripBlockMarker(sliced, target.block);
+  }
+  return { ok: true, md: stripDynamicBlocks(sliced) };
+}
+
+function offsetMathPlaceholderIndices(md: string, offset: number): string {
+  if (offset === 0) return md;
+  return md.replace(
+    /data-inkbound-math="(\d+)"/g,
+    (_match, n: string) => `data-inkbound-math="${Number(n) + offset}"`
+  );
+}
+
+// Renders `dest` into the wrapper's own copy and finalises its links and
+// images. On any failure the wrapper is marked "render-failed", the
+// partially-built content is discarded, and the caller's image numbering does
+// not advance.
+async function expandMarkdownEmbed(
+  wrapper: HTMLElement,
+  dest: TFile,
+  target: EmbedTarget,
+  sourcePath: string,
+  startIndex: number,
+  visited: ReadonlySet<string>,
+  pipeline: EmbedPipeline
+): Promise<EmbedExpansion> {
+  const warnings: string[] = [];
+  const spansBefore = pipeline.mathSpans.length;
+  try {
+    const rawMd = await pipeline.app.vault.cachedRead(dest);
+    const source = embedSource(pipeline.app, dest, target, rawMd);
+    if (!source.ok) {
+      wrapper.setAttribute("data-embed-reason", source.reason);
+      return { warnings, images: [] };
+    }
+    // 011-footnote-semantics: an embed's slice is where a footnote most often loses its
+    // partner (a heading- or block-scoped embed copies the reference but not the definition
+    // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
+    // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
+    // Named for the embedded note (`dest.path`), whose source holds it.
+    warnings.push(...footnoteSourceWarnings(scanFootnoteSource(source.md), dest.path));
+
+    const ourDiv = wrapper.createDiv();
+    ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
+    // 005-latex-math: protect math in the embed's source the same way the
+    // host note is protected, with chapter-unique placeholder indices
+    // re-keyed against the shared counter (protectMath numbers from 0).
+    const protectedMd = protectMath(source.md);
+    const offset = pipeline.mathCounter.next;
+    pipeline.mathSpans.push(
+      ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
+    );
+    pipeline.mathCounter.next += protectedMd.spans.length;
+    await MarkdownRenderer.render(
+      pipeline.app,
+      offsetMathPlaceholderIndices(protectedMd.md, offset),
+      ourDiv,
+      dest.path,
+      pipeline.component
+    );
+
+    const childVisited = new Set(visited);
+    childVisited.add(dest.path);
+    const child = await populateEmbeds(ourDiv, dest.path, startIndex, childVisited, pipeline);
+    warnings.push(...child.warnings);
+
+    const resolve = (linkpath: string): string | null => {
+      const f = pipeline.app.metadataCache.getFirstLinkpathDest(linkpath, dest.path);
+      return f instanceof TFile ? f.path : null;
+    };
+    rewriteLinks(ourDiv, pipeline.hrefByPath, resolve);
+    const found = rewriteImages(ourDiv, pipeline.basePath, startIndex + child.images.length, (w) =>
+      warnings.push(`${w} (referenced by ${dest.path})`)
+    );
+    // Tagged with the embed's own resolved path — a relative (non-app://)
+    // image reference inside this embed's content must resolve against the
+    // note it came from, not the host chapter (FR-006), and this is the only
+    // point that still has that context before it flows into main.ts.
+    return {
+      warnings,
+      images: [...child.images, ...found.map((f) => ({ ...f, sourcePath: dest.path }))],
+    };
+  } catch (e) {
+    wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`)?.remove();
+    // The div is gone, so the image hrefs and math placeholders stamped into
+    // it no longer exist and must not be counted. The counter itself is not
+    // rolled back: placeholder indices only need to be unique, not dense.
+    pipeline.mathSpans.length = spansBefore;
+    wrapper.setAttribute("data-embed-reason", "render-failed");
+    wrapper.setAttribute("data-embed-detail", errorMessage(e));
+    return { warnings, images: [] };
+  }
 }
 
 // Re-exported so callers/tests can inject a deterministic rasterizer via the
@@ -352,18 +399,14 @@ export async function renderUnitToChapter(
     // flattenEmbeds replaces the embed wrappers (with our copy, or with the
     // placeholder) and that structure is lost. Obsidian's own async embed
     // population is never consulted — see populateEmbeds' comment.
-    const embedRewrite = await populateEmbeds(
+    const embedRewrite = await populateEmbeds(el, sourcePath, startImageIndex, new Set([sourcePath]), {
       app,
       component,
-      el,
-      sourcePath,
       hrefByPath,
       basePath,
-      startImageIndex,
-      new Set([sourcePath]),
       mathCounter,
-      mathSpans
-    );
+      mathSpans,
+    });
     warnings.push(...embedRewrite.warnings);
     warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
     const resolve = (linkpath: string): string | null => {

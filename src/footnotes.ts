@@ -163,10 +163,15 @@ const SNIPPET_LENGTH = 40;
 
 interface Note {
   li: Element;
-  keys: Set<string>;
   markers: Element[];
   number: number;
   id: string;
+}
+
+interface ResolvedMarker {
+  sup: Element;
+  note: Note;
+  ordinal: number;
 }
 
 function hasClass(el: Element, name: string): boolean {
@@ -259,6 +264,21 @@ export function processFootnotes(root: HTMLElement): string[] {
   if (containers.length === 0 && markerSups.length === 0) return [];
 
   const warnings: string[] = [];
+  const { notes, byKey } = gatherNotes(containers);
+  const mint = createIdMinter(reservedIds(root));
+  const { resolved, ambiguousNotes } = matchMarkers(markerSups, byKey, mint, warnings);
+  for (const note of notes) {
+    if (note.number === 0 && !ambiguousNotes.has(note)) {
+      warnings.push(`Footnote note "${describeNote(note)}" has no marker and was left out`);
+    }
+  }
+
+  rewriteMarkers(resolved, mint);
+  appendFootnoteSection(root, notes, containers);
+  return warnings;
+}
+
+function gatherNotes(containers: Element[]): { notes: Note[]; byKey: Map<string, Note[]> } {
   const notes: Note[] = [];
   const byKey = new Map<string, Note[]>();
   for (const container of containers) {
@@ -268,32 +288,48 @@ export function processFootnotes(root: HTMLElement): string[] {
         const v = li.getAttribute(attr);
         if (v) keys.add(v);
       }
-      const note: Note = { li, keys, markers: [], number: 0, id: "" };
+      const note: Note = { li, markers: [], number: 0, id: "" };
       notes.push(note);
       for (const key of keys) byKey.set(key, [...(byKey.get(key) ?? []), note]);
     }
   }
+  return { notes, byKey };
+}
 
-  // Ids held by anything that is NOT part of the footnote structure being replaced: the
-  // minted ids must not collide with these (a heading titled "fn 1" is the realistic case).
+// Ids held by anything that is NOT part of the footnote structure being
+// replaced: the minted ids must not collide with these (a heading titled
+// "fn 1" is the realistic case).
+function reservedIds(root: HTMLElement): Set<string> {
   const taken = new Set<string>();
   for (const el of Array.from(root.querySelectorAll("[id]"))) {
     if (el.closest(".footnotes") || el.closest("sup.footnote-ref")) continue;
     taken.add(el.getAttribute("id")!);
   }
-  const mint = (base: string): string => {
+  return taken;
+}
+
+function createIdMinter(taken: Set<string>): (base: string) => string {
+  return (base) => {
     let id = base;
     for (let n = 2; taken.has(id); n++) id = `${base}-x${n}`;
     taken.add(id);
     return id;
   };
+}
 
-  // Number notes by first reference, in document order across the whole chapter — an
-  // embed's markers appear where the embed sits, so its notes are numbered there. A marker
-  // is only ever tied to a note when exactly ONE note answers to its fragment: flattening
-  // leaves no boundary between renders, so a fragment shared by several notes cannot be
-  // attributed, and guessing would silently attach a marker to the wrong note.
-  const resolved: { sup: Element; note: Note; ordinal: number }[] = [];
+// Number notes by first reference, in document order across the whole chapter —
+// an embed's markers appear where the embed sits, so its notes are numbered
+// there. A marker is only ever tied to a note when exactly ONE note answers to
+// its fragment: flattening leaves no boundary between renders, so a fragment
+// shared by several notes cannot be attributed, and guessing would silently
+// attach a marker to the wrong note.
+function matchMarkers(
+  markerSups: Element[],
+  byKey: Map<string, Note[]>,
+  mint: (base: string) => string,
+  warnings: string[]
+): { resolved: ResolvedMarker[]; ambiguousNotes: Set<Note> } {
+  const resolved: ResolvedMarker[] = [];
   const ambiguousNotes = new Set<Note>();
   const ambiguousFragments = new Set<string>();
   let counter = 0;
@@ -325,13 +361,11 @@ export function processFootnotes(root: HTMLElement): string[] {
       degradeMarker(sup, anchor);
     }
   }
-  for (const note of notes) {
-    if (note.number === 0 && !ambiguousNotes.has(note)) {
-      warnings.push(`Footnote note "${describeNote(note)}" has no marker and was left out`);
-    }
-  }
+  return { resolved, ambiguousNotes };
+}
 
-  // Markers: a superscript number linking to the note, with the standard semantics.
+// Markers: a superscript number linking to the note, with the standard semantics.
+function rewriteMarkers(resolved: ResolvedMarker[], mint: (base: string) => string): void {
   for (const { sup, note, ordinal } of resolved) {
     for (const name of sup.getAttributeNames()) sup.removeAttribute(name);
     sup.setAttribute("class", "footnote-ref");
@@ -349,21 +383,21 @@ export function processFootnotes(root: HTMLElement): string[] {
       )
     );
   }
+}
 
-  // Notes: one section, one aside per referenced note, in number order. Every source
-  // container goes, including any whose notes nothing referred to.
+// Notes: one section, one aside per referenced note, in number order. Every
+// source container goes, including any whose notes nothing referred to.
+function appendFootnoteSection(root: HTMLElement, notes: Note[], containers: Element[]): void {
   const referenced = notes.filter((n) => n.number > 0).sort((a, b) => a.number - b.number);
   const asides = referenced.map(buildAside);
   for (const container of containers) container.remove();
-  if (asides.length > 0) {
-    const section = create("section", [
-      ["class", "footnotes"],
-      ["epub:type", "footnotes"],
-    ]);
-    for (const aside of asides) section.appendChild(aside);
-    root.appendChild(section);
-  }
-  return warnings;
+  if (asides.length === 0) return;
+  const section = create("section", [
+    ["class", "footnotes"],
+    ["epub:type", "footnotes"],
+  ]);
+  for (const aside of asides) section.appendChild(aside);
+  root.appendChild(section);
 }
 
 function buildAside(note: Note): HTMLElement {

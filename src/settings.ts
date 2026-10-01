@@ -42,6 +42,55 @@ const TOC_DEPTH_OPTIONS: Record<string, string> = {
   "6": "Level 6",
 };
 
+interface SettingText {
+  name: string;
+  desc?: string;
+}
+
+// Single source for each setting's label and description so display() and
+// getSettingDefinitions() can never drift on wording — the same rule
+// BACKLINK_POSITION_OPTIONS follows for the dropdown's values.
+const SETTING_TEXT = {
+  outputFolder: {
+    name: "Output folder",
+    desc: "Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.",
+  },
+  mobileOutputFolder: {
+    name: "Output folder (mobile)",
+    desc: "Folder inside the vault where mobile saves books; empty = Exports. Mobile has no access outside the vault.",
+  },
+  linkDepth: {
+    name: "Default link depth",
+    desc: "How far 'note + linked notes' follows wikilinks (1–3).",
+  },
+  backlinkPosition: {
+    name: "Backlink listing position",
+    desc: 'Where each chapter shows the "Linked from:" list of chapters that link to it.',
+  },
+  tocHeadingDepth: {
+    name: "TOC heading depth",
+    desc: "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC.",
+  },
+  embedThaiFont: {
+    name: "Embed Thai font",
+    desc: "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present.",
+  },
+  language: {
+    name: "Language (dc:language)",
+  },
+  fallbackAuthor: {
+    name: "Fallback author",
+    desc: "Used when a note/folder has no author frontmatter.",
+  },
+  booxUrl: {
+    name: "Device URL",
+    desc: "Shown on the Boox in the BooxDrop app, e.g. http://192.168.1.42:8085",
+  },
+  pushAfterExport: {
+    name: "Push after export",
+  },
+} as const satisfies Record<string, SettingText>;
+
 export class EpubExportSettingTab extends PluginSettingTab {
   constructor(
     app: App,
@@ -80,45 +129,38 @@ export class EpubExportSettingTab extends PluginSettingTab {
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       {
-        name: "Output folder",
-        desc: "Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.",
+        ...SETTING_TEXT.outputFolder,
         control: { type: "text", key: "outputFolder" },
       },
       {
         // 008-mobile-support: shown on BOTH platforms, each labeled for the
         // platform it governs. Hiding the inactive one would leave a user
         // unable to explain where their other device's books went.
-        name: "Output folder (mobile)",
-        desc: "Folder inside the vault where mobile saves books; empty = Exports. Mobile has no access outside the vault.",
+        ...SETTING_TEXT.mobileOutputFolder,
         control: { type: "text", key: "mobileOutputFolder" },
       },
       {
-        name: "Default link depth",
-        desc: "How far 'note + linked notes' follows wikilinks (1–3).",
+        ...SETTING_TEXT.linkDepth,
         control: { type: "slider", key: "linkDepth", min: 1, max: 3, step: 1 },
       },
       {
-        name: "Backlink listing position",
-        desc: 'Where each chapter shows the "Linked from:" list of chapters that link to it.',
+        ...SETTING_TEXT.backlinkPosition,
         control: { type: "dropdown", key: "backlinkPosition", options: BACKLINK_POSITION_OPTIONS },
       },
       {
-        name: "TOC heading depth",
-        desc: "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC.",
+        ...SETTING_TEXT.tocHeadingDepth,
         control: { type: "dropdown", key: "tocHeadingDepth", options: TOC_DEPTH_OPTIONS },
       },
       {
-        name: "Embed Thai font",
-        desc: "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present.",
+        ...SETTING_TEXT.embedThaiFont,
         control: { type: "toggle", key: "embedThaiFont" },
       },
       {
-        name: "Language (dc:language)",
+        ...SETTING_TEXT.language,
         control: { type: "text", key: "language" },
       },
       {
-        name: "Fallback author",
-        desc: "Used when a note/folder has no author frontmatter.",
+        ...SETTING_TEXT.fallbackAuthor,
         control: { type: "text", key: "fallbackAuthor" },
       },
       {
@@ -126,12 +168,11 @@ export class EpubExportSettingTab extends PluginSettingTab {
         heading: "BooxDrop",
         items: [
           {
-            name: "Device URL",
-            desc: "Shown on the Boox in the BooxDrop app, e.g. http://192.168.1.42:8085",
+            ...SETTING_TEXT.booxUrl,
             control: { type: "text", key: "booxUrl" },
           },
           {
-            name: "Push after export",
+            ...SETTING_TEXT.pushAfterExport,
             control: { type: "toggle", key: "pushAfterExport" },
           },
           {
@@ -149,129 +190,155 @@ export class EpubExportSettingTab extends PluginSettingTab {
     ];
   }
 
+  // display()'s field builders. Each wires the same shape — label, optional
+  // description, control, and a save after every change — so a setting is one
+  // call and its wording lives only in SETTING_TEXT.
+  private baseSetting(containerEl: HTMLElement, field: SettingText): Setting {
+    const setting = new Setting(containerEl).setName(field.name);
+    if (field.desc) setting.setDesc(field.desc);
+    return setting;
+  }
+
+  private addTextField(
+    containerEl: HTMLElement,
+    field: SettingText,
+    value: string,
+    onInput: (value: string) => void,
+    placeholder?: string
+  ): void {
+    this.baseSetting(containerEl, field).addText((t) => {
+      if (placeholder) t.setPlaceholder(placeholder);
+      t.setValue(value).onChange((v) => {
+        onInput(v);
+        void this.plugin.saveSettings();
+      });
+    });
+  }
+
+  private addToggleField(
+    containerEl: HTMLElement,
+    field: SettingText,
+    value: boolean,
+    onInput: (value: boolean) => void
+  ): void {
+    this.baseSetting(containerEl, field).addToggle((t) =>
+      t.setValue(value).onChange((v) => {
+        onInput(v);
+        void this.plugin.saveSettings();
+      })
+    );
+  }
+
+  private addSliderField(
+    containerEl: HTMLElement,
+    field: SettingText,
+    value: number,
+    limits: { min: number; max: number; step: number },
+    onInput: (value: number) => void
+  ): void {
+    this.baseSetting(containerEl, field).addSlider((sl) =>
+      sl
+        .setLimits(limits.min, limits.max, limits.step)
+        .setValue(value)
+        .onChange((v) => {
+          onInput(v);
+          void this.plugin.saveSettings();
+        })
+    );
+  }
+
+  private addDropdownField(
+    containerEl: HTMLElement,
+    field: SettingText,
+    value: string,
+    options: Record<string, string>,
+    onInput: (value: string) => void
+  ): void {
+    this.baseSetting(containerEl, field).addDropdown((d) =>
+      d
+        .addOptions(options)
+        .setValue(value)
+        .onChange((v) => {
+          onInput(v);
+          void this.plugin.saveSettings();
+        })
+    );
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
     const s = this.plugin.settings;
-    const save = () => this.plugin.saveSettings();
 
-    new Setting(containerEl)
-      .setName("Output folder")
-      .setDesc("Absolute path or ~/…; empty = ~/Downloads. Existing .epub files are overwritten.")
-      .addText((t) =>
-        t.setValue(s.outputFolder).onChange((v) => {
-          s.outputFolder = v;
-          void save();
-        })
-      );
+    this.addTextField(containerEl, SETTING_TEXT.outputFolder, s.outputFolder, (v) => {
+      s.outputFolder = v;
+    });
 
-    new Setting(containerEl)
-      .setName("Output folder (mobile)")
-      .setDesc(
-        "Folder inside the vault where mobile saves books; empty = Exports. Mobile has no access outside the vault."
-      )
-      .addText((t) =>
-        t.setValue(s.mobileOutputFolder).onChange((v) => {
-          // Coerced on the way in, not just on load: the value is handed to the
-          // vault adapter, so a typo like "../" must never reach a write.
-          s.mobileOutputFolder = coerceMobileOutputFolder(v);
-          void save();
-        })
-      );
+    this.addTextField(containerEl, SETTING_TEXT.mobileOutputFolder, s.mobileOutputFolder, (v) => {
+      // Coerced on the way in, not just on load: the value is handed to the
+      // vault adapter, so a typo like "../" must never reach a write.
+      s.mobileOutputFolder = coerceMobileOutputFolder(v);
+    });
 
-    new Setting(containerEl)
-      .setName("Default link depth")
-      .setDesc("How far 'note + linked notes' follows wikilinks (1–3).")
-      .addSlider((sl) =>
-        sl
-          .setLimits(1, 3, 1)
-          .setValue(s.linkDepth)
-          .onChange((v) => {
-            s.linkDepth = v;
-            void save();
-          })
-      );
+    this.addSliderField(
+      containerEl,
+      SETTING_TEXT.linkDepth,
+      s.linkDepth,
+      { min: 1, max: 3, step: 1 },
+      (v) => {
+        s.linkDepth = v;
+      }
+    );
 
-    new Setting(containerEl)
-      .setName("Backlink listing position")
-      .setDesc('Where each chapter shows the "Linked from:" list of chapters that link to it.')
-      .addDropdown((d) =>
-        d
-          .addOptions(BACKLINK_POSITION_OPTIONS)
-          .setValue(s.backlinkPosition)
-          .onChange((v) => {
-            s.backlinkPosition = coerceBacklinkPosition(v);
-            void save();
-          })
-      );
+    this.addDropdownField(
+      containerEl,
+      SETTING_TEXT.backlinkPosition,
+      s.backlinkPosition,
+      BACKLINK_POSITION_OPTIONS,
+      (v) => {
+        s.backlinkPosition = coerceBacklinkPosition(v);
+      }
+    );
 
-    new Setting(containerEl)
-      .setName("TOC heading depth")
-      .setDesc(
-        "Deepest heading level listed under each chapter in the book's table of contents. Off restores the flat chapter-only TOC."
-      )
-      .addDropdown((d) =>
-        d
-          .addOptions(TOC_DEPTH_OPTIONS)
-          .setValue(String(s.tocHeadingDepth))
-          .onChange((v) => {
-            s.tocHeadingDepth = coerceTocHeadingDepth(Number(v));
-            void save();
-          })
-      );
+    this.addDropdownField(
+      containerEl,
+      SETTING_TEXT.tocHeadingDepth,
+      String(s.tocHeadingDepth),
+      TOC_DEPTH_OPTIONS,
+      (v) => {
+        s.tocHeadingDepth = coerceTocHeadingDepth(Number(v));
+      }
+    );
 
     // 006-thai-font FR-009: default ON — books containing Thai get Noto
     // Sans Thai (SIL OFL 1.1) embedded so e-ink renders it consistently.
-    new Setting(containerEl)
-      .setName("Embed Thai font")
-      .setDesc(
-        "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present."
-      )
-      .addToggle((t) =>
-        t.setValue(s.embedThaiFont).onChange((v) => {
-          s.embedThaiFont = coerceEmbedThaiFont(v);
-          void save();
-        })
-      );
+    this.addToggleField(containerEl, SETTING_TEXT.embedThaiFont, s.embedThaiFont, (v) => {
+      s.embedThaiFont = coerceEmbedThaiFont(v);
+    });
 
-    new Setting(containerEl).setName("Language (dc:language)").addText((t) =>
-      t.setValue(s.language).onChange((v) => {
-        s.language = v || "th";
-        void save();
-      })
-    );
+    this.addTextField(containerEl, SETTING_TEXT.language, s.language, (v) => {
+      s.language = v || "th";
+    });
 
-    new Setting(containerEl)
-      .setName("Fallback author")
-      .setDesc("Used when a note/folder has no author frontmatter.")
-      .addText((t) =>
-        t.setValue(s.fallbackAuthor).onChange((v) => {
-          s.fallbackAuthor = v;
-          void save();
-        })
-      );
+    this.addTextField(containerEl, SETTING_TEXT.fallbackAuthor, s.fallbackAuthor, (v) => {
+      s.fallbackAuthor = v;
+    });
 
     new Setting(containerEl).setName("BooxDrop").setHeading();
 
-    new Setting(containerEl)
-      .setName("Device URL")
-      .setDesc("Shown on the Boox in the BooxDrop app, e.g. http://192.168.1.42:8085")
-      .addText((t) =>
-        t
-          .setPlaceholder("http://192.168.1.42:8085")
-          .setValue(s.booxUrl)
-          .onChange((v) => {
-            s.booxUrl = v.trim();
-            void save();
-          })
-      );
-
-    new Setting(containerEl).setName("Push after export").addToggle((tg) =>
-      tg.setValue(s.pushAfterExport).onChange((v) => {
-        s.pushAfterExport = v;
-        void save();
-      })
+    this.addTextField(
+      containerEl,
+      SETTING_TEXT.booxUrl,
+      s.booxUrl,
+      (v) => {
+        s.booxUrl = v.trim();
+      },
+      "http://192.168.1.42:8085"
     );
+
+    this.addToggleField(containerEl, SETTING_TEXT.pushAfterExport, s.pushAfterExport, (v) => {
+      s.pushAfterExport = v;
+    });
 
     new Setting(containerEl)
       .setName("Test connection")
