@@ -3,6 +3,16 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.1
+
+No change to exported books — this release is internal readability work.
+
+- **The embed, footnote, and settings code paths are split into named steps.**
+  Export behavior, warnings, and EPUB output are unchanged; each stage of the
+  pipeline is now a function that says what it does.
+- **Setting labels and descriptions have a single source,** so the settings tab
+  and Obsidian's settings search cannot drift apart.
+
 ## 1.10.0
 
 An embedded Bases table now comes through as a table.
