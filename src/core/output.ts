@@ -4,7 +4,7 @@
 // placement rule below is a unit test with no stub at all.
 //
 // This is the ONE place platform changes the outcome of an export. It does not
-// DETECT the platform: src/main.ts (an adapter, already allowed to import
+// DETECT the platform: adapters/output-adapter.ts (already allowed to import
 // `obsidian`) reads `Platform` and passes a plain PlatformKind in. Detecting
 // here would drag an `obsidian` import into the pure core and break the
 // module-split invariant the constitution calls load-bearing (principle IV) —

@@ -59,7 +59,7 @@ curl -sS -m 90 -X POST \
 ```
 
 A `"successful":true` body means the plugin's `UPLOAD_PATH` should match that
-path. All BooxDrop knowledge lives in `src/booxdrop.ts` — nothing else needs to
+path. All BooxDrop knowledge lives in `src/core/booxdrop.ts` — nothing else needs to
 change.
 
 ## Client behaviour notes

@@ -1,6 +1,6 @@
 {
   "name": "chrome",
-  "covers": "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/render.ts) and task-list checkboxes",
+  "covers": "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/core/render.ts) and task-list checkboxes",
   "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
   "obsidianVersion": "1.13.7",
   "capturedAt": "2026-09-29",

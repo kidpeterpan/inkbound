@@ -1,9 +1,9 @@
 // ── Thai font embedding (006-thai-font) ──────────────────────────────────
 //
 // Pure module: zero "obsidian" imports (constitution IV). The font BYTES
-// live in src/fonts/*.ttf and are inlined by esbuild's binary loader
+// live in src/core/fonts/*.ttf and are inlined by esbuild's base64 loader
 // (esbuild.config.mjs + scripts/local-export.ts both set
-// `loader: { ".ttf": "binary" }`); vitest aliases those exact paths to
+// `loader: { ".ttf": "base64" }`); vitest aliases those exact paths to
 // tests/fixtures/font-bytes.ts instead. The OFL license text is inlined as
 // a constant so no text-loader is needed — it must travel with the font
 // (SIL OFL 1.1 requirement) and is shipped inside every font-bearing book.
