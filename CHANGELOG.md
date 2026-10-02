@@ -3,6 +3,23 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.3
+
+No change to exported books — this release is internal readability work.
+
+- **Mermaid normalization, note-embed flattening, image rewriting, and the
+  heading TOC are split into named steps.** Embed degradation is now a value a
+  function returns rather than a warning pushed into a captured array, so
+  whether an embed resolved is answered by the signature, not by tracing side
+  effects.
+- **Rules that lived in two places now have one definition:** the
+  `images/img_NNN.ext` href format, the "unwrap a dead link into plain text"
+  step, and the RegExp escape used by block-marker stripping.
+- **Bases view settling, math rendering, the package manifest/spine build, and
+  the Boox push are short sequences of guard clauses** instead of long
+  conditional chains, and the export-check script's bundle loading and console
+  capture are named helpers.
+
 ## 1.10.2
 
 No change to exported books — this release is internal readability work.
