@@ -1140,6 +1140,38 @@ describe("renderUnitToChapter heading TOC (004-heading-toc)", () => {
     expect(r.warnings).toHaveLength(0);
   });
 
+  it("numbers all four image sources from one counter, continuing from startImageIndex", async () => {
+    // The counter contract: embed content, regular images, rasterized Mermaid
+    // and rendered math all become <img> in the SAME chapter, so each source
+    // must continue where the previous one stopped. Asserting it with a
+    // non-zero start and all four present is what pins "no stage recomputes
+    // the sum" — a stage that reused a stale offset would collide here.
+    const embedded = new TFile("/vault", "Embedded.md");
+    const app = appWithNotes({ "Embedded.md": "![inner](inner.png)" }, () => embedded);
+    setSvgRasterizer(async () => ({ bytes: new Uint8Array([7]), width: 10, height: 10 }));
+
+    const r = await renderUnitToChapter(
+      app,
+      newComponent(),
+      "![[Embedded]]\n\n![cap](pic.png)\n\n```mermaid\ngraph TD; A-->B;\n```\n\ninline $x^2$ math\n",
+      "note.md",
+      new Map(),
+      "/vault",
+      10
+    );
+
+    const hrefs = r.images.map((image) => image.newHref);
+    expect(hrefs).toEqual([
+      "../images/img_011.png", // embedded note's own image
+      "../images/img_012.png", // the host chapter's regular image
+      "../images/img_013.png", // rasterized Mermaid diagram
+      "../images/img_014.png", // rendered math
+    ]);
+    expect(new Set(hrefs).size, "no two images share an href").toBe(4);
+    for (const href of hrefs) expect(r.xhtmlBody).toContain(href);
+    expect(r.warnings).toHaveLength(0);
+  });
+
   it("renders math inside an embedded note, with chapter-unique placeholder indices", async () => {
     const dest = new TFile("/vault", "Embedded.md");
     const app = appWithNotes({ "Embedded.md": "math here: $a+b$" }, () => dest);

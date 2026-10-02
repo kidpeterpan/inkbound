@@ -23,6 +23,7 @@ const SRC_DIR = join(__dirname, "..", "src");
 const OBSIDIAN_ADAPTERS = new Set([
   "bases-adapter.ts", // the app's Bases renderer
   "export-notice.ts", // Notice + the report modal
+  "export-pipeline.ts", // drives the vault, the renderer and the book writer
   "http.ts", // requestUrl
   "main.ts", // the plugin itself
   "meta-adapter.ts", // metadata cache, vault reads, cover downloads

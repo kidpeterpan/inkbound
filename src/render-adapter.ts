@@ -387,6 +387,31 @@ export interface ChapterRender {
   toc: TocEntry[];
 }
 
+/**
+ * Turns one note's markdown into a chapter: rendered XHTML, the images it
+ * needs, its warnings, and its heading TOC.
+ *
+ * THE PAGE PIPELINE RUNS IN THIS ORDER, and two of these steps are
+ * order-sensitive in ways that are not obvious from the calls alone:
+ *
+ *   1. protectMath             — placeholders in, before any renderer sees $…$
+ *   2. MarkdownRenderer.render — the real renderer, once per note
+ *   3. populateEmbeds          — our own copy of every embedded note
+ *   4. cleanupDom              — flattenEmbeds + renderer chrome + Bases
+ *   5. rewriteLinks            — wikilinks -> sibling chapter hrefs
+ *   6. rewriteImages           — vault images -> numbered ../images/img_NNN
+ *   7. rasterizeMermaidDiagrams— Mermaid -> PNG
+ *   8. renderMath              — placeholders -> PNG
+ *   9. processFootnotes        — every note -> one EPUB 3 notes section
+ *  10. collectHeadingToc       — heading ids + nav entries (skipped at depth 0)
+ *  11. serializeBody           — the finished XHTML
+ *
+ * The load-bearing constraints: footnotes must run AFTER flattenEmbeds (each
+ * embed brings its own `section.footnotes` into the DOM) and BEFORE heading
+ * ids (so heading text can exclude markers and ids can avoid the footnote
+ * ids). Steps 3-8 all stamp `<img>` hrefs into the chapter, so they share ONE
+ * running image counter, advanced in step order — see `nextImageNumber` below.
+ */
 export async function renderUnitToChapter(
   app: App,
   component: Component,
@@ -415,12 +440,20 @@ export async function renderUnitToChapter(
   // in one call, replacing the createElement+appendChild pair.
   const el = document.body.createDiv();
   try {
+    // Every image this chapter ends up with — embed content, regular images,
+    // rasterized Mermaid, rendered math — becomes an
+    // `<img src="../images/img_NNN.ext">` in the SAME chapter, so all four are
+    // numbered from one running counter. Each stage advances it by however many
+    // images it stamped; no stage recomputes the sum, so inserting a stage
+    // cannot leave a later one reusing a number already burned into the HTML.
+    let nextImageNumber = startImageIndex;
+
     await MarkdownRenderer.render(app, protectedMd.md, el, sourcePath, component);
     // Render our own copy of every embedded note's content BEFORE cleanupDom's
     // flattenEmbeds replaces the embed wrappers (with our copy, or with the
     // placeholder) and that structure is lost. Obsidian's own async embed
     // population is never consulted — see populateEmbeds' comment.
-    const embedRewrite = await populateEmbeds(el, sourcePath, startImageIndex, new Set([sourcePath]), {
+    const embedRewrite = await populateEmbeds(el, sourcePath, nextImageNumber, new Set([sourcePath]), {
       app,
       component,
       hrefByPath,
@@ -429,6 +462,8 @@ export async function renderUnitToChapter(
       mathSpans,
     });
     warnings.push(...embedRewrite.warnings);
+    nextImageNumber += embedRewrite.images.length;
+
     warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
     const resolve = (linkpath: string): string | null => {
       const f = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
@@ -437,26 +472,21 @@ export async function renderUnitToChapter(
     // Only touches whatever's left — embed-internal links/images were
     // already finalized above and are skipped here (idempotence guards).
     rewriteLinks(el, hrefByPath, resolve);
-    const images = rewriteImages(el, basePath, startImageIndex + embedRewrite.images.length, (w) =>
+    const images = rewriteImages(el, basePath, nextImageNumber, (w) =>
       warnings.push(`${w} (referenced by ${sourcePath})`)
     );
+    nextImageNumber += images.length;
+
     // Composes with rewriteImages's numbering: mermaid PNGs continue where
-    // the regular images left off, so run this AFTER rewriteImages and offset
-    // by how many it already stamped.
-    const mermaid = await rasterizeMermaidDiagrams(
-      el,
-      startImageIndex + embedRewrite.images.length + images.length
-    );
+    // the regular images left off, so run this AFTER rewriteImages.
+    const mermaid = await rasterizeMermaidDiagrams(el, nextImageNumber);
     warnings.push(...mermaid.warnings);
+    nextImageNumber += mermaid.images.length;
+
     // 005-latex-math: math PNGs continue where mermaid's left off — all four
-    // sources (embed/regular/mermaid/math) share one href counter so no two
-    // images ever collide (see main.ts's imageCount invariant comment).
-    const math = await renderMath(
-      el,
-      mathSpans,
-      startImageIndex + embedRewrite.images.length + images.length + mermaid.images.length,
-      sourcePath
-    );
+    // sources share the one counter above so no two images ever collide (see
+    // the chapter/image href numbering invariant in CLAUDE.md).
+    const math = await renderMath(el, mathSpans, nextImageNumber, sourcePath);
     warnings.push(...math.warnings);
     // 011-footnote-semantics: gather every note in the chapter into one section of EPUB 3
     // footnotes. The POSITION is load-bearing (research R9):
