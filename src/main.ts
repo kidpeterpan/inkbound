@@ -12,6 +12,7 @@ import {
 } from "obsidian";
 import { EpubBuilder, chapterHref, type NavItem } from "./epub";
 import { escapeXml } from "./xml";
+import { systemBookIdentity } from "./book-identity";
 import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./book-tree";
 import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
@@ -496,7 +497,10 @@ export default class EpubExportPlugin extends Plugin {
       const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
 
       const hrefByPath = new Map(job.files.map((f, i) => [f.path, chapterHref(i)]));
-      const builder = new EpubBuilder(job.meta);
+      // The book's uuid / modified timestamp / ZIP entry dates come from here:
+      // this is the composition root, so the one place an export picks up the
+      // system clock is visible where the export is set up (book-identity.ts).
+      const builder = new EpubBuilder(job.meta, systemBookIdentity());
 
       const withBacklinks = this.backlinkDecorator(job.files, hrefByPath);
 

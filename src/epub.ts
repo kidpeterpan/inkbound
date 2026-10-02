@@ -5,6 +5,7 @@ import { thaiFontCss, THAI_FONT_META, OFL_LICENSE_HREF, type ThaiFontAsset } fro
 import type { TocEntry } from "./render";
 import type { ExportMeta } from "./types";
 import { escapeXml } from "./xml";
+import { systemBookIdentity, type BookIdentity } from "./book-identity";
 
 export function chapterHref(index: number): string {
   return `text/chapter_${String(index + 1).padStart(3, "0")}.xhtml`;
@@ -144,7 +145,27 @@ export class EpubBuilder {
   // byte (FR-013/FR-014). Set only by folder exports that produced Parts.
   private navTree: NavItem[] | null = null;
 
-  constructor(private meta: ExportMeta) {}
+  // A real export passes nothing and gets the system's time + a random UUID;
+  // a caller that wants a reproducible artifact passes a fixed identity (see
+  // book-identity.ts), which is the only thing that has to change.
+  constructor(
+    private meta: ExportMeta,
+    private identity: BookIdentity = systemBookIdentity()
+  ) {}
+
+  /**
+   * Adds one ZIP entry, stamped with this book's identity date. Every entry
+   * goes through here so two builds of the same book are byte-identical —
+   * JSZip would otherwise date each entry with the current clock.
+   */
+  private addEntry(
+    zip: JSZip,
+    path: string,
+    data: string | Uint8Array,
+    options: JSZip.JSZipFileOptions = {}
+  ): void {
+    zip.file(path, data, { ...options, date: this.identity.zipDate });
+  }
 
   setNavTree(tree: NavItem[]): void {
     validateNavTree(tree, this.chapters.length);
@@ -181,13 +202,13 @@ export class EpubBuilder {
   async build(): Promise<Uint8Array> {
     const zip = new JSZip();
     // Spec: mimetype must be the FIRST entry and stored uncompressed.
-    zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
-    zip.file("META-INF/container.xml", this.containerXml());
+    this.addEntry(zip, "mimetype", "application/epub+zip", { compression: "STORE" });
+    this.addEntry(zip, "META-INF/container.xml", this.containerXml());
     if (this.meta.coverBytes && this.meta.coverExt) {
-      zip.file(`OEBPS/images/cover.${this.meta.coverExt}`, this.meta.coverBytes);
+      this.addEntry(zip, `OEBPS/images/cover.${this.meta.coverExt}`, this.meta.coverBytes);
     }
-    zip.file("OEBPS/package.opf", this.opf());
-    zip.file("OEBPS/nav.xhtml", this.nav());
+    this.addEntry(zip, "OEBPS/package.opf", this.opf());
+    this.addEntry(zip, "OEBPS/nav.xhtml", this.nav());
     // The stylesheet only GAINS things a book actually uses, so a book that uses
     // neither stays byte-stable: 006-thai-font adds @font-face + body chain when the font
     // is embedded, 011-footnote-semantics adds the footnote rules when any chapter
@@ -195,22 +216,22 @@ export class EpubBuilder {
     const css = [EPUB_CSS];
     if (this.chapters.some((c) => usesFootnoteMarkup(c.body))) css.push(FOOTNOTE_CSS);
     if (this.thaiFont) css.push(thaiFontCss());
-    zip.file("OEBPS/style/epub.css", css.join("\n"));
+    this.addEntry(zip, "OEBPS/style/epub.css", css.join("\n"));
     if (this.thaiFont) {
       // Font binaries + the OFL license that must travel with them (FR-005).
       for (const f of THAI_FONT_META) {
-        zip.file(`OEBPS/${f.href}`, f.weight === 400 ? this.thaiFont.regular : this.thaiFont.bold);
+        this.addEntry(zip, `OEBPS/${f.href}`, f.weight === 400 ? this.thaiFont.regular : this.thaiFont.bold);
       }
-      zip.file(`OEBPS/${OFL_LICENSE_HREF}`, this.thaiFont.license);
+      this.addEntry(zip, `OEBPS/${OFL_LICENSE_HREF}`, this.thaiFont.license);
     }
     // Cover page: a real first spine document (not a chapter) so readers
     // open onto the artwork. Only when cover art exists — coverless books
     // keep today's exact structure (FR-004).
     if (this.hasCover()) {
-      zip.file("OEBPS/text/cover.xhtml", this.coverDoc());
+      this.addEntry(zip, "OEBPS/text/cover.xhtml", this.coverDoc());
     }
-    for (const ch of this.chapters) zip.file(`OEBPS/${ch.href}`, this.chapterDoc(ch));
-    for (const a of this.assets) zip.file(`OEBPS/${a.href}`, a.bytes);
+    for (const ch of this.chapters) this.addEntry(zip, `OEBPS/${ch.href}`, this.chapterDoc(ch));
+    for (const a of this.assets) this.addEntry(zip, `OEBPS/${a.href}`, a.bytes);
     return zip.generateAsync({ type: "uint8array", compression: "DEFLATE" });
   }
 
@@ -264,18 +285,17 @@ export class EpubBuilder {
   }
 
   private opf(): string {
-    const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const cover = this.coverManifestItems();
     const items = this.contentManifestItems().join("\n    ");
     const spine = this.spineItems().join("\n    ");
     return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="uid">urn:uuid:${cryptoRandomUuid()}</dc:identifier>
+    <dc:identifier id="uid">urn:uuid:${this.identity.uuid}</dc:identifier>
     <dc:title>${escapeXml(this.meta.title)}</dc:title>
     <dc:language>${escapeXml(this.meta.language)}</dc:language>
     <dc:creator>${escapeXml(this.meta.author)}</dc:creator>
-    <meta property="dcterms:modified">${modified}</meta>
+    <meta property="dcterms:modified">${this.identity.modifiedAt}</meta>
     ${cover.meta}
   </metadata>
   <manifest>
@@ -384,17 +404,4 @@ ${ch.body}
   </body>
 </html>`;
   }
-}
-
-function cryptoRandomUuid(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-
-  // RFC-4122 v4 UUID fallback: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
 }
