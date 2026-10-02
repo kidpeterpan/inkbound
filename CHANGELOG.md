@@ -3,6 +3,17 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.2
+
+No change to exported books — this release is internal readability work.
+
+- **The chapter loop, image rewriting, footnote scanning, and Bases cell
+  reading are split into named steps.** Export behavior, warnings, and EPUB
+  output are unchanged; each stage of the pipeline is now a function that
+  says what it does.
+- **Cover resolution, folder planning, and embed flattening now read as short
+  sequences of guard clauses** instead of one long conditional chain.
+
 ## 1.10.1
 
 No change to exported books — this release is internal readability work.
