@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { createWarningCollector, buildReport, renderReportText, type ScopedWarning } from "../src/report";
+import {
+  createWarningCollector,
+  buildReport,
+  renderReportText,
+  type ScopedWarning,
+} from "../src/core/report";
 
 // ── The collector (T002) ──────────────────────────────────────────────────
 //

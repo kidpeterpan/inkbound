@@ -109,7 +109,7 @@ the fixture diff, and read that test's failures as the new manual checklist:
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path). The fixtures replace
   the vault's absolute path with `/VAULT`, so they carry no home directory.
-- The `CHROME_SELECTORS` cleanup list in `src/render.ts`, as far as
+- The `CHROME_SELECTORS` cleanup list in `src/core/render.ts`, as far as
   `MarkdownRenderer` can show it: the code-block copy button is proven
   present and removed. The frontmatter selectors never fire in production
   (`stripFrontmatter` runs on the markdown first) and the collapse, pusher
@@ -124,7 +124,7 @@ the fixture diff, and read that test's failures as the new manual checklist:
 - The shape of an unresolved wikilink and of an unresolved note embed, which
   `rewriteLinks` and `flattenEmbeds` key on.
 
-**Bases tables (`src/bases.ts`, `src/bases-adapter.ts`) — NOT yet verified by
+**Bases tables (`src/core/bases.ts`, `src/adapters/bases-adapter.ts`) — NOT yet verified by
 hand, and the fixture is hand-built.** A Bases table view is exported by
 rendering the embed into a temporary off-screen element attached to the live
 document (a detached one is never filled in), growing that element until
@@ -269,7 +269,7 @@ code="$(cat script.js)"` runs it (`require("obsidian")` is not available in that
 How "unchanged" is checked: **a real book is never byte-identical to another
 export** — every export writes a fresh package `urn:uuid`, a fresh
 `dcterms:modified` into `package.opf`, and dates each ZIP entry with the clock.
-All three come from the `BookIdentity` in `src/book-identity.ts`, so injecting a
+All three come from the `BookIdentity` in `src/core/book-identity.ts`, so injecting a
 fixed one makes the artifact reproducible byte for byte
 (`tests/book-identity.test.ts`); with the real system identity in play, identity
 is judged entry by entry with those values normalised
@@ -321,7 +321,7 @@ The trio that keeps them working in all three environments:
 3. `vitest.config.ts` aliases the exact `.ttf` paths to
    `tests/fixtures/font-bytes.ts` (vitest has no binary loader).
 
-The binary imports live ONLY in `src/font-assets.ts` (plus the injectable
+The binary imports live ONLY in `src/core/font-assets.ts` (plus the injectable
 `setThaiFontLoader` seam), so pure modules and tsx-run scripts
 (`build-sample.ts`) never have to load a `.ttf`.
 
@@ -391,7 +391,7 @@ verified, when, how to re-probe it after a firmware update, and how the
 client handles application-level failures (a 2xx HTTP status with
 `"successful": false` in the JSON body) are documented in
 [`booxdrop-probe.md`](./booxdrop-probe.md) — read that before touching
-`src/booxdrop.ts`'s `UPLOAD_PATH`.
+`src/core/booxdrop.ts`'s `UPLOAD_PATH`.
 
 ## The mobile load gate (`scripts/check-mobile-safe.mjs`)
 
@@ -412,7 +412,7 @@ reader of `src/` cannot see:
    loader's helper is `__toBinaryNode`, built on `Buffer.from(...)` — a Node
    global absent from mobile WebViews, executed at module top level. This is
    why the bundled fonts use the `base64` loader and are decoded with `atob`
-   in `src/font-assets.ts`.
+   in `src/core/font-assets.ts`.
 
 The gate checks both, and the second check is the important one: it **loads the
 bundle** in a jsdom-backed context with no `Buffer`, no `process`, and a

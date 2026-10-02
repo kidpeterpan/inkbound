@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { slugify, deriveChapterTitle } from "../src/naming";
+import { slugify, deriveChapterTitle } from "../src/core/naming";
 
 describe("slugify", () => {
   it("lowercases and snake_cases spaces", () => {

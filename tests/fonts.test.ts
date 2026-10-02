@@ -1,12 +1,18 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { containsThai, thaiFontCss, THAI_FONT_FAMILY, OFL_LICENSE_TEXT, THAI_FONT_META } from "../src/fonts";
+import {
+  containsThai,
+  thaiFontCss,
+  THAI_FONT_FAMILY,
+  OFL_LICENSE_TEXT,
+  THAI_FONT_META,
+} from "../src/core/fonts";
 import {
   buildAsset,
   decodeBase64,
   loadThaiFontAsset,
   setThaiFontLoader,
   getThaiFontLoader,
-} from "../src/font-assets";
+} from "../src/core/font-assets";
 
 describe("containsThai", () => {
   it("detects Thai consonants and vowels", () => {

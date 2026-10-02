@@ -3,10 +3,10 @@
 import "./lib/install-dom";
 import "../tests/fixtures/obsidian-stub";
 import { writeFileSync } from "fs";
-import { EpubBuilder, type NavItem } from "../src/epub";
-import { renderMathToSvg } from "../src/math";
-import { buildStaticTable, extractBaseTable } from "../src/bases";
-import { rewriteLinks, serializeBody } from "../src/render";
+import { EpubBuilder, type NavItem } from "../src/core/epub";
+import { renderMathToSvg } from "../src/core/math";
+import { buildStaticTable, extractBaseTable } from "../src/core/bases";
+import { rewriteLinks, serializeBody } from "../src/core/render";
 import { buildBasesEmbed, hostWith } from "../tests/fixtures/bases-dom";
 
 // A real 1×1 transparent PNG (base64) so the sample's cover page and

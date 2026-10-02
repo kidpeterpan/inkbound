@@ -1,37 +1,39 @@
 // The module boundary, enforced instead of documented.
 //
-// This repo's load-bearing architectural rule — pure modules never import
-// "obsidian", so vitest can load them directly and the export pipeline stays
-// testable without an Obsidian app — used to live only in prose (CLAUDE.md's
-// Architecture section, render-adapter.ts's module-split rationale). Prose
-// does not fail a build. This test does.
+// The layout IS the rule:
 //
-// It is a FITNESS FUNCTION, not a snapshot: it asserts the rule in both
-// directions, so the adapter list cannot rot. Adding an `obsidian` import to a
-// pure module fails, and so does removing the last one from a listed adapter
-// (which would mean the list is lying about the code).
+//   src/core/*      pure. No `obsidian` import, no Node builtin, no import of
+//                   anything that has one. vitest loads these directly, with
+//                   no stub, which is what keeps the pipeline unit-testable.
+//   src/adapters/*  may import `obsidian` (app, vault, renderer, transport).
+//   src/main.ts     the plugin entry — an adapter, and the one file esbuild
+//                   bundles (see esbuild.config.mjs's entryPoints).
+//
+// This test is a FITNESS FUNCTION: it fails when the rule is broken, in either
+// direction, and names the offending file. Before this existed the rule was
+// prose in CLAUDE.md, and prose does not fail a build.
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 
 const SRC_DIR = join(__dirname, "..", "src");
+const CORE_PREFIX = "core/";
+const ADAPTER_PREFIX = "adapters/";
 
-/**
- * The modules allowed to import "obsidian". Every entry has a reason to be
- * here: it needs the app, the vault, the DOM renderer, or a transport.
- */
-const OBSIDIAN_ADAPTERS = new Set([
-  "bases-adapter.ts", // the app's Bases renderer
-  "export-notice.ts", // Notice + the report modal
-  "export-pipeline.ts", // drives the vault, the renderer and the book writer
-  "http.ts", // requestUrl
-  "main.ts", // the plugin itself
-  "meta-adapter.ts", // metadata cache, vault reads, cover downloads
-  "output-adapter.ts", // Platform + the vault adapter
-  "render-adapter.ts", // MarkdownRenderer
-  "report-view.ts", // Modal
-  "settings.ts", // PluginSettingTab
-]);
+/** Every .ts under src/, as paths relative to src/ ("core/render.ts"). */
+function relativeTsFiles(dir: string, prefix = ""): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      found.push(...relativeTsFiles(join(dir, entry.name), `${prefix}${entry.name}/`));
+    } else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+      found.push(`${prefix}${entry.name}`);
+    }
+  }
+  return found;
+}
+
+const MODULES = relativeTsFiles(SRC_DIR).sort();
 
 // Matches `import x from "m"`, `import { x } from "m"`, `import "m"` and the
 // multi-line forms. Comment lines are stripped first — this file's own subject
@@ -47,65 +49,66 @@ function sourceWithoutComments(source: string): string {
     .join("\n");
 }
 
-function importedSpecifiers(fileName: string): string[] {
-  const source = sourceWithoutComments(readFileSync(join(SRC_DIR, fileName), "utf8"));
+function importedSpecifiers(moduleName: string): string[] {
+  const source = sourceWithoutComments(readFileSync(join(SRC_DIR, moduleName), "utf8"));
   return [...source.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]);
 }
 
-const moduleNames = readdirSync(SRC_DIR)
-  .filter((name) => name.endsWith(".ts"))
-  .sort();
+/** Resolves a relative specifier to a src-relative path ("core/x"), or null. */
+function resolvesWithinSrc(moduleName: string, specifier: string): string | null {
+  if (!specifier.startsWith(".")) return null;
+  return normalize(join(dirname(moduleName), specifier));
+}
 
-describe("the pure/adapter boundary", () => {
+const isAdapter = (moduleName: string): boolean =>
+  moduleName.startsWith(ADAPTER_PREFIX) || moduleName === "main.ts";
+
+describe("the pure/adapter module boundary", () => {
   it("has modules to check (so a broken path cannot make this pass vacuously)", () => {
-    expect(moduleNames.length).toBeGreaterThan(20);
-    expect(moduleNames).toContain("main.ts");
+    expect(MODULES.filter((m) => m.startsWith(CORE_PREFIX)).length).toBeGreaterThan(20);
+    expect(MODULES.filter((m) => m.startsWith(ADAPTER_PREFIX)).length).toBeGreaterThan(5);
+    expect(MODULES).toContain("main.ts");
   });
 
-  it("lets exactly the listed adapters import obsidian, and requires them to", () => {
-    const importersOfObsidian = moduleNames.filter((name) => importedSpecifiers(name).includes("obsidian"));
-
-    const undeclaredAdapters = importersOfObsidian.filter((name) => !OBSIDIAN_ADAPTERS.has(name));
-    const staleEntries = [...OBSIDIAN_ADAPTERS].filter((name) => !importersOfObsidian.includes(name));
-
-    // Asserted separately so a failure NAMES the file instead of printing two
-    // sets. Both directions are checked: an unlisted importer is a new adapter
-    // to declare or a pure module that just lost its purity, and a listed
-    // module that stopped importing obsidian makes the list a lie.
-    expect(
-      undeclaredAdapters,
-      'these modules import "obsidian" but are not in OBSIDIAN_ADAPTERS: either move the ' +
-        "obsidian use behind an adapter, or add the module here deliberately"
-    ).toEqual([]);
-    expect(
-      staleEntries,
-      "these modules are listed as adapters but no longer import obsidian: remove them " +
-        "from OBSIDIAN_ADAPTERS so the list keeps describing the code"
-    ).toEqual([]);
-  });
-
-  it("keeps every pure module from reaching into an adapter", () => {
-    const pureModules = moduleNames.filter((name) => !OBSIDIAN_ADAPTERS.has(name));
+  it("keeps every core module free of obsidian and of adapter imports", () => {
     const leaks: string[] = [];
 
-    for (const name of pureModules) {
-      for (const specifier of importedSpecifiers(name)) {
-        const target = specifier.startsWith("./") ? `${specifier.slice(2)}.ts` : null;
-        if (target && OBSIDIAN_ADAPTERS.has(target)) {
-          leaks.push(`${name} imports ${specifier}`);
+    for (const moduleName of MODULES.filter((m) => m.startsWith(CORE_PREFIX))) {
+      for (const specifier of importedSpecifiers(moduleName)) {
+        if (specifier === "obsidian") {
+          leaks.push(`${moduleName} imports obsidian`);
+          continue;
+        }
+        const resolved = resolvesWithinSrc(moduleName, specifier);
+        if (resolved !== null && isAdapter(resolved)) {
+          leaks.push(`${moduleName} imports ${specifier}`);
         }
       }
     }
 
-    expect(leaks, "pure modules must not depend on adapters").toEqual([]);
+    expect(leaks, "core/ must stay pure: move the impure part into adapters/, or the module itself").toEqual(
+      []
+    );
+  });
+
+  it("keeps obsidian out of everything that is not an adapter", () => {
+    const importers = MODULES.filter((m) => importedSpecifiers(m).includes("obsidian"));
+    const undeclared = importers.filter((m) => !isAdapter(m));
+
+    expect(
+      undeclared,
+      'these modules import "obsidian" but live outside adapters/: either move them into ' +
+        "adapters/, or move the obsidian use out of them"
+    ).toEqual([]);
   });
 
   it("parses imports the way the modules actually write them", () => {
     // Guards the parser itself: main.ts's obsidian import spans several lines,
-    // and the third assertion above is silent if IMPORT_SPECIFIER stops
-    // matching multi-line imports.
+    // and the assertions above are silent if IMPORT_SPECIFIER stops matching
+    // multi-line imports.
     expect(importedSpecifiers("main.ts")).toContain("obsidian");
-    expect(importedSpecifiers("render.ts")).not.toContain("obsidian");
-    expect(importedSpecifiers("render.ts").length).toBe(0);
+    expect(importedSpecifiers("core/render.ts")).not.toContain("obsidian");
+    expect(importedSpecifiers("core/render.ts").length).toBe(0);
+    expect(importedSpecifiers("adapters/render-adapter.ts")).toContain("obsidian");
   });
 });

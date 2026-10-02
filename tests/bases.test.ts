@@ -8,8 +8,8 @@ import {
   type BaseShape,
   type BaseViewState,
   type SettleOps,
-} from "../src/bases";
-import { serializeBody } from "../src/render";
+} from "../src/core/bases";
+import { serializeBody } from "../src/core/render";
 import { buildBasesEmbed, hostWith, type BasesDomOptions } from "./fixtures/bases-dom";
 
 // src/bases.ts is pure (no "obsidian" import). The DOM it reads is HAND-BUILT

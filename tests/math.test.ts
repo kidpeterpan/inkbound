@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { findMathSpans, protectMath, renderMathToSvg, renderMath } from "../src/math";
-import { setSvgRasterizer } from "../src/render";
+import { findMathSpans, protectMath, renderMathToSvg, renderMath } from "../src/core/math";
+import { setSvgRasterizer } from "../src/core/render";
 
 function div(html: string): HTMLElement {
   const el = document.createElement("div");

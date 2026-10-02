@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting, Notice } from "obsidian";
 import type { SettingDefinitionItem } from "obsidian";
-import type EpubExportPlugin from "./main";
-import { BooxDropClient } from "./booxdrop";
+import type EpubExportPlugin from "../main";
+import { BooxDropClient } from "../core/booxdrop";
 import { obsidianHttp } from "./http";
 
 import {
@@ -9,9 +9,9 @@ import {
   coerceTocHeadingDepth,
   coerceEmbedThaiFont,
   coerceMobileOutputFolder,
-} from "./settings-core";
+} from "../core/settings-core";
 
-export type { BacklinkPosition, EpubExportSettings } from "./settings-core";
+export type { BacklinkPosition, EpubExportSettings } from "../core/settings-core";
 export {
   DEFAULT_SETTINGS,
   coerceBacklinkPosition,
@@ -20,7 +20,7 @@ export {
   DEFAULT_MOBILE_OUTPUT_FOLDER,
   resolveOutputPath,
   summarizeWarnings,
-} from "./settings-core";
+} from "../core/settings-core";
 
 // Single source for the dropdown's choices so display() and
 // getSettingDefinitions() can never drift on labels or allowed values.

@@ -20,10 +20,10 @@ import {
   collectHeadingToc,
   serializeBody,
   setSvgRasterizer,
-} from "../src/render";
-import { renderMath, protectMath } from "../src/math";
-import { stripDynamicBlocks, stripFrontmatter } from "../src/render";
-import { processFootnotes } from "../src/footnotes";
+} from "../src/core/render";
+import { renderMath, protectMath } from "../src/core/math";
+import { stripDynamicBlocks, stripFrontmatter } from "../src/core/render";
+import { processFootnotes } from "../src/core/footnotes";
 
 interface RealRenderFixture {
   name: string;

@@ -6,9 +6,9 @@
 // disk into a "the export failed" message (FR-019, Constitution II).
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MODALS, NOTICES, NOTICE_ELS } from "./fixtures/obsidian-stub";
-import { showExportNotice } from "../src/export-notice";
-import * as reportModule from "../src/report";
-import type { ScopedWarning } from "../src/report";
+import { showExportNotice } from "../src/adapters/export-notice";
+import * as reportModule from "../src/core/report";
+import type { ScopedWarning } from "../src/core/report";
 
 const SAVED_TEXT = "EPUB saved to /books/my-book.epub";
 const BOOK = { bookTitle: "My Book", chapterPaths: ["a.md", "b.md"] };

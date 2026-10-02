@@ -11,8 +11,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { processFootnotes } from "../src/footnotes";
-import { serializeBody } from "../src/render";
+import { processFootnotes } from "../src/core/footnotes";
+import { serializeBody } from "../src/core/render";
 import {
   assertChapterFootnoteInvariants,
   loadRealContextHtml,

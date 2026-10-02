@@ -15,7 +15,7 @@
 // el.style writes).
 
 import { App, Modal, Notice } from "obsidian";
-import { BOOK_GROUP_LABEL, renderReportText, type ExportReport } from "./report";
+import { BOOK_GROUP_LABEL, renderReportText, type ExportReport } from "../core/report";
 
 export class ExportReportModal extends Modal {
   private readonly report: ExportReport;

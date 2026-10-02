@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildMultipart, BooxDropClient, UPLOAD_PATH } from "../src/booxdrop";
+import { buildMultipart, BooxDropClient, UPLOAD_PATH } from "../src/core/booxdrop";
 
 describe("buildMultipart", () => {
   it("lays out headers, binary payload, and closing boundary", () => {

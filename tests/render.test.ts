@@ -21,7 +21,7 @@ import {
   setSvgRasterizer,
   serializeBody,
   collectHeadingToc,
-} from "../src/render";
+} from "../src/core/render";
 
 function div(html: string): HTMLElement {
   const el = document.createElement("div");

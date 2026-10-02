@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { resolveDestination, resolveMobileOutputPath } from "../src/output";
-import { resolveOutputPath, DEFAULT_MOBILE_OUTPUT_FOLDER } from "../src/settings-core";
+import { resolveDestination, resolveMobileOutputPath } from "../src/core/output";
+import { resolveOutputPath, DEFAULT_MOBILE_OUTPUT_FOLDER } from "../src/core/settings-core";
 
 const HOME = "/Users/pan";
 const settings = (outputFolder: string, mobileOutputFolder: string) => ({

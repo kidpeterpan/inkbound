@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { Component, MarkdownRenderer } from "./fixtures/obsidian-stub";
-import { getBaseRenderer, renderBaseTable, setBaseRenderer } from "../src/bases-adapter";
-import { DEFAULT_SETTLE, type SettleOptions } from "../src/bases";
+import { getBaseRenderer, renderBaseTable, setBaseRenderer } from "../src/adapters/bases-adapter";
+import { DEFAULT_SETTLE, type SettleOptions } from "../src/core/bases";
 import { buildBasesEmbed, type BasesDomOptions } from "./fixtures/bases-dom";
 
 // renderBaseTable is the only code that needs a live Obsidian, so this mocks

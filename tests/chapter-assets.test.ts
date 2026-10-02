@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveChapterAssets, type AssetVault } from "../src/chapter-assets";
-import type { ChapterImage } from "../src/types";
+import { resolveChapterAssets, type AssetVault } from "../src/core/chapter-assets";
+import type { ChapterImage } from "../src/core/types";
 
 // resolveChapterAssets is pure — no "obsidian" import — so these tests use a
 // hand-rolled fake vault instead of the obsidian stub. `Ref` is a plain object
