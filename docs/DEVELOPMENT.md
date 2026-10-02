@@ -266,12 +266,15 @@ code="$(cat script.js)"` runs it (`require("obsidian")` is not available in that
   context, which is why dataview is the route).
 - **Thai text inside a note**, on a real e-ink screen. The fixture is English.
 
-How "unchanged" is checked: **no book is byte-identical between two exports**
-even before this feature — every export writes a fresh package `urn:uuid` and a
-fresh `dcterms:modified` into `package.opf`. Identity is therefore judged entry
-by entry with those two values normalised (`tests/fixtures/epub-fingerprint.ts`),
-and `tests/footnote-free-identity.test.ts` pins the exact hashes a footnote-free
-book had before footnotes existed.
+How "unchanged" is checked: **a real book is never byte-identical to another
+export** — every export writes a fresh package `urn:uuid`, a fresh
+`dcterms:modified` into `package.opf`, and dates each ZIP entry with the clock.
+All three come from the `BookIdentity` in `src/book-identity.ts`, so injecting a
+fixed one makes the artifact reproducible byte for byte
+(`tests/book-identity.test.ts`); with the real system identity in play, identity
+is judged entry by entry with those values normalised
+(`tests/fixtures/epub-fingerprint.ts`), and `tests/footnote-free-identity.test.ts`
+pins the exact hashes a footnote-free book had before footnotes existed.
 
 Note two things that WERE fixed rather than merely being listed, because they
 were provably broken:
