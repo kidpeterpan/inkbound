@@ -22,7 +22,7 @@ import { marked } from "marked";
 // `createEl()` (declared as an ambient global augmentation in
 // node_modules/obsidian/obsidian.d.ts's `interface Node`) before any plugin
 // code runs. jsdom's Node has neither. `EpubExportSettingTab.display()`
-// (src/settings.ts) calls both on `containerEl`, so exercising display() in
+// (src/adapters/settings.ts) calls both on `containerEl`, so exercising display() in
 // tests needs the same minimal behavior installed. Narrowed to exactly what
 // settings.ts uses (`empty()`, and `createEl(tag, { text })`) — not a
 // general-purpose polyfill of the whole Node interface.
@@ -76,7 +76,7 @@ if (typeof Node !== "undefined" && !("createEl" in Node.prototype)) {
   });
 }
 
-// Two more Obsidian-provided globals src/bases-adapter.ts uses: `activeDocument`
+// Two more Obsidian-provided globals src/adapters/bases-adapter.ts uses: `activeDocument`
 // (the document of the focused window; the only one there is under jsdom) and
 // HTMLElement.setCssStyles (assigns style properties by their camelCase names).
 if (typeof document !== "undefined" && !("activeDocument" in globalThis)) {
@@ -126,7 +126,7 @@ if (typeof Node !== "undefined" && !("createSpan" in Node.prototype)) {
 // `createFragment` as bare AMBIENT GLOBAL FUNCTIONS (inside a
 // `declare global { ... }` block, not the `interface Node` augmentation) —
 // the real Obsidian app installs both forms before plugin code runs.
-// src/render.ts (a pure module with ZERO "obsidian" imports, so it can't
+// src/core/render.ts (a pure module with ZERO "obsidian" imports, so it can't
 // reference the Node.prototype method's `this` and can't import a value from
 // "obsidian" either) calls the bare global form directly for its
 // plain-HTML-element sites. jsdom has neither form, so both need polyfilling
@@ -491,7 +491,7 @@ export class App {
 
 // ── Modal ─────────────────────────────────────────────────────────────────
 //
-// 010-export-report. Narrowed to exactly what src/report-view.ts touches
+// 010-export-report. Narrowed to exactly what src/adapters/report-view.ts touches
 // (`app`, `contentEl`, `titleEl`, `open`, `close`, `onOpen`, `onClose`) —
 // same discipline as every other class in this file: a harness fixture, not a
 // general-purpose Obsidian shim. Real Obsidian's Modal also carries `scope`,

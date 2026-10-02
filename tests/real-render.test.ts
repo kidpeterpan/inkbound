@@ -51,7 +51,7 @@ function mount(html: string): HTMLElement {
 
 /**
  * The same pure passes renderUnitToChapter runs after MarkdownRenderer, in
- * the same order (see src/render-adapter.ts), minus populateEmbeds, which
+ * the same order (see src/adapters/render-adapter.ts), minus populateEmbeds, which
  * needs a live vault. Returns everything the adapter would hand to main.ts.
  */
 async function runPurePipeline(fixture: RealRenderFixture) {

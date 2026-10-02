@@ -96,7 +96,7 @@ function assertAllReferencesResolve(root: HTMLElement): void {
 
 // tests/fixtures/obsidian-stub.ts installs a bare-global `createEl` (loaded
 // via tests/setup/no-network.ts for every test file) mirroring Obsidian's
-// ambient global declared in node_modules/obsidian/obsidian.d.ts. src/render.ts
+// ambient global declared in node_modules/obsidian/obsidian.d.ts. src/core/render.ts
 // calls this global directly (see its top-of-file comment) for every
 // plain-HTML-element site the obsidianmd/prefer-create-el review warning
 // flagged. The one behavior that differs from the Node.prototype method of
@@ -1361,7 +1361,7 @@ describe("rasterizeMermaidDiagrams", () => {
     // render.ts's default rasterizer drives real browser APIs (Image, canvas,
     // Blob, URL.createObjectURL) that jsdom either doesn't implement at all
     // (URL.createObjectURL) or implements as a stub that always returns null
-    // (canvas 2d context) — see the module comment in src/render.ts. These
+    // (canvas 2d context) — see the module comment in src/core/render.ts. These
     // tests stub just enough of that surface to walk the rest of the
     // function's branches deterministically; they do NOT prove the real
     // Electron/Chromium canvas pipeline draws correctly (that needs a real

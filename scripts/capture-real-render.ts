@@ -1,7 +1,7 @@
 // Captures what Obsidian's REAL MarkdownRenderer emits for a fixed set of
 // markdown snippets, and writes each capture to tests/fixtures/real-render/
 // as JSON. tests/real-render.test.ts then runs the pure render pipeline
-// (src/render.ts, src/math.ts, src/footnotes.ts) over that markup.
+// (src/core/render.ts, src/core/math.ts, src/core/footnotes.ts) over that markup.
 //
 // WHY: the vitest stand-in for MarkdownRenderer is `marked` plus
 // post-processing, not Obsidian's renderer (docs/DEVELOPMENT.md, "Testing and
@@ -57,7 +57,7 @@ const SNIPPETS: Snippet[] = [
   {
     name: "chrome",
     covers:
-      "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/render.ts) and task-list checkboxes",
+      "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/core/render.ts) and task-list checkboxes",
     markdown: [
       "---",
       "title: Frontmatter block",

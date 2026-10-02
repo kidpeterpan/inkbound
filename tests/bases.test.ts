@@ -12,7 +12,7 @@ import {
 import { serializeBody } from "../src/core/render";
 import { buildBasesEmbed, hostWith, type BasesDomOptions } from "./fixtures/bases-dom";
 
-// src/bases.ts is pure (no "obsidian" import). The DOM it reads is HAND-BUILT
+// src/core/bases.ts is pure (no "obsidian" import). The DOM it reads is HAND-BUILT
 // by tests/fixtures/bases-dom.ts from the structure measured on a live
 // Obsidian 1.13.7 — see that file for what was measured and what is assumed.
 

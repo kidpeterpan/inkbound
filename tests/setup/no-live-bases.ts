@@ -1,5 +1,5 @@
 // Structural guard, registered via vitest.config.ts's `test.setupFiles`, in the
-// same spirit as no-network.ts: the real Bases renderer (src/bases-adapter.ts)
+// same spirit as no-network.ts: the real Bases renderer (src/adapters/bases-adapter.ts)
 // attaches a host to the live document and waits up to five real seconds for
 // Obsidian to fill it in. Under vitest there is no Obsidian, so a test that
 // embeds a .base file and forgets to inject a renderer would silently spend

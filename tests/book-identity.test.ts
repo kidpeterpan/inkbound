@@ -1,4 +1,4 @@
-// The reproducibility contract for a built book (src/book-identity.ts).
+// The reproducibility contract for a built book (src/core/book-identity.ts).
 //
 // Why this exists: an export used to embed a fresh `urn:uuid`, a fresh
 // `dcterms:modified` AND a fresh ZIP-entry timestamp per entry, so the best

@@ -1,6 +1,6 @@
 // Obsidian adapter for exporting a Bases TABLE view as a static table.
 //
-// Deliberately apart from render-adapter.ts and from the pure src/bases.ts: it
+// Deliberately apart from render-adapter.ts and from the pure src/core/bases.ts: it
 // is the only place that needs Obsidian's runtime (MarkdownRenderer, Component,
 // the live document), and the only part that cannot run under vitest for real —
 // so it stays small, and everything it decides lives in bases.ts.

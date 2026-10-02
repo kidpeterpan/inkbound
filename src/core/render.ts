@@ -995,7 +995,7 @@ export function serializeBody(root: HTMLElement): string {
 // time and embed it as a normal image, falling back to the (still
 // spec-valid) inline SVG when rasterization isn't possible.
 //
-// This lives HERE rather than in src/render-adapter.ts (where an earlier
+// This lives HERE rather than in src/adapters/render-adapter.ts (where an earlier
 // draft of this feature placed it) for the same reason rewriteImages leaves
 // vault-path resolution to its caller: render-adapter.ts imports real
 // VALUES from "obsidian" (App, Component, MarkdownRenderer, TFile), and

@@ -2,7 +2,7 @@
 //
 // Constitution IV — this is a THIN adapter. Every decision about what the
 // report contains (grouping, ordering, counting, the plain-text rendering the
-// copy action ships) lives in the pure src/report.ts, which vitest loads
+// copy action ships) lives in the pure src/core/report.ts, which vitest loads
 // directly. What is left here is the DOM and the Modal lifecycle, the only
 // parts that genuinely need Obsidian.
 //

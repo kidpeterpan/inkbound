@@ -1,7 +1,7 @@
 // Pure settings helpers — zero "obsidian" imports so vitest can load this
 // module directly (the "obsidian" npm package ships type declarations only,
 // no runtime JS, and would blow up any test file that imports it transitively).
-// src/settings.ts re-exports everything from here and adds the obsidian-facing
+// src/adapters/settings.ts re-exports everything from here and adds the obsidian-facing
 // EpubExportSettingTab class.
 
 export type BacklinkPosition = "start" | "end" | "both" | "none";

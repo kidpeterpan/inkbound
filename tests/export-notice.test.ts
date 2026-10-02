@@ -1,4 +1,4 @@
-// The export completion notice (src/export-notice.ts) — 010-export-report.
+// The export completion notice (src/adapters/export-notice.ts) — 010-export-report.
 //
 // This became testable the moment it left main.ts's plugin class: reaching it
 // used to require a whole export, and the invariant it carries is worth pinning

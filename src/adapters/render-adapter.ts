@@ -1,6 +1,6 @@
 // ── Obsidian adapter (exercised via manual smoke tests, not unit tests) ──
 //
-// Deliberately its own module, NOT appended to src/render.ts, even though the
+// Deliberately its own module, NOT appended to src/core/render.ts, even though the
 // brief's Step 5 shows it inline there. Reason: "obsidian" ships type
 // declarations only, no runtime JS (node_modules/obsidian/package.json has
 // "main": ""). MarkdownRenderer.render(...) and `instanceof TFile` are real
