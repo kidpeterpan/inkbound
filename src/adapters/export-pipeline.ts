@@ -8,9 +8,10 @@
 // scattered across `this.`.
 //
 // ADAPTER by this repo's rule (it imports `obsidian` for TFile/Notice and the
-// vault): the PURE stages it drives live in render.ts, chapter-assets.ts,
-// book-tree.ts, report.ts and epub.ts, and the writing half lives in
-// output-adapter.ts. See tests/module-boundaries.test.ts.
+// vault): the PURE stages it drives live in core/render.ts,
+// core/chapter-assets.ts, core/book-tree.ts, core/report.ts and core/epub.ts,
+// and the writing half lives in adapters/output-adapter.ts. See
+// tests/module-boundaries.test.ts.
 import { App, Component, FileSystemAdapter, Notice, TFile } from "obsidian";
 import { EpubBuilder, chapterHref, type NavItem } from "../core/epub";
 import { escapeXml } from "../core/xml";
