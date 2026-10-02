@@ -74,6 +74,48 @@ function fail(message: string, details: string[] = []): never {
   process.exit(1);
 }
 
+// THE shipped bundle. Not a rebuild, not src/ — the file `npm run build`
+// produced and a release would publish. A throw here is the gate's most
+// likely real catch (a build-time transform left the bundle inconsistent —
+// e.g. the MathJax rename in esbuild.config.mjs), so it gets its own message
+// rather than being reported as a harness bug.
+function loadShippedBundle(): ReturnType<typeof loadPluginClass> {
+  try {
+    return loadPluginClass(BUNDLE);
+  } catch (e) {
+    fail("the shipped main.js threw while loading (before any export ran).", [
+      e instanceof Error ? (e.stack ?? e.message) : String(e),
+      "This is usually a build-time transform in esbuild.config.mjs leaving the",
+      "bundle inconsistent — nothing in src/ or vitest can see it.",
+    ]);
+  }
+}
+
+// The orchestrator reports failures through console.error + a Notice rather
+// than throwing (an export must never crash Obsidian), so capture both.
+// Warnings are allowed — an omitted embed is a degraded book, not a broken
+// one — but they are printed so a new one is visible in CI logs.
+function captureConsole(): { errors: string[]; warnings: string[]; restore(): void } {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => (a instanceof Error ? (a.stack ?? a.message) : String(a))).join(" "));
+  };
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((a) => String(a)).join(" "));
+  };
+  return {
+    errors,
+    warnings,
+    restore: () => {
+      console.error = originalError;
+      console.warn = originalWarn;
+    },
+  };
+}
+
 async function main(): Promise<void> {
   if (!existsSync(BUNDLE)) {
     console.error("check-export-works: main.js not found — run `npm run build` first.");
@@ -95,26 +137,10 @@ async function main(): Promise<void> {
   const NOTICES = obsidianStubNs.NOTICES as string[];
   installObsidianRequireShim(obsidianStubNs);
 
-  // THE shipped bundle. Not a rebuild, not src/ — the file `npm run build`
-  // produced and a release would publish. A throw here is the gate's most
-  // likely real catch (a build-time transform left the bundle inconsistent —
-  // e.g. the MathJax rename in esbuild.config.mjs), so it gets its own message
-  // rather than being reported as a harness bug.
-  let PluginClass: ReturnType<typeof loadPluginClass>;
-  try {
-    PluginClass = loadPluginClass(BUNDLE);
-  } catch (e) {
-    fail("the shipped main.js threw while loading (before any export ran).", [
-      e instanceof Error ? (e.stack ?? e.message) : String(e),
-      "This is usually a build-time transform in esbuild.config.mjs leaving the",
-      "bundle inconsistent — nothing in src/ or vitest can see it.",
-    ]);
-  }
+  const PluginClass = loadShippedBundle();
 
   const outDir = mkdtempSync(path.join(os.tmpdir(), "inkbound-check-export-"));
-  const errors: string[] = [];
-  const originalError = console.error;
-  const originalWarn = console.warn;
+  const captured = captureConsole();
   try {
     const { app } = createVaultStub(VAULT_ROOT, BOOK_FOLDER);
     const folder = (
@@ -138,30 +164,16 @@ async function main(): Promise<void> {
       pushAfterExport: false,
     };
 
-    // The orchestrator reports failures through console.error + a Notice
-    // rather than throwing (an export must never crash Obsidian), so capture
-    // both. Warnings are allowed — an omitted embed is a degraded book, not a
-    // broken one — but they are printed so a new one is visible in CI logs.
-    console.error = (...args: unknown[]) => {
-      errors.push(args.map((a) => (a instanceof Error ? (a.stack ?? a.message) : String(a))).join(" "));
-    };
-    const warnings: string[] = [];
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((a) => String(a)).join(" "));
-    };
-
     await plugin.exportFolder(folder);
 
-    console.error = originalError;
-    console.warn = originalWarn;
-
-    for (const w of warnings) console.log(`  [warn] ${w}`);
+    captured.restore();
+    for (const w of captured.warnings) console.log(`  [warn] ${w}`);
 
     const failureNotice = NOTICES.find((n) => n.startsWith("EPUB export failed"));
-    if (failureNotice || errors.length > 0) {
+    if (failureNotice || captured.errors.length > 0) {
       fail("the shipped bundle could not complete an export.", [
         ...(failureNotice ? [`notice: ${failureNotice}`] : []),
-        ...errors,
+        ...captured.errors,
       ]);
     }
     const epubPath = savedPathFromNotices(NOTICES);
@@ -204,8 +216,7 @@ async function main(): Promise<void> {
         "and a second, footnote-heavy book with valid, reproducible footnotes."
     );
   } finally {
-    console.error = originalError;
-    console.warn = originalWarn;
+    captured.restore();
     rmSync(outDir, { recursive: true, force: true });
   }
 }

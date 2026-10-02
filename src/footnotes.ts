@@ -355,6 +355,7 @@ function matchMarkers(
     const anchor = markerAnchor(sup)!;
     const fragment = anchor.getAttribute("href")!.slice(1);
     const candidates = byKey.get(fragment) ?? [];
+
     if (candidates.length === 1) {
       const note = candidates[0];
       if (note.number === 0) {
@@ -363,21 +364,26 @@ function matchMarkers(
       }
       note.markers.push(sup);
       resolved.push({ sup, note, ordinal: note.markers.length });
-    } else if (candidates.length === 0) {
+      continue;
+    }
+
+    if (candidates.length === 0) {
       warnings.push(
         `Footnote marker "${(anchor.textContent ?? "").trim()}" has no matching note and was left as plain text`
       );
       degradeMarker(sup, anchor);
-    } else {
-      if (!ambiguousFragments.has(fragment)) {
-        ambiguousFragments.add(fragment);
-        warnings.push(
-          `Footnote reference "${fragment}" matches more than one note and was left as plain text`
-        );
-        for (const note of candidates) ambiguousNotes.add(note);
-      }
-      degradeMarker(sup, anchor);
+      continue;
     }
+
+    // More than one note answers to this fragment, and flattening leaves no
+    // boundary between renders to attribute it to. Warn once per fragment,
+    // then degrade every marker that points at it.
+    if (!ambiguousFragments.has(fragment)) {
+      ambiguousFragments.add(fragment);
+      warnings.push(`Footnote reference "${fragment}" matches more than one note and was left as plain text`);
+      for (const note of candidates) ambiguousNotes.add(note);
+    }
+    degradeMarker(sup, anchor);
   }
   return { resolved, ambiguousNotes };
 }

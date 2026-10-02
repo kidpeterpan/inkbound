@@ -296,73 +296,112 @@ export type SettleResult =
 const sameShape = (a: BaseShape, b: BaseShape) =>
   a.rows === b.rows && a.columns === b.columns && a.reportedCount === b.reportedCount;
 
+interface Size {
+  width: number;
+  height: number;
+}
+
+// Every non-ready settle result besides "loading" is the view's own answer; a
+// view still loading after a resize never stabilized.
+function settleFailure(view: Exclude<BaseViewState, { kind: "ready" }>): SettleResult {
+  return view.kind === "loading" ? { kind: "timeout" } : view;
+}
+
+// Polls the view until it leaves the loading state; null means it never did.
+// Both waits are bounded by the clock AND by a poll count, so a clock that
+// never advances cannot make either loop run forever.
+async function waitForReady(ops: SettleOps, o: SettleOptions): Promise<BaseViewState | null> {
+  const maxPolls = Math.ceil(o.timeoutMs / o.pollMs) + 1;
+  const deadline = ops.now() + o.timeoutMs;
+  let view = ops.read();
+  for (let i = 0; view.kind === "loading"; i++) {
+    if (i >= maxPolls || ops.now() >= deadline) return null;
+    await ops.sleep(o.pollMs);
+    view = ops.read();
+  }
+  return view;
+}
+
+// After a resize the view re-renders; wait until two reads in a row agree.
+async function settleAfterResize(ops: SettleOps, o: SettleOptions): Promise<BaseViewState> {
+  const maxPolls = Math.ceil(o.settleMs / o.pollMs) + 1;
+  let previous: BaseShape | null = null;
+  let latest = ops.read();
+  for (let i = 0; i < maxPolls; i++) {
+    if (latest.kind === "error" || latest.kind === "unsupported") return latest;
+    if (latest.kind === "ready") {
+      if (previous && sameShape(previous, latest.shape)) return latest;
+      previous = latest.shape;
+    }
+    await ops.sleep(o.pollMs);
+    latest = ops.read();
+  }
+  return latest;
+}
+
+// Columns: widen until the header stops gaining columns. There is no count to
+// compare against, so "stopped growing" is the only evidence of completeness.
+async function growUntilAllColumns(
+  ops: SettleOps,
+  o: SettleOptions,
+  size: Size,
+  initialShape: BaseShape
+): Promise<{ failure: SettleResult | null; shape: BaseShape; columnsMayBeCut: boolean }> {
+  let shape = initialShape;
+  let columnsMayBeCut = false;
+  for (let round = 0; round < o.maxRounds && size.width < o.maxWidth; round++) {
+    size.width = Math.min(size.width * 2, o.maxWidth);
+    ops.setSize(size.width, size.height);
+    const view = await settleAfterResize(ops, o);
+    if (view.kind !== "ready") return { failure: settleFailure(view), shape, columnsMayBeCut };
+    const grew = view.shape.columns > shape.columns;
+    shape = view.shape;
+    columnsMayBeCut = grew && size.width >= o.maxWidth;
+    if (!grew) break;
+  }
+  return { failure: null, shape, columnsMayBeCut };
+}
+
+// Rows: the toolbar's count is the truth; grow the host until that many render.
+async function growUntilAllRowsReported(
+  ops: SettleOps,
+  o: SettleOptions,
+  size: Size,
+  initialShape: BaseShape
+): Promise<{ failure: SettleResult | null; shape: BaseShape }> {
+  let shape = initialShape;
+  for (let round = 0; round < o.maxRounds && size.height < o.maxHeight; round++) {
+    if (shape.reportedCount === null || shape.rows >= shape.reportedCount) break;
+    size.height = Math.min(o.maxHeight, Math.max(size.height * 2, (shape.reportedCount + 2) * o.rowHeightPx));
+    ops.setSize(size.width, size.height);
+    const view = await settleAfterResize(ops, o);
+    if (view.kind !== "ready") return { failure: settleFailure(view), shape };
+    shape = view.shape;
+  }
+  return { failure: null, shape };
+}
+
 export async function settleBaseView(
   ops: SettleOps,
   o: SettleOptions = DEFAULT_SETTLE
 ): Promise<SettleResult> {
-  let width = o.startWidth;
-  let height = o.startHeight;
-  ops.setSize(width, height);
+  const size: Size = { width: o.startWidth, height: o.startHeight };
+  ops.setSize(size.width, size.height);
 
-  // Both waits are bounded by the clock AND by a poll count, so a clock that
-  // never advances cannot make either loop run forever.
-  const loadPolls = Math.ceil(o.timeoutMs / o.pollMs) + 1;
-  const deadline = ops.now() + o.timeoutMs;
-  let s = ops.read();
-  for (let i = 0; s.kind === "loading"; i++) {
-    if (i >= loadPolls || ops.now() >= deadline) return { kind: "timeout" };
-    await ops.sleep(o.pollMs);
-    s = ops.read();
-  }
-  if (s.kind !== "ready") return s;
+  const initial = await waitForReady(ops, o);
+  if (initial === null) return { kind: "timeout" };
+  if (initial.kind !== "ready") return settleFailure(initial);
 
-  // After a resize the view re-renders; wait until two reads in a row agree.
-  const settle = async (): Promise<BaseViewState> => {
-    const polls = Math.ceil(o.settleMs / o.pollMs) + 1;
-    let previous: BaseShape | null = null;
-    let latest: BaseViewState = ops.read();
-    for (let i = 0; i < polls; i++) {
-      if (latest.kind === "error" || latest.kind === "unsupported") return latest;
-      if (latest.kind === "ready") {
-        if (previous && sameShape(previous, latest.shape)) return latest;
-        previous = latest.shape;
-      }
-      await ops.sleep(o.pollMs);
-      latest = ops.read();
-    }
-    return latest;
-  };
+  const columns = await growUntilAllColumns(ops, o, size, initial.shape);
+  if (columns.failure) return columns.failure;
 
-  let shape = s.shape;
-  let columnsMayBeCut = false;
+  const rows = await growUntilAllRowsReported(ops, o, size, columns.shape);
+  if (rows.failure) return rows.failure;
 
-  // Columns: widen until the header stops gaining columns. There is no count to
-  // compare against, so "stopped growing" is the only evidence of completeness.
-  for (let round = 0; round < o.maxRounds && width < o.maxWidth; round++) {
-    width = Math.min(width * 2, o.maxWidth);
-    ops.setSize(width, height);
-    const next = await settle();
-    if (next.kind !== "ready") return next.kind === "loading" ? { kind: "timeout" } : next;
-    const grew = next.shape.columns > shape.columns;
-    shape = next.shape;
-    columnsMayBeCut = grew && width >= o.maxWidth;
-    if (!grew) break;
-  }
-
-  // Rows: the toolbar's count is the truth; grow the host until that many render.
-  for (let round = 0; round < o.maxRounds && height < o.maxHeight; round++) {
-    if (shape.reportedCount === null || shape.rows >= shape.reportedCount) break;
-    height = Math.min(o.maxHeight, Math.max(height * 2, (shape.reportedCount + 2) * o.rowHeightPx));
-    ops.setSize(width, height);
-    const next = await settle();
-    if (next.kind !== "ready") return next.kind === "loading" ? { kind: "timeout" } : next;
-    shape = next.shape;
-  }
-
-  const rowsCut = shape.reportedCount !== null && shape.rows < shape.reportedCount;
+  const rowsCut = rows.shape.reportedCount !== null && rows.shape.rows < rows.shape.reportedCount;
   const problems = [
-    rowsCut ? `${shape.rows} of ${shape.reportedCount} rows` : null,
-    columnsMayBeCut ? "some columns may be missing" : null,
+    rowsCut ? `${rows.shape.rows} of ${rows.shape.reportedCount} rows` : null,
+    columns.columnsMayBeCut ? "some columns may be missing" : null,
   ].filter((p): p is string => p !== null);
-  return { kind: "ready", shape, incomplete: problems.length > 0 ? problems.join("; ") : null };
+  return { kind: "ready", shape: rows.shape, incomplete: problems.length > 0 ? problems.join("; ") : null };
 }
