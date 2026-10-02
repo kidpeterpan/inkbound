@@ -370,18 +370,24 @@ repeatedly, before a manual device test.
 
 ## Architecture
 
-`src/` splits into two kinds of modules:
+`src/` splits into two kinds of modules, and the directory is the rule:
 
-- **Pure modules** — `metadata.ts`, `collect.ts`, `naming.ts`, `epub.ts`,
-  `epub-css.ts`, `media-types.ts`, `settings-core.ts`, `math.ts`, `fonts.ts` — have zero imports of
-  the `obsidian` package, so vitest loads and unit-tests them directly.
-- **Obsidian adapters** — `main.ts`, `settings.ts`, `render-adapter.ts`,
-  `http.ts` — import `obsidian` for its types and runtime globals (`Plugin`,
-  `Notice`, `TFile`, `requestUrl`, etc.) and are only importable in tests
-  through the `vitest.config.ts` alias to `tests/fixtures/obsidian-stub.ts`
-  described above under "Testing and its limits".
+- **`src/core/`** — pure: zero imports of the `obsidian` package, so vitest
+  loads and unit-tests them directly, with no stub.
+- **`src/adapters/`** — import `obsidian` for its types and runtime globals
+  (`Plugin`, `Notice`, `TFile`, `requestUrl`, `MarkdownRenderer`, `Modal`,
+  `Platform`, etc.) and are only importable in tests through the
+  `vitest.config.ts` alias to `tests/fixtures/obsidian-stub.ts` described above
+  under "Testing and its limits". `src/main.ts` is the plugin entry — esbuild's
+  `entryPoints` — and is an adapter too.
 
-`types.ts` holds shared interfaces only (no runtime code) and is excluded
+`tests/module-boundaries.test.ts` enforces the split in both directions —
+nothing under `core/` may import `obsidian` or reach into `adapters/`, and
+nothing outside `adapters/` + `main.ts` may import `obsidian` — so moving a
+module between the two directories is how its status changes. There is no list
+to keep in sync.
+
+`core/types.ts` holds shared interfaces only (no runtime code) and is excluded
 from the coverage report for that reason.
 
 ## BooxDrop endpoint notes
