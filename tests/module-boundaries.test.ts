@@ -35,11 +35,60 @@ function relativeTsFiles(dir: string, prefix = ""): string[] {
 
 const MODULES = relativeTsFiles(SRC_DIR).sort();
 
-// Matches `import x from "m"`, `import { x } from "m"`, `import "m"` and the
-// multi-line forms. Comment lines are stripped first — this file's own subject
-// matter means comments here talk ABOUT `from "obsidian"`, and a naive search
-// matches that prose (it did, while this was being written).
-const IMPORT_SPECIFIER = /(?:^|\n)\s*import\s+(?:[^"']*?\sfrom\s+)?["']([^"']+)["']/g;
+// Two patterns, because the shapes differ: a static import starts its own line
+// (`import x from "m"`, `import { x } from "m"`, `import "m"`, `export … from`,
+// and their multi-line forms), while a dynamic one appears mid-expression —
+// `const { promises: fs } = await import("fs")`. Comment lines are stripped
+// first: this file's own subject matter means comments here talk ABOUT
+// `from "obsidian"`, and a naive search matches that prose (it did, while this
+// was being written).
+const STATIC_IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?:[^"']*?\sfrom\s+)?["']([^"']+)["']/g;
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*["']([^"']+)["']/g;
+
+// Node builtins, bare or `node:`-prefixed. `core/` must not reach for any of
+// them: the plugin ships one bundle that has to LOAD on Obsidian mobile, where
+// there is no require() — see docs/DEVELOPMENT.md's "The mobile load gate".
+// (ESM-only builtins like `node:fs/promises` are covered by the prefix check.)
+const NODE_BUILTIN = new Set([
+  "assert",
+  "buffer",
+  "child_process",
+  "cluster",
+  "console",
+  "crypto",
+  "dgram",
+  "dns",
+  "domain",
+  "events",
+  "fs",
+  "http",
+  "http2",
+  "https",
+  "module",
+  "net",
+  "os",
+  "path",
+  "perf_hooks",
+  "process",
+  "punycode",
+  "querystring",
+  "readline",
+  "stream",
+  "string_decoder",
+  "timers",
+  "tls",
+  "tty",
+  "url",
+  "util",
+  "v8",
+  "vm",
+  "worker_threads",
+  "zlib",
+]);
+
+function isNodeBuiltin(specifier: string): boolean {
+  return specifier.startsWith("node:") || NODE_BUILTIN.has(specifier);
+}
 
 function sourceWithoutComments(source: string): string {
   return source
@@ -51,7 +100,10 @@ function sourceWithoutComments(source: string): string {
 
 function importedSpecifiers(moduleName: string): string[] {
   const source = sourceWithoutComments(readFileSync(join(SRC_DIR, moduleName), "utf8"));
-  return [...source.matchAll(IMPORT_SPECIFIER)].map((match) => match[1]);
+  return [
+    ...[...source.matchAll(STATIC_IMPORT)].map((match) => match[1]),
+    ...[...source.matchAll(DYNAMIC_IMPORT)].map((match) => match[1]),
+  ];
 }
 
 /** Resolves a relative specifier to a src-relative path ("core/x"), or null. */
@@ -91,6 +143,22 @@ describe("the pure/adapter module boundary", () => {
     );
   });
 
+  it("keeps node builtins out of core, so the bundle still loads on mobile", () => {
+    const offenders: string[] = [];
+
+    for (const moduleName of MODULES.filter((m) => m.startsWith(CORE_PREFIX))) {
+      for (const specifier of importedSpecifiers(moduleName)) {
+        if (isNodeBuiltin(specifier)) offenders.push(`${moduleName} imports ${specifier}`);
+      }
+    }
+
+    expect(
+      offenders,
+      "core/ modules must not import node builtins: the shipped bundle is one file that has " +
+        "to load on Obsidian mobile, where require() does not exist (see docs/DEVELOPMENT.md)"
+    ).toEqual([]);
+  });
+
   it("keeps obsidian out of everything that is not an adapter", () => {
     const importers = MODULES.filter((m) => importedSpecifiers(m).includes("obsidian"));
     const undeclared = importers.filter((m) => !isAdapter(m));
@@ -103,12 +171,13 @@ describe("the pure/adapter module boundary", () => {
   });
 
   it("parses imports the way the modules actually write them", () => {
-    // Guards the parser itself: main.ts's obsidian import spans several lines,
-    // and the assertions above are silent if IMPORT_SPECIFIER stops matching
-    // multi-line imports.
-    expect(importedSpecifiers("main.ts")).toContain("obsidian");
+    // Guards the parser itself: the assertions above are silent if
+    // IMPORT_SPECIFIER stops matching the shapes the code actually uses.
+    expect(importedSpecifiers("main.ts")).toContain("obsidian"); // multi-line from
     expect(importedSpecifiers("core/render.ts")).not.toContain("obsidian");
     expect(importedSpecifiers("core/render.ts").length).toBe(0);
     expect(importedSpecifiers("adapters/render-adapter.ts")).toContain("obsidian");
+    // Dynamic import: adapters/output-adapter.ts does `await import("fs")`.
+    expect(importedSpecifiers("adapters/output-adapter.ts")).toContain("fs");
   });
 });

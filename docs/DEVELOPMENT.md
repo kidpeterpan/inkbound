@@ -309,15 +309,15 @@ README's "Known limitations" section.)
 
 ## Bundled fonts (.ttf loader trio)
 
-`src/fonts/NotoSansThai-{Regular,Bold}.ttf` are static wght 400/700 instances
+`src/core/fonts/NotoSansThai-{Regular,Bold}.ttf` are static wght 400/700 instances
 instantiated from the official Noto Sans Thai variable font (google/fonts
 `ofl/notosansthai/NotoSansThai[wdth,wght].ttf`) via
 `fontTools.varLib.instancer.instantiateVariableFont(f, {"wght": w, "wdth": 100})`.
 The trio that keeps them working in all three environments:
 
-1. `esbuild.config.mjs` + `scripts/local-export.ts` set `loader: { ".ttf": "binary" }`
+1. `esbuild.config.mjs` + `scripts/local-export.ts` set `loader: { ".ttf": "base64" }`
    → the bytes are inlined as base64 `Uint8Array` default exports.
-2. `src/fonts/fonts.d.ts` declares `module "*.ttf"` for `tsc`.
+2. `src/core/fonts/fonts.d.ts` declares `module "*.ttf"` for `tsc`.
 3. `vitest.config.ts` aliases the exact `.ttf` paths to
    `tests/fixtures/font-bytes.ts` (vitest has no binary loader).
 
