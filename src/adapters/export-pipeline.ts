@@ -112,7 +112,6 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
   // builders record BEFORE this runs — so it is book-level by definition,
   // and is seeded here rather than looked for in the chapter loop below.
   (job.warnings ?? []).forEach(collector.forBook());
-  const outcome: ExportOutcome = { report: null, shareTarget: null };
 
   let notice: Notice | null = null;
   try {
@@ -162,7 +161,8 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
   } catch (e) {
     console.error("[inkbound] export failed", e);
     new Notice(`EPUB export failed: ${errorMessage(e)}`);
-    return outcome;
+    // Nothing was written, so there is no book to share and no report to open.
+    return { report: null, shareTarget: null };
   } finally {
     // In `finally`, not on the success path: a write that fails must not
     // take the warnings gathered before it down with it — on mobile the
