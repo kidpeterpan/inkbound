@@ -1,5 +1,5 @@
-// Tests for the markdown-level half of src/footnotes.ts (011 US4, FR-015, FR-016),
-// plus src/footnote-refs.ts, which naming.ts uses to strip a reference from a heading.
+// Tests for the markdown-level half of src/core/footnotes.ts (011 US4, FR-015, FR-016),
+// plus src/core/footnote-refs.ts, which naming.ts uses to strip a reference from a heading.
 //
 // Why this exists: Obsidian destroys orphan footnotes BEFORE the DOM does. Captured from a
 // live 1.13.7 (tests/fixtures/footnotes-real.html): a dangling `[^nope]` renders as the bare

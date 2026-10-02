@@ -891,7 +891,7 @@ describe("exportFolder", () => {
     // Regression test: exportFolder used to pass `(fm?.tags ?? []) as string[]`
     // straight through with no runtime check. A scalar `tags: "notebook
     // mainframe"` string would reach pickIndexNote, whose `.includes("book")`
-    // / `.includes("main")` checks (src/collect.ts) are Array.prototype.includes
+    // / `.includes("main")` checks (src/core/collect.ts) are Array.prototype.includes
     // for genuine arrays but silently fall through to
     // String.prototype.includes — SUBSTRING matching — for a scalar string.
     // "notebook mainframe" contains both "book" and "main", so without the
@@ -2266,7 +2266,7 @@ describe("basePath on a non-FileSystemAdapter vault (008-mobile-support)", () =>
 
 // ── 008-mobile-support US3: push to a Boox from mobile ────────────────────
 //
-// The transport (src/http.ts's requestUrl) is already platform-neutral, so
+// The transport (src/adapters/http.ts's requestUrl) is already platform-neutral, so
 // this needs no production branch. These tests exist to PROVE that rather than
 // assume it, and to pin the two properties that mobile could plausibly break:
 // the upload name, and the write-before-push order the constitution requires.

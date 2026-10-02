@@ -1,4 +1,4 @@
-// Unit tests for src/footnotes.ts (011-footnote-semantics).
+// Unit tests for src/core/footnotes.ts (011-footnote-semantics).
 //
 // Input is REAL Obsidian 1.13.7 markup wherever it exists (tests/fixtures/footnotes-real.html
 // and footnotes-real-contexts.html — FR-030). Synthetic markup, built with the fixture

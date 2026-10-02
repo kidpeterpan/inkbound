@@ -13,7 +13,7 @@
 // (google/fonts ofl/notosansthai/NotoSansThai[wdth,wght].ttf) via
 //   fonttools varLib.instancer.instantiateVariableFont(f, {"wght": w, "wdth": 100})
 // 467 glyphs each, ~47.8 KB — see plan.md Research. The font BYTES and the
-// injectable loader seam live in src/font-assets.ts (which owns the .ttf
+// injectable loader seam live in src/core/font-assets.ts (which owns the .ttf
 // binary imports), so this module stays loadable by tsx-based scripts that
 // have no .ttf loader.
 

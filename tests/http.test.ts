@@ -16,7 +16,7 @@ describe("obsidianHttp", () => {
     expect(res.status).toBe(204);
     // Body identity: obsidianHttp must forward the exact ArrayBuffer given,
     // not drop it or wrap/copy it into a new one. `throw: false` is asserted
-    // here too — src/http.ts always sends it (so a bad body still yields a
+    // here too — src/adapters/http.ts always sends it (so a bad body still yields a
     // usable status instead of throwing), but nothing previously checked
     // that it hadn't silently flipped to `true`.
     expect(seen[0]).toMatchObject({ url: "http://d/x", method: "POST", headers: { A: "b" }, throw: false });

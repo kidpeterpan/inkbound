@@ -1025,7 +1025,7 @@ describe("renderUnitToChapter", () => {
 
   it("treats a scoped embed of the host's own note as circular, not as a heading/block lookup (FR-008)", async () => {
     // The dest/circular check runs BEFORE any heading/block resolution (see
-    // src/render-adapter.ts's populateEmbeds), so a note embedding a section
+    // src/adapters/render-adapter.ts's populateEmbeds), so a note embedding a section
     // of itself never reaches findHeadingSection/findSupportedBlock at all —
     // it degrades exactly like any other self-referencing embed already
     // would, with no new self-reference-specific code path.
@@ -1400,7 +1400,7 @@ describe("renderUnitToChapter footnote warnings (011 US4)", () => {
 
 // ── Bases embeds (table views become static tables) ─────────────────────────
 //
-// The real renderer (src/bases-adapter.ts) needs a live Obsidian, so these
+// The real renderer (src/adapters/bases-adapter.ts) needs a live Obsidian, so these
 // tests inject one through setBaseRenderer, handing back a table built by the
 // production converter from the hand-built fixture DOM. What is under test is
 // everything populateEmbeds and the pure passes do with the outcome.
