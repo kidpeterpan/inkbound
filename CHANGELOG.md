@@ -3,6 +3,26 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.4
+
+No change to exported books — this release is internal structure work.
+
+- **`src/` is split into a pure `core/` and Obsidian `adapters/`, and the split
+  is enforced by a test.** Nothing under `core/` may import `obsidian`, an
+  adapter, or a Node builtin, so the export pipeline stays loadable and
+  unit-testable without an Obsidian app — and the test names the offending file
+  instead of letting the boundary erode quietly.
+- **`main.ts` is a thin plugin entry now** (861 → 330 lines): the export
+  pipeline, metadata and cover resolution, the write path, and the completion
+  notice each live in a module that says what it does. The page pipeline's
+  eleven steps are written out in order, and its image numbering runs from one
+  counter instead of four copies of a running sum.
+- **A built book's uuid, modified timestamp, and ZIP entry dates come from one
+  injected `BookIdentity`.** A real export still mints a fresh one, but passing
+  a fixed identity makes the file reproducible byte for byte — which is what
+  `tests/book-identity.test.ts` asserts, and what the old entry-by-entry
+  fingerprint comparison could only approximate.
+
 ## 1.10.3
 
 No change to exported books — this release is internal readability work.
