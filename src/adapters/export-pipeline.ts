@@ -12,25 +12,25 @@
 // book-tree.ts, report.ts and epub.ts, and the writing half lives in
 // output-adapter.ts. See tests/module-boundaries.test.ts.
 import { App, Component, FileSystemAdapter, Notice, TFile } from "obsidian";
-import { EpubBuilder, chapterHref, type NavItem } from "./epub";
-import { escapeXml } from "./xml";
-import { systemBookIdentity } from "./book-identity";
+import { EpubBuilder, chapterHref, type NavItem } from "../core/epub";
+import { escapeXml } from "../core/xml";
+import { systemBookIdentity } from "../core/book-identity";
 import { renderUnitToChapter } from "./render-adapter";
-import { resolveChapterAssets, type AssetVault } from "./chapter-assets";
-import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
-import { BooxDropClient } from "./booxdrop";
+import { resolveChapterAssets, type AssetVault } from "../core/chapter-assets";
+import { computeBacklinks, renderBacklinksFragment } from "../core/backlinks";
+import { BooxDropClient } from "../core/booxdrop";
 import { obsidianHttp } from "./http";
-import { resolveDestination, type ExportDestination } from "./output";
+import { resolveDestination, type ExportDestination } from "../core/output";
 import { desktopHomedir, platformKind, writeBook } from "./output-adapter";
 import { showExportNotice } from "./export-notice";
-import { createWarningCollector, type ExportReport, type WarningCollector } from "./report";
-import { coerceBacklinkPosition, summarizeWarnings, type EpubExportSettings } from "./settings-core";
-import { slugify } from "./naming";
-import { getThaiFontLoader } from "./font-assets";
-import { containsThai } from "./fonts";
-import { errorMessage } from "./error-text";
-import type { ShareTarget } from "./share";
-import type { ExportMeta } from "./types";
+import { createWarningCollector, type ExportReport, type WarningCollector } from "../core/report";
+import { coerceBacklinkPosition, summarizeWarnings, type EpubExportSettings } from "../core/settings-core";
+import { slugify } from "../core/naming";
+import { getThaiFontLoader } from "../core/font-assets";
+import { containsThai } from "../core/fonts";
+import { errorMessage } from "../core/error-text";
+import type { ShareTarget } from "../core/share";
+import type { ExportMeta } from "../core/types";
 
 export interface Job {
   meta: ExportMeta;

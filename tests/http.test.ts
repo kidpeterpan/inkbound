@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { setRequestUrlImpl, resetRequestUrlImpl, type RequestUrlParamLike } from "./fixtures/obsidian-stub";
-import { obsidianHttp } from "../src/http";
+import { obsidianHttp } from "../src/adapters/http";
 
 afterEach(() => resetRequestUrlImpl());
 

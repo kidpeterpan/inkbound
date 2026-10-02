@@ -8,8 +8,8 @@
 // these tests compare the actual bytes instead of fingerprinting around them.
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder } from "../src/epub";
-import { systemBookIdentity, type BookIdentity } from "../src/book-identity";
+import { EpubBuilder } from "../src/core/epub";
+import { systemBookIdentity, type BookIdentity } from "../src/core/book-identity";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

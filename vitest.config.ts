@@ -60,7 +60,7 @@ export default defineConfig({
       // pure decision logic (the drift canary's rules), with no I/O of its own.
       include: ["src/**/*.ts", "scripts/lib/obsidian-drift.ts"],
       // Interfaces only — emits no JS, so v8 reports 0/0 and would fail any threshold.
-      exclude: ["src/types.ts"],
+      exclude: ["src/core/types.ts"],
       reporter: ["text", "html", "lcov"],
       thresholds: {
         perFile: true,

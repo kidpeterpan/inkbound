@@ -20,7 +20,7 @@ import * as path from "path";
 import * as os from "os";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
-import { DEFAULT_SETTINGS } from "../src/settings-core";
+import { DEFAULT_SETTINGS } from "../src/core/settings-core";
 import {
   REPO_ROOT,
   inspectEpub,

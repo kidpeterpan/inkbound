@@ -10,8 +10,8 @@
 import { readFileSync, writeFileSync, readdirSync } from "fs";
 import * as path from "path";
 import { JSDOM } from "jsdom";
-import { cleanupDom, rasterizeMermaidDiagrams, serializeBody } from "../src/render";
-import { EpubBuilder } from "../src/epub";
+import { cleanupDom, rasterizeMermaidDiagrams, serializeBody } from "../src/core/render";
+import { EpubBuilder } from "../src/core/epub";
 
 const extractDir = process.argv[2];
 if (!extractDir) {

@@ -1,17 +1,17 @@
 import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } from "obsidian";
-import type { NavItem } from "./epub";
-import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./book-tree";
-import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
-import { deriveChapterTitle } from "./naming";
-import { canShareEpub, shareEpub, type ShareTarget } from "./share";
-import { DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab } from "./settings";
-import type { ExportMeta } from "./types";
-import type { MetaDefaults } from "./metadata";
-import { NoteMetaSource } from "./meta-adapter";
-import type { ExportReport } from "./report";
-import { openExportReport } from "./report-view";
-import { errorMessage } from "./error-text";
-import { runExport as runExportPipeline, type Job } from "./export-pipeline";
+import type { NavItem } from "./core/epub";
+import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./core/book-tree";
+import { orderChapters, pickIndexNote, bfsLinked } from "./core/collect";
+import { deriveChapterTitle } from "./core/naming";
+import { canShareEpub, shareEpub, type ShareTarget } from "./core/share";
+import { DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab } from "./adapters/settings";
+import type { ExportMeta } from "./core/types";
+import type { MetaDefaults } from "./core/metadata";
+import { NoteMetaSource } from "./adapters/meta-adapter";
+import type { ExportReport } from "./core/report";
+import { openExportReport } from "./adapters/report-view";
+import { errorMessage } from "./core/error-text";
+import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
 
 export default class EpubExportPlugin extends Plugin {
   settings: EpubExportSettings = DEFAULT_SETTINGS;

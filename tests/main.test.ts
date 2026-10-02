@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
-import { setSvgRasterizer } from "../src/render-adapter";
-import { setThaiFontLoader } from "../src/font-assets";
-import { setBaseRenderer, type BaseRenderOutcome } from "../src/bases-adapter";
-import { buildStaticTable, extractBaseTable } from "../src/bases";
+import { setSvgRasterizer } from "../src/adapters/render-adapter";
+import { setThaiFontLoader } from "../src/core/font-assets";
+import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
+import { buildStaticTable, extractBaseTable } from "../src/core/bases";
 import { buildBasesEmbed, hostWith } from "./fixtures/bases-dom";
-import { EpubBuilder } from "../src/epub";
+import { EpubBuilder } from "../src/core/epub";
 import {
   TFile,
   TFolder,
@@ -31,9 +31,9 @@ import {
 } from "./fixtures/obsidian-stub";
 import type { StubCommand } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
-import { setShareHost } from "../src/share";
-import { BOOK_GROUP_LABEL } from "../src/report";
-import type { EpubExportSettings } from "../src/settings";
+import { setShareHost } from "../src/core/share";
+import { BOOK_GROUP_LABEL } from "../src/core/report";
+import type { EpubExportSettings } from "../src/adapters/settings";
 import { epubEntryFingerprints } from "./fixtures/epub-fingerprint";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 

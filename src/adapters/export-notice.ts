@@ -8,7 +8,7 @@
 // (FR-019, Constitution II). Worst case is a saved book shown with the plain
 // notice — exactly the pre-feature behavior.
 import { App, Notice } from "obsidian";
-import { buildReport, type ExportReport, type ScopedWarning } from "./report";
+import { buildReport, type ExportReport, type ScopedWarning } from "../core/report";
 import { openExportReport } from "./report-view";
 
 export interface ExportNoticeInput {

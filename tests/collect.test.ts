@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orderChapters, orderByName, pickIndexNote, bfsLinked } from "../src/collect";
+import { orderChapters, orderByName, pickIndexNote, bfsLinked } from "../src/core/collect";
 
 describe("orderChapters", () => {
   it("sorts NN_ prefixes numerically, then others alphabetically", () => {

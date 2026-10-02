@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "../src/book-tree";
-import { orderChapters } from "../src/collect";
+import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "../src/core/book-tree";
+import { orderChapters } from "../src/core/collect";
 
 // ── fixture helpers ─────────────────────────────────────────────────────
 

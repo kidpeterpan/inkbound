@@ -5,7 +5,7 @@
 // declarations only, no runtime JS (node_modules/obsidian/package.json has
 // "main": ""). MarkdownRenderer.render(...) and `instanceof TFile` are real
 // VALUE usages, not just type positions, so that import can't be elided —
-import { errorMessage } from "./error-text";
+import { errorMessage } from "../core/error-text";
 // bundling it into render.ts would make Vite try to eagerly resolve the
 // "obsidian" package the moment anything in render.ts is loaded, which
 // breaks every pure-function test in tests/render.test.ts (verified: it
@@ -13,8 +13,8 @@ import { errorMessage } from "./error-text";
 // adapter out mirrors the same fix already applied to settings.ts/
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
-import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "./footnotes";
-import type { ChapterImage } from "./types";
+import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "../core/footnotes";
+import type { ChapterImage } from "../core/types";
 import {
   stripFrontmatter,
   stripDynamicBlocks,
@@ -37,8 +37,8 @@ import {
   type HeadingInfo,
   type SectionInfo,
   type ListItemInfo,
-} from "./render";
-import { protectMath, renderMath, type MathSpan } from "./math";
+} from "../core/render";
+import { protectMath, renderMath, type MathSpan } from "../core/math";
 import { getBaseRenderer } from "./bases-adapter";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
@@ -374,8 +374,8 @@ async function expandMarkdownEmbed(
 // implementation lives in render.ts — see the "Mermaid rasterization" block
 // there for why (importing THIS module pulls in "obsidian", which has no
 // runtime JS outside Obsidian/vitest).
-export { setSvgRasterizer } from "./render";
-export type { SvgRasterizer } from "./render";
+export { setSvgRasterizer } from "../core/render";
+export type { SvgRasterizer } from "../core/render";
 
 export interface ChapterRender {
   xhtmlBody: string;

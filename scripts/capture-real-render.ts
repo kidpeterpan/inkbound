@@ -39,8 +39,8 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { protectMath } from "../src/math";
-import { stripDynamicBlocks, stripFrontmatter } from "../src/render";
+import { protectMath } from "../src/core/math";
+import { stripDynamicBlocks, stripFrontmatter } from "../src/core/render";
 
 export const BASE_PATH_TOKEN = "/VAULT";
 

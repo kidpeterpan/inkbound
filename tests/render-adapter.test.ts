@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
-import { renderUnitToChapter, setSvgRasterizer } from "../src/render-adapter";
-import { setBaseRenderer, type BaseRenderOutcome } from "../src/bases-adapter";
-import { buildStaticTable, extractBaseTable } from "../src/bases";
+import { renderUnitToChapter, setSvgRasterizer } from "../src/adapters/render-adapter";
+import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
+import { buildStaticTable, extractBaseTable } from "../src/core/bases";
 import { buildBasesEmbed, hostWith, type BasesDomOptions } from "./fixtures/bases-dom";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 

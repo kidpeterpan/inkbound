@@ -8,8 +8,8 @@
 // visible is the note's SOURCE — which is what these functions read.
 
 import { describe, it, expect } from "vitest";
-import { footnoteSourceWarnings, scanFootnoteSource, usesFootnoteMarkup } from "../src/footnotes";
-import { stripFootnoteRefs } from "../src/footnote-refs";
+import { footnoteSourceWarnings, scanFootnoteSource, usesFootnoteMarkup } from "../src/core/footnotes";
+import { stripFootnoteRefs } from "../src/core/footnote-refs";
 
 describe("scanFootnoteSource: finding footnotes that will not survive", () => {
   it("reports a reference with no definition, and a definition with no reference", () => {

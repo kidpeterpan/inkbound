@@ -28,8 +28,8 @@ import {
   settleBaseView,
   type SettleOps,
   type SettleOptions,
-} from "./bases";
-import { errorMessage } from "./error-text";
+} from "../core/bases";
+import { errorMessage } from "../core/error-text";
 
 export type BaseRenderOutcome =
   // `warning`: something is known to be missing from the table (rows or columns

@@ -46,7 +46,7 @@ import * as path from "path";
 import JSZip from "jszip";
 import { assertChapterFootnoteInvariants } from "../tests/fixtures/footnote-fixtures";
 import { epubEntryFingerprints } from "../tests/fixtures/epub-fingerprint";
-import { DEFAULT_SETTINGS } from "../src/settings-core";
+import { DEFAULT_SETTINGS } from "../src/core/settings-core";
 import {
   REPO_ROOT,
   inspectEpub,

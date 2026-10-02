@@ -6,7 +6,7 @@
 // below are load-bearing enough that they deserve to sit together with the
 // comment that explains them.
 import { Platform, type Vault } from "obsidian";
-import type { ExportDestination, PlatformKind } from "./output";
+import type { ExportDestination, PlatformKind } from "../core/output";
 
 // 008-mobile-support: the ONLY place this plugin decides what platform it is
 // on. Everything downstream takes the resulting PlatformKind as a plain

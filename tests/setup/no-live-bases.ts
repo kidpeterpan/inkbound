@@ -9,7 +9,7 @@
 // A test that wants a Bases table or a specific failure calls setBaseRenderer
 // itself, after this hook has run.
 import { beforeEach } from "vitest";
-import { setBaseRenderer } from "../../src/bases-adapter";
+import { setBaseRenderer } from "../../src/adapters/bases-adapter";
 
 beforeEach(() => {
   setBaseRenderer(async () => ({ ok: false, reason: "Bases cannot render outside Obsidian (test default)" }));

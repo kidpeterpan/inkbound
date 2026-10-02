@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mediaTypeForExt } from "../src/media-types";
+import { mediaTypeForExt } from "../src/core/media-types";
 
 describe("mediaTypeForExt", () => {
   it("maps allowlisted extensions to their media types", () => {
