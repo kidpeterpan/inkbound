@@ -130,6 +130,23 @@ export function readBaseView(host: Element): BaseViewState {
 // empty text box a multi-select widget carries. None is content.
 const NOT_CONTENT = "svg, .multi-select-pill-remove-button, .metadata-link-flair, .multi-select-input";
 
+// Merges neighbouring plain-text parts so whitespace can be collapsed across
+// the seams, collapses each part's whitespace, and drops empties.
+function normalizeCellParts(raw: BaseCellPart[]): BaseCellPart[] {
+  const merged: BaseCellPart[] = [];
+  for (const part of raw) {
+    const last = merged[merged.length - 1];
+    if (last && last.href === undefined && part.href === undefined) last.text += part.text;
+    else merged.push({ ...part });
+  }
+  for (const part of merged) part.text = part.text.replace(/\s+/g, " ");
+  if (merged.length > 0) {
+    merged[0].text = merged[0].text.trimStart();
+    merged[merged.length - 1].text = merged[merged.length - 1].text.trimEnd();
+  }
+  return merged.filter((p) => p.text !== "");
+}
+
 function cellParts(td: Element): BaseCellPart[] {
   const raw: BaseCellPart[] = [];
   const push = (text: string, href?: string) => raw.push(href === undefined ? { text } : { text, href });
@@ -168,20 +185,7 @@ function cellParts(td: Element): BaseCellPart[] {
     }
   };
   walk(td);
-
-  // Merge neighbouring plain text so whitespace can be collapsed across the seams.
-  const merged: BaseCellPart[] = [];
-  for (const part of raw) {
-    const last = merged[merged.length - 1];
-    if (last && last.href === undefined && part.href === undefined) last.text += part.text;
-    else merged.push({ ...part });
-  }
-  for (const part of merged) part.text = part.text.replace(/\s+/g, " ");
-  if (merged.length > 0) {
-    merged[0].text = merged[0].text.trimStart();
-    merged[merged.length - 1].text = merged[merged.length - 1].text.trimEnd();
-  }
-  return merged.filter((p) => p.text !== "");
+  return normalizeCellParts(raw);
 }
 
 /** Reads a table view that readBaseView reported `ready`. Does not touch the DOM. */
