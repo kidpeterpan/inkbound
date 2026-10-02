@@ -34,8 +34,9 @@ import type { MetaDefaults } from "./metadata";
 import { NoteMetaSource } from "./meta-adapter";
 import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
-import { createWarningCollector, buildReport, type ExportReport, type WarningCollector } from "./report";
+import { createWarningCollector, type ExportReport, type WarningCollector } from "./report";
 import { openExportReport } from "./report-view";
+import { showExportNotice } from "./export-notice";
 import { errorMessage } from "./error-text";
 
 interface Job {
@@ -598,7 +599,11 @@ export default class EpubExportPlugin extends Plugin {
     const warnMsg = summarizeWarnings(collector.messages());
     const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
 
-    this.showExportNotice(savedText, job, collector);
+    this.lastReport = showExportNotice(this.app, savedText, {
+      bookTitle: job.meta.title,
+      chapterPaths: job.files.map((f) => f.path),
+      warnings: collector.scoped(),
+    });
   }
 
   // Pushes the finished book when the setting is on, returning the fragment the
@@ -622,53 +627,6 @@ export default class EpubExportPlugin extends Plugin {
       collector.forBook()(`push to Boox failed: ${msg}`);
       return ` — saved locally, push failed: ${msg}`;
     }
-  }
-
-  // Builds the export report and shows the completion notice — clickable when
-  // the report has warnings, byte-identical to the pre-report notice otherwise.
-  private showExportNotice(savedText: string, job: Job, collector: WarningCollector): void {
-    // 010-export-report. Built and wired in its own try: everything above
-    // has already succeeded and the book IS on disk, so a bug in the report
-    // must not fall through to the outer catch and tell the reader the
-    // export failed (FR-019, Constitution II). Worst case is a saved book
-    // shown with the plain notice — exactly the pre-feature behavior.
-    let report: ExportReport | null = null;
-    try {
-      report = buildReport(
-        job.meta.title,
-        job.files.map((f) => f.path),
-        collector.scoped()
-      );
-      this.lastReport = report;
-    } catch (e) {
-      console.error("[inkbound] could not build the export report", e);
-    }
-
-    if (report && report.total > 0) {
-      // WHY A DocumentFragment AND NOT Notice.noticeEl: the report needs a
-      // tap target on the notice, and Notice exposes exactly two element
-      // members — `messageEl` (@since 1.8.7, which manifest.json's
-      // minAppVersion of 1.5.0 forbids: undefined on 1.5.0 through 1.8.6,
-      // and the no-unsupported-api lint rule fails the build for it) and
-      // `noticeEl` (available since 0.9.7 but deprecated, and this repo's
-      // lint config forbids disabling @typescript-eslint/no-deprecated at
-      // all). The constructor's DocumentFragment overload predates both and
-      // is flagged by neither: we build the notice body ourselves and make
-      // it clickable, so no Notice member is touched. See
-      // specs/010-export-report/research.md R3.
-      const openReport = report;
-      new Notice(
-        createFragment((frag) => {
-          const body = frag.createDiv({ text: savedText });
-          body.addEventListener("click", () => openExportReport(this.app, openReport));
-        }),
-        8000
-      );
-      return;
-    }
-    // FR-003: a warning-free export's notice is byte-identical to what it
-    // was before this feature, and nothing about it is clickable.
-    new Notice(savedText, 8000);
   }
 
   async loadSettings() {
