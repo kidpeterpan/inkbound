@@ -32,23 +32,23 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 
 ## Development commands
 
-| Command                            | What it does                                                                                                                                         |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                      |
-| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                           |
-| `npm test`                         | Runs the vitest suite once.                                                                                                                          |
-| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.      |
-| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development" above).                       |
+| Command                            | What it does                                                                                                                                                                                                                                                          |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run build`                    | Production build (`esbuild.config.mjs production`) → `main.js`.                                                                                                                                                                                                       |
+| `npm run dev`                      | Development build in watch mode (rebuilds `main.js` on save; stays running until stopped).                                                                                                                                                                            |
+| `npm test`                         | Runs the vitest suite once.                                                                                                                                                                                                                                           |
+| `npm run test:coverage`            | Runs the suite with coverage; enforces an 85% per-file threshold (statements, lines, functions, branches) — see "Testing and its limits" below.                                                                                                                       |
+| `npm run deploy`                   | Builds, then copies `main.js`/`manifest.json`/`styles.css` into a vault's plugin folder (see "Install for development" above).                                                                                                                                        |
 | `npm run epubcheck`                | Builds the sample EPUB (`scripts/build-sample.ts`) and validates it against the EPUB 3 spec; takes extra `.epub` paths (`-- book.epub`). Skips with a hint when `epubcheck` is not installed locally, but is a hard failure in CI — see "The EPUB 3 spec gate" below. |
-| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                      |
-| `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI. |
-| `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.    |
-| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                          |
-| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                           |
-| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below.  |
-| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                        |
-| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                  |
-| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                          |
+| `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                                                                                                                                       |
+| `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI.                                                                                                                  |
+| `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.                                                                                                                     |
+| `npm run version:check`            | Fails (exit 1) if `package.json` and `manifest.json` disagree on `version`.                                                                                                                                                                                           |
+| `npm run version:bump -- <semver>` | Writes a new `version` to both `package.json` and `manifest.json` at once.                                                                                                                                                                                            |
+| `npm run lint`                     | Runs ESLint (`eslint.config.mjs`) over the project, including Obsidian's own plugin-review rules over `src/` — see "Obsidian's review rules" below.                                                                                                                   |
+| `npm run lint:fix`                 | Runs ESLint with `--fix`, applying any auto-fixable findings.                                                                                                                                                                                                         |
+| `npm run format`                   | Runs Prettier with `--write` over `src`, `tests`, `scripts`, and top-level JSON/mjs/Markdown files.                                                                                                                                                                   |
+| `npm run format:check`             | Runs Prettier with `--check` (no writes); used to verify formatting without changing files.                                                                                                                                                                           |
 
 ## Testing and its limits
 
@@ -426,7 +426,8 @@ says nothing about whether Obsidian mobile then behaves as expected.
 ## The shipped-bundle export gate (`scripts/check-export-works.ts`)
 
 Every other automated check runs something other than the file users install.
-vitest imports `src/*.ts`; `local-export` re-bundles `src/main.ts` with its own
+vitest imports `src/**/*.ts` (the modules directly, and the adapters through the
+`obsidian` alias); `local-export` re-bundles `src/main.ts` with its own
 esbuild options; `check-mobile-safe` evaluates `main.js` but only its module
 top level; `check-review-safe` greps it. Nothing asked `main.js` to export a
 book — which is how 1.7.0 and 1.7.1 shipped with desktop export completely
