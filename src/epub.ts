@@ -4,15 +4,7 @@ import { usesFootnoteMarkup } from "./footnotes";
 import { thaiFontCss, THAI_FONT_META, OFL_LICENSE_HREF, type ThaiFontAsset } from "./fonts";
 import type { TocEntry } from "./render";
 import type { ExportMeta } from "./types";
-
-export function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
+import { escapeXml } from "./xml";
 
 export function chapterHref(index: number): string {
   return `text/chapter_${String(index + 1).padStart(3, "0")}.xhtml`;
