@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder, type NavItem, chapterHref, escapeXml } from "../src/epub";
+import { EpubBuilder, type NavItem, chapterHref } from "../src/epub";
 import { EPUB_CSS, FOOTNOTE_CSS } from "../src/epub-css";
+import { escapeXml } from "../src/xml";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 

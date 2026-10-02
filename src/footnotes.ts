@@ -26,20 +26,6 @@ export interface FootnoteSourceScan {
 
 // ── strings ──────────────────────────────────────────────────────────────────
 
-// [^label] (no whitespace or ']' in the label) and simple, non-nested ^[inline note].
-const FOOTNOTE_REF_SOURCE = /\[\^[^\]\s]+\]|\^\[[^\]]*\]/;
-
-// Obsidian's metadata cache keeps a heading's SOURCE text, so "Title[^h]" would reach the
-// book as a literal title. Returns the input untouched unless a reference was present —
-// the byte-identical path for every ordinary heading.
-export function stripFootnoteRefs(text: string): string {
-  if (!FOOTNOTE_REF_SOURCE.test(text)) return text;
-  return text
-    .replace(new RegExp(FOOTNOTE_REF_SOURCE.source, "g"), "")
-    .replace(/\s{2,}/g, " ")
-    .trim();
-}
-
 // True when a serialized chapter body carries footnote markup. Matches an attribute
 // inside a tag, not prose that happens to mention the attribute.
 export function usesFootnoteMarkup(body: string): boolean {

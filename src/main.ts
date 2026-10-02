@@ -10,7 +10,8 @@ import {
   parseLinktext,
   requestUrl,
 } from "obsidian";
-import { EpubBuilder, chapterHref, escapeXml, type NavItem } from "./epub";
+import { EpubBuilder, chapterHref, type NavItem } from "./epub";
+import { escapeXml } from "./xml";
 import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./book-tree";
 import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
