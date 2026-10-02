@@ -59,71 +59,89 @@ function unique(items: string[]): string[] {
   return Array.from(new Set(items));
 }
 
+// True when `line` is the closing fence of `fence`: same fence character, at
+// least as long, with nothing but whitespace after it.
+function fenceCloses(line: string, fence: { char: string; length: number }): boolean {
+  const close = FENCE.exec(line);
+  return (
+    close !== null &&
+    close[1][0] === fence.char &&
+    close[1].length >= fence.length &&
+    line.slice(close[0].length).trim() === ""
+  );
+}
+
+interface SourceScanState {
+  defined: string[];
+  referenced: string[];
+  fence: { char: string; length: number } | null;
+  // An indented line is a definition's continuation (not code) when the last block began
+  // with a definition; otherwise, after a blank line, it opens an indented code block.
+  inDefinition: boolean;
+  inCode: boolean;
+  previousBlank: boolean;
+}
+
+// Advances the scan by one line. Each guard returns instead of falling
+// through, so the line's classification reads top to bottom.
+function scanLine(line: string, state: SourceScanState): void {
+  if (state.fence) {
+    if (fenceCloses(line, state.fence)) state.fence = null;
+    return;
+  }
+  const open = FENCE.exec(line);
+  if (open) {
+    state.fence = { char: open[1][0], length: open[1].length };
+    state.inDefinition = false;
+    state.previousBlank = false;
+    return;
+  }
+  if (line.trim() === "") {
+    state.previousBlank = true;
+    return;
+  }
+
+  const indented = /^( {4}|\t)/.test(line);
+  if (indented && !state.inDefinition && (state.previousBlank || state.inCode)) {
+    state.inCode = true;
+    state.previousBlank = false;
+    return;
+  }
+  state.inCode = false;
+
+  let text = line;
+  const def = DEFINITION.exec(line);
+  if (def) {
+    state.defined.push(def[1].toLowerCase());
+    state.inDefinition = true;
+    text = line.slice(def[0].length);
+  } else if (!indented) {
+    state.inDefinition = false;
+  }
+  state.referenced.push(...referencesIn(text));
+  state.previousBlank = false;
+}
+
 // Finds footnote problems in a note's markdown: references with no definition and
 // definitions nothing refers to. Labels are compared case-insensitively (Obsidian
 // lowercases them) and returned lowercased, de-duplicated, in first-appearance order.
 // Fenced, indented and inline code are ignored; simple inline `^[…]` notes are neither.
 export function scanFootnoteSource(markdown: string): FootnoteSourceScan {
-  const defined: string[] = [];
-  const referenced: string[] = [];
-  let fence: { char: string; length: number } | null = null;
-  // An indented line is a definition's continuation (not code) when the last block began
-  // with a definition; otherwise, after a blank line, it opens an indented code block.
-  let inDefinition = false;
-  let inCode = false;
-  let previousBlank = true;
+  const state: SourceScanState = {
+    defined: [],
+    referenced: [],
+    fence: null,
+    inDefinition: false,
+    inCode: false,
+    previousBlank: true,
+  };
+  for (const line of markdown.split(/\r?\n/)) scanLine(line, state);
 
-  for (const line of markdown.split(/\r?\n/)) {
-    if (fence) {
-      const close = FENCE.exec(line);
-      if (
-        close &&
-        close[1][0] === fence.char &&
-        close[1].length >= fence.length &&
-        line.slice(close[0].length).trim() === ""
-      ) {
-        fence = null;
-      }
-      continue;
-    }
-    const open = FENCE.exec(line);
-    if (open) {
-      fence = { char: open[1][0], length: open[1].length };
-      inDefinition = false;
-      previousBlank = false;
-      continue;
-    }
-    if (line.trim() === "") {
-      previousBlank = true;
-      continue;
-    }
-
-    const indented = /^( {4}|\t)/.test(line);
-    if (indented && !inDefinition && (previousBlank || inCode)) {
-      inCode = true;
-      previousBlank = false;
-      continue;
-    }
-    inCode = false;
-
-    let text = line;
-    const def = DEFINITION.exec(line);
-    if (def) {
-      defined.push(def[1].toLowerCase());
-      inDefinition = true;
-      text = line.slice(def[0].length);
-    } else if (!indented) {
-      inDefinition = false;
-    }
-    referenced.push(...referencesIn(text));
-    previousBlank = false;
-  }
-
-  const definedSet = new Set(defined);
-  const referencedSet = new Set(referenced);
+  const definedSet = new Set(state.defined);
+  const referencedSet = new Set(state.referenced);
   return {
-    orphanRefs: unique(referenced.filter((label) => !definedSet.has(label))),
-    unusedDefs: unique(defined.filter((label) => !referencedSet.has(label))),
+    orphanRefs: unique(state.referenced.filter((label) => !definedSet.has(label))),
+    unusedDefs: unique(state.defined.filter((label) => !referencedSet.has(label))),
   };
 }
 
@@ -400,42 +418,39 @@ function appendFootnoteSection(root: HTMLElement, notes: Note[], containers: Ele
   root.appendChild(section);
 }
 
-function buildAside(note: Note): HTMLElement {
-  const aside = create("aside", [
-    ["id", note.id],
-    ["class", "footnote"],
-    ["epub:type", "footnote"],
-    ["role", "doc-footnote"],
-  ]);
-
-  // Obsidian's own back-links are replaced by ours (distinguishable, deterministic).
-  for (const back of Array.from(note.li.querySelectorAll("a.footnote-backref"))) back.remove();
-
-  // An inline note (`^[…]`) has no block children: its text and marks sit directly in the
-  // li. Wrap them so every note is made of blocks and has somewhere to put the back-links.
+// Moves the note's content into the aside. An inline note (`^[…]`) has no block
+// children: its text and marks sit directly in the li, so wrap them in a
+// paragraph — every note is made of blocks and has somewhere to put the
+// back-links.
+function moveNoteContent(note: Note, aside: HTMLElement): void {
   const isBlockNote = Array.from(note.li.children).some((c) => BLOCK_TAGS.has(c.localName));
-  if (isBlockNote) {
-    while (note.li.firstChild) aside.appendChild(note.li.firstChild);
-  } else {
+  if (!isBlockNote) {
     const p = createEl("p");
     while (note.li.firstChild) p.appendChild(note.li.firstChild);
     aside.appendChild(p);
+    return;
   }
+  while (note.li.firstChild) aside.appendChild(note.li.firstChild);
+}
 
-  // The visible number leads the note's first block; if that block is not a paragraph, it
-  // gets a paragraph of its own so the number is never glued into a list or code block.
-  const number = create("span", [["class", "footnote-num"]], `${note.number}.`);
+// The visible number leads the note's first block; if that block is not a
+// paragraph, it gets a paragraph of its own so the number is never glued into a
+// list or code block.
+function prependNoteNumber(aside: HTMLElement, number: number): void {
+  const label = create("span", [["class", "footnote-num"]], `${number}.`);
   const first = Array.from(aside.children)[0];
   if (first && first.localName === "p") {
     first.insertBefore(document.createTextNode(" "), first.firstChild);
-    first.insertBefore(number, first.firstChild);
-  } else {
-    const p = createEl("p");
-    p.appendChild(number);
-    aside.insertBefore(p, aside.firstChild);
+    first.insertBefore(label, first.firstChild);
+    return;
   }
+  const p = createEl("p");
+  p.appendChild(label);
+  aside.insertBefore(p, aside.firstChild);
+}
 
-  // Back-links go on the LAST paragraph (added if the note ends in some other block).
+// Back-links go on the LAST paragraph (added if the note ends in some other block).
+function appendBacklinks(aside: HTMLElement, note: Note): void {
   let last = Array.from(aside.children).pop()!;
   if (last.localName !== "p") {
     last = createEl("p");
@@ -454,6 +469,22 @@ function buildAside(note: Note): HTMLElement {
       )
     );
   });
+}
+
+function buildAside(note: Note): HTMLElement {
+  const aside = create("aside", [
+    ["id", note.id],
+    ["class", "footnote"],
+    ["epub:type", "footnote"],
+    ["role", "doc-footnote"],
+  ]);
+
+  // Obsidian's own back-links are replaced by ours (distinguishable, deterministic).
+  for (const back of Array.from(note.li.querySelectorAll("a.footnote-backref"))) back.remove();
+
+  moveNoteContent(note, aside);
+  prependNoteNumber(aside, note.number);
+  appendBacklinks(aside, note);
   return aside;
 }
 

@@ -578,6 +578,12 @@ function embedReplaceTarget(wrapper: Element): Element {
 // (render-adapter.ts) folds these into the chapter's own warnings, enriching
 // them with chapter context this pure module doesn't have.
 //
+// Both passes are idempotent: a processed wrapper/pair is removed from the
+// DOM, so a later call finds nothing left to do.
+export function flattenEmbeds(root: HTMLElement): string[] {
+  return [...flattenEmbedWrappers(root), ...flattenBareTitlePairs(root)];
+}
+
 // Primary pass — wrapper-based (the confirmed real-Obsidian shape, see the
 // "Note-embed hardening" comment above): every `.internal-embed` wrapper is
 // replaced with the children of the EMBED_RENDERED_ATTR div populateEmbeds
@@ -592,15 +598,7 @@ function embedReplaceTarget(wrapper: Element): Element {
 // own `alt`/`src` attributes are invalid XHTML — leaving the img itself for
 // rewriteImages. Wrappers are processed innermost-first so an embedded
 // note's own nested embeds flatten before their host.
-//
-// Fallback pass — a bare `.markdown-embed-title` + `.markdown-embed-content`
-// sibling pair with no wrapper ancestor (never observed from real Obsidian,
-// kept as a cheap safety net for renderer variants): unwrap if populated,
-// placeholder if empty.
-//
-// Both passes are idempotent: a processed wrapper/pair is removed from the
-// DOM, so a later call finds nothing left to do.
-export function flattenEmbeds(root: HTMLElement): string[] {
+function flattenEmbedWrappers(root: HTMLElement): string[] {
   const warnings: string[] = [];
 
   const wrappers = Array.from(root.querySelectorAll(`.${EMBED_WRAPPER_CLASS}`))
@@ -651,6 +649,16 @@ export function flattenEmbeds(root: HTMLElement): string[] {
       warnings.push(embedOmissionMessage(reason, name, wrapper.getAttribute("data-embed-detail")));
     }
   }
+
+  return warnings;
+}
+
+// Fallback pass — a bare `.markdown-embed-title` + `.markdown-embed-content`
+// sibling pair with no wrapper ancestor (never observed from real Obsidian,
+// kept as a cheap safety net for renderer variants): unwrap if populated,
+// placeholder if empty.
+function flattenBareTitlePairs(root: HTMLElement): string[] {
+  const warnings: string[] = [];
 
   root.querySelectorAll(`.${EMBED_TITLE_CLASS}`).forEach((titleEl) => {
     if (titleEl.closest(`.${EMBED_WRAPPER_CLASS}`)) return; // wrapper pass owns it
@@ -727,6 +735,53 @@ export function rewriteLinks(
   });
 }
 
+// The vault path an <img> src refers to, or null when the src is malformed
+// (a warning is emitted in that case). `scheme` is the src's parsed scheme,
+// or undefined for a relative/vault-absolute path. Left UNRESOLVED against the
+// vault — the caller resolves it against the source note (render.ts stays
+// pure, zero obsidian imports).
+function vaultPathFromSrc(
+  src: string,
+  scheme: string | undefined,
+  basePath: string,
+  warn?: (message: string) => void
+): string | null {
+  const noQueryOrFragment = src.split(/[?#]/)[0];
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(noQueryOrFragment);
+  } catch {
+    // Malformed URI (e.g., literal % in filename): skip this image, but
+    // say so — the src stays as it was, which no reader can open.
+    warn?.(`malformed image reference skipped: ${src}`);
+    return null;
+  }
+
+  if (scheme !== "app") {
+    // Relative or vault-absolute markdown image path (not app://-resolved).
+    return decoded;
+  }
+
+  // 008-mobile-support — INVARIANT: the empty check is NOT redundant with
+  // `at === -1`. `"anything".indexOf("")` returns 0, not -1, so an empty
+  // basePath takes the "found at position 0" branch, slices off nothing,
+  // and hands the caller the entire `app://…` URL as a vault path — the
+  // exact failure the fallback below was written to prevent. An empty
+  // basePath is not exotic: main.ts produces it whenever the vault adapter
+  // is not a FileSystemAdapter, which is EVERY export on Obsidian mobile.
+  const at = basePath === "" ? -1 : decoded.indexOf(basePath);
+  if (at === -1) {
+    // Path doesn't contain the given basePath (multi-vault, symlinked
+    // attachment folders, path-case differences). Fall through with just
+    // the basename so the caller's fuzzy resolver (getFirstLinkpathDest)
+    // gets a chance, and failing that, the missing-image warning fires —
+    // every image ends up either embedded or warned, never silently
+    // left as a broken app:// href.
+    return decoded.split("/").pop() ?? decoded;
+  }
+  return decoded.slice(at + basePath.length).replace(/^\//, "");
+}
+
 export function rewriteImages(
   root: HTMLElement,
   basePath: string,
@@ -750,50 +805,9 @@ export function rewriteImages(
     // "../images/..." reference from a sibling folder.
     if (/^\.\.\/images\/img_\d+\.[a-z0-9]+$/i.test(src)) return;
 
-    let vaultPath: string;
-    if (scheme === "app") {
-      const noQueryOrFragment = src.split(/[?#]/)[0];
-      let decoded: string;
-      try {
-        decoded = decodeURIComponent(noQueryOrFragment);
-      } catch {
-        // Malformed URI (e.g., literal % in filename): skip this image, but
-        // say so — the src stays as it was, which no reader can open.
-        warn?.(`malformed image reference skipped: ${src}`);
-        return;
-      }
-      // 008-mobile-support — INVARIANT: the empty check is NOT redundant with
-      // `at === -1`. `"anything".indexOf("")` returns 0, not -1, so an empty
-      // basePath takes the "found at position 0" branch, slices off nothing,
-      // and hands the caller the entire `app://…` URL as a vault path — the
-      // exact failure the fallback below was written to prevent. An empty
-      // basePath is not exotic: main.ts produces it whenever the vault adapter
-      // is not a FileSystemAdapter, which is EVERY export on Obsidian mobile.
-      const at = basePath === "" ? -1 : decoded.indexOf(basePath);
-      if (at === -1) {
-        // Path doesn't contain the given basePath (multi-vault, symlinked
-        // attachment folders, path-case differences). Fall through with just
-        // the basename so the caller's fuzzy resolver (getFirstLinkpathDest)
-        // gets a chance, and failing that, the missing-image warning fires —
-        // every image ends up either embedded or warned, never silently
-        // left as a broken app:// href.
-        vaultPath = decoded.split("/").pop() ?? decoded;
-      } else {
-        vaultPath = decoded.slice(at + basePath.length).replace(/^\//, "");
-      }
-    } else {
-      // Relative or vault-absolute markdown image path (not app://-resolved).
-      // Left UNRESOLVED here — the caller resolves it against the source
-      // note (render.ts stays pure, zero obsidian imports).
-      const noQueryOrFragment = src.split(/[?#]/)[0];
-      try {
-        vaultPath = decodeURIComponent(noQueryOrFragment);
-      } catch {
-        // Same as the app:// branch above.
-        warn?.(`malformed image reference skipped: ${src}`);
-        return;
-      }
-    }
+    const vaultPath = vaultPathFromSrc(src, scheme, basePath, warn);
+    if (vaultPath === null) return;
+
     const extMatch = /\.(\w+)$/.exec(vaultPath);
     const ext = extMatch ? extMatch[1].toLowerCase() : "png";
     // startIndex offsets numbering so images from different chapters in the

@@ -30,7 +30,7 @@ import {
 } from "./settings";
 import type { ExportMeta } from "./types";
 import { resolveMeta, MetaDefaults } from "./metadata";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "./cover";
+import { parseCoverValue, findImageEmbeds, isSupportedCoverExt, type CoverValue } from "./cover";
 import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
 import { createWarningCollector, buildReport, type ExportReport, type WarningCollector } from "./report";
@@ -47,6 +47,30 @@ interface Job {
   // e.g. the folder planner falling back to filename order. Seeded into
   // runExport's warnings so they reach the user with everything else.
   warnings?: string[];
+}
+
+// State of runExport's chapter loop, assembled once and mutated chapter by
+// chapter by renderAndAddChapter — passing it keeps that method's signature
+// short while preserving the loop's original mutation order exactly.
+interface ChapterPass {
+  builder: EpubBuilder;
+  hrefByPath: Map<string, string>;
+  basePath: string;
+  assetVault: AssetVault<TFile>;
+  withBacklinks: (file: TFile, xhtmlBody: string) => string;
+  // Running total of images rewriteImages has STAMPED into chapter HTML
+  // so far — not the count that later loaded as assets. The <img> hrefs
+  // are burned into r.xhtmlBody the moment renderUnitToChapter returns,
+  // before any vault read is attempted, so the next chapter's startIndex
+  // must be measured against what was stamped, not what loaded — else a
+  // missing/failed image would let a later chapter reissue an href
+  // that's already sitting in an earlier chapter's HTML.
+  imageCount: number;
+  // 006-thai-font FR-001: Thai anywhere in any chapter body (including
+  // linked/embedded content, which flows through xhtmlBody) marks the
+  // book for font embedding — decided AFTER the loop, when the setting
+  // is consulted, so detection alone never changes output.
+  hasThai: boolean;
 }
 
 export default class EpubExportPlugin extends Plugin {
@@ -182,11 +206,7 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   // Resolves EPUB metadata from a note's own frontmatter, then attaches a
-  // cover if one can be found. Resolution order (FR-007, research R5):
-  // explicit `cover:` field → legacy `coverUrl:` field → first image embed
-  // in the metadata note's source (fallback, FR-003). Every failure mode
-  // degrades to a coverless export with a warning — never fails an export
-  // over artwork (spec + constitution II).
+  // cover if one can be found.
   private async metaFromNote(
     file: TFile | null,
     fallbackBasename: string,
@@ -199,31 +219,48 @@ export default class EpubExportPlugin extends Plugin {
       author: resolved.author,
       language: resolved.language,
     };
+    await this.attachCover(meta, parseCoverValue(fm?.cover), resolved.coverUrl, file, warn);
+    return meta;
+  }
 
-    const coverValue = parseCoverValue(fm?.cover);
+  // Cover resolution order (FR-007, research R5): explicit `cover:` field →
+  // legacy `coverUrl:` field → first image embed in the metadata note's
+  // source (fallback, FR-003). Every failure mode degrades to a coverless
+  // export with a warning — never fails an export over artwork (spec +
+  // constitution II).
+  private async attachCover(
+    meta: ExportMeta,
+    coverValue: CoverValue | null,
+    legacyCoverUrl: string | null,
+    file: TFile | null,
+    warn: (message: string) => void
+  ): Promise<void> {
     if (coverValue?.kind === "url") {
       await this.downloadCover(meta, coverValue.url, warn);
-    } else if (coverValue?.kind === "path") {
-      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`, warn);
-    } else if (resolved.coverUrl) {
-      await this.downloadCover(meta, resolved.coverUrl, warn);
-    } else if (file) {
-      // No cover frontmatter at all — fall back to the first image embed of
-      // the metadata note itself (code-fence-aware scan in cover.ts). Keep
-      // scanning: an embed that is missing or unsupported is skipped in
-      // favor of the next one (spec edge case).
-      const md = await this.app.vault.cachedRead(file).catch(() => null);
-      if (md !== null) {
-        for (const target of findImageEmbeds(md)) {
-          // Fallback candidates are skipped SILENTLY: a note whose first
-          // embed is a gif or a stale link but whose second is a fine png
-          // gets a cover with no noise. Warnings are reserved for the
-          // explicitly declared `cover:` (US4).
-          if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, null)) break;
-        }
-      }
+      return;
     }
-    return meta;
+    if (coverValue?.kind === "path") {
+      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`, warn);
+      return;
+    }
+    if (legacyCoverUrl) {
+      await this.downloadCover(meta, legacyCoverUrl, warn);
+      return;
+    }
+    if (!file) return;
+    // No cover frontmatter at all — fall back to the first image embed of
+    // the metadata note itself (code-fence-aware scan in cover.ts). Keep
+    // scanning: an embed that is missing or unsupported is skipped in
+    // favor of the next one (spec edge case).
+    const md = await this.app.vault.cachedRead(file).catch(() => null);
+    if (md === null) return;
+    for (const target of findImageEmbeds(md)) {
+      // Fallback candidates are skipped SILENTLY: a note whose first
+      // embed is a gif or a stale link but whose second is a fine png
+      // gets a cover with no noise. Warnings are reserved for the
+      // explicitly declared `cover:` (US4).
+      if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, null)) return;
+    }
   }
 
   // Remote cover: fetch and sniff png/webp from the content-type; anything
@@ -367,9 +404,14 @@ export default class EpubExportPlugin extends Plugin {
     return { index, files };
   }
 
-  async exportFolder(folder: TFolder) {
-    const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
-    const legacy = this.legacyFolderOrder(mdFiles, folder);
+  // Plans a folder export's reading order and nav tree. Returns null after
+  // notifying when the folder has no Markdown notes; a planner failure
+  // degrades to the legacy flat order with a warning, never aborts
+  // (Constitution II / FR-016).
+  private planFolderExport(
+    folder: TFolder,
+    legacy: { index: TFile | null; files: TFile[] }
+  ): { files: TFile[]; nav?: NavItem[]; warnings: string[] } | null {
     const warnings: string[] = [];
     let files = legacy.files;
     let nav: NavItem[] | undefined;
@@ -378,7 +420,7 @@ export default class EpubExportPlugin extends Plugin {
       const input = this.buildFolderInput(folder, byPath);
       if (byPath.size === 0) {
         new Notice("Folder has no Markdown notes.");
-        return;
+        return null;
       }
       const plan = planBook(input);
       // Path-keyed, not basename-keyed: two subfolders may hold same-named notes (FR-018).
@@ -405,12 +447,20 @@ export default class EpubExportPlugin extends Plugin {
       warnings.push(`chapter ordering fell back to filename order: ${errorMessage(e)}`);
       if (files.length === 0) {
         new Notice("Folder has no Markdown notes.");
-        return;
+        return null;
       }
     }
+    return { files, nav, warnings };
+  }
 
-    const meta = await this.metaFromNote(legacy.index, folder.name, (m) => warnings.push(m));
-    await this.runExport({ meta, files, nav, warnings });
+  async exportFolder(folder: TFolder) {
+    const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
+    const legacy = this.legacyFolderOrder(mdFiles, folder);
+    const plan = this.planFolderExport(folder, legacy);
+    if (!plan) return;
+
+    const meta = await this.metaFromNote(legacy.index, folder.name, (m) => plan.warnings.push(m));
+    await this.runExport({ meta, files: plan.files, nav: plan.nav, warnings: plan.warnings });
   }
 
   // ── orchestrator ────────────────────────────────────────────────
@@ -448,19 +498,6 @@ export default class EpubExportPlugin extends Plugin {
       const builder = new EpubBuilder(job.meta);
 
       const withBacklinks = this.backlinkDecorator(job.files, hrefByPath);
-      // Running total of images rewriteImages has STAMPED into chapter HTML
-      // so far — not the count that later loaded as assets. The <img> hrefs
-      // are burned into r.xhtmlBody the moment renderUnitToChapter returns,
-      // before any vault read is attempted, so the next chapter's startIndex
-      // must be measured against what was stamped, not what loaded — else a
-      // missing/failed image would let a later chapter reissue an href
-      // that's already sitting in an earlier chapter's HTML.
-      let imageCount = 0;
-      // 006-thai-font FR-001: Thai anywhere in any chapter body (including
-      // linked/embedded content, which flows through xhtmlBody) marks the
-      // book for font embedding — decided AFTER the loop, when the setting
-      // is consulted, so detection alone never changes output.
-      let hasThai = false;
 
       // How resolveChapterAssets finds and reads a vault image. The one place
       // the obsidian types (TFile, the link resolver) meet that pure module.
@@ -478,6 +515,15 @@ export default class EpubExportPlugin extends Plugin {
         read: (file) => this.app.vault.readBinary(file),
       };
 
+      const chapterPass: ChapterPass = {
+        builder,
+        hrefByPath,
+        basePath,
+        assetVault,
+        withBacklinks,
+        imageCount: 0,
+        hasThai: false,
+      };
       for (const [chapterIndex, file] of job.files.entries()) {
         // Everything recorded inside this iteration is about THIS chapter.
         const warnForChapter = collector.forNote(file.path);
@@ -486,49 +532,10 @@ export default class EpubExportPlugin extends Plugin {
         // already updates, so this costs nothing new — and it helps desktop
         // exports of large books just as much.
         notice.setMessage(`Exporting "${job.meta.title}" — chapter ${chapterIndex + 1}/${job.files.length}…`);
-        try {
-          const md = await this.app.vault.cachedRead(file);
-          const r = await renderUnitToChapter(
-            this.app,
-            this,
-            md,
-            file.path,
-            hrefByPath,
-            basePath,
-            imageCount,
-            this.settings.tocHeadingDepth
-          );
-          r.warnings.forEach(warnForChapter);
-          hasThai = hasThai || containsThai(r.xhtmlBody);
-          // Bump immediately, before the asset loop below: these numbers are
-          // already burned into r.xhtmlBody regardless of what happens next.
-          imageCount += r.images.length;
-          await resolveChapterAssets(
-            r.images,
-            file.path,
-            assetVault,
-            (href, bytes, mediaType) => builder.addAsset(href, bytes, mediaType),
-            warnForChapter
-          );
-          builder.addChapter(this.titleFor(file), withBacklinks(file, r.xhtmlBody), r.toc);
-        } catch (e) {
-          warnForChapter(`chapter skipped: ${file.path} — ${String(e)}`);
-          // Placeholder keeps builder's chapter count == job.files.length, so
-          // hrefByPath (position-derived from job.files) stays in sync with
-          // EpubBuilder's own internal numbering (which only advances on
-          // addChapter). Without this, a skipped chapter shifts every later
-          // chapter's real href back by one, silently retargeting any link
-          // that pointed at or past the failed chapter.
-          // The placeholder still gets the backlink trail: a failed chapter
-          // keeps its spine slot and can still be navigated back from.
-          builder.addChapter(
-            this.titleFor(file),
-            withBacklinks(file, `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`)
-          );
-        }
+        await this.renderAndAddChapter(chapterPass, file, warnForChapter);
       }
 
-      this.applyThaiFont(builder, hasThai, collector);
+      this.applyThaiFont(builder, chapterPass.hasThai, collector);
 
       this.applyNavTree(builder, job.nav, collector);
 
@@ -544,6 +551,56 @@ export default class EpubExportPlugin extends Plugin {
       // scripts/local-export.ts parses these lines (FR-020).
       collector.messages().forEach((w) => console.warn("[inkbound]", w));
       notice?.hide();
+    }
+  }
+
+  // Renders one chapter and adds it — or a failure placeholder — to the book,
+  // resolving its images and advancing the pass's running totals. The whole
+  // body of runExport's chapter loop, split out so the loop reads as a loop.
+  private async renderAndAddChapter(
+    pass: ChapterPass,
+    file: TFile,
+    warn: (message: string) => void
+  ): Promise<void> {
+    try {
+      const md = await this.app.vault.cachedRead(file);
+      const r = await renderUnitToChapter(
+        this.app,
+        this,
+        md,
+        file.path,
+        pass.hrefByPath,
+        pass.basePath,
+        pass.imageCount,
+        this.settings.tocHeadingDepth
+      );
+      r.warnings.forEach(warn);
+      pass.hasThai = pass.hasThai || containsThai(r.xhtmlBody);
+      // Bump immediately, before the asset loop below: these numbers are
+      // already burned into r.xhtmlBody regardless of what happens next.
+      pass.imageCount += r.images.length;
+      await resolveChapterAssets(
+        r.images,
+        file.path,
+        pass.assetVault,
+        (href, bytes, mediaType) => pass.builder.addAsset(href, bytes, mediaType),
+        warn
+      );
+      pass.builder.addChapter(this.titleFor(file), pass.withBacklinks(file, r.xhtmlBody), r.toc);
+    } catch (e) {
+      warn(`chapter skipped: ${file.path} — ${String(e)}`);
+      // Placeholder keeps builder's chapter count == job.files.length, so
+      // hrefByPath (position-derived from job.files) stays in sync with
+      // EpubBuilder's own internal numbering (which only advances on
+      // addChapter). Without this, a skipped chapter shifts every later
+      // chapter's real href back by one, silently retargeting any link
+      // that pointed at or past the failed chapter.
+      // The placeholder still gets the backlink trail: a failed chapter
+      // keeps its spine slot and can still be navigated back from.
+      pass.builder.addChapter(
+        this.titleFor(file),
+        pass.withBacklinks(file, `<p class="omitted">[chapter failed to render: ${escapeXml(file.path)}]</p>`)
+      );
     }
   }
 
