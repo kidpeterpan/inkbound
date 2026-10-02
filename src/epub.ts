@@ -235,53 +235,62 @@ export class EpubBuilder {
 </container>`;
   }
 
+  // The optional cover's manifest pieces — image item, its spine page, and the
+  // <meta name="cover"> — all empty when the book is coverless.
+  private coverManifestItems(): { image: string; page: string; meta: string } {
+    if (!this.hasCover()) return { image: "", page: "", meta: "" };
+    const ext = this.meta.coverExt!;
+    return {
+      image: `<item id="cover-image" href="images/cover.${ext}" media-type="image/${ext === "jpg" ? "jpeg" : ext}" properties="cover-image"/>`,
+      page: `<item id="cover-page" href="text/cover.xhtml" media-type="application/xhtml+xml"/>`,
+      meta: `<meta name="cover" content="cover-image"/>`,
+    };
+  }
+
+  // Manifest items for the chapters, their assets, and the optional font.
+  private contentManifestItems(): string[] {
+    const chapters = this.chapters.map(
+      (c) =>
+        `<item id="${c.id}" href="${c.href}" media-type="application/xhtml+xml"${c.hasSvg ? ' properties="svg"' : ""}/>`
+    );
+    const assets = this.assets.map(
+      (a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`
+    );
+    // 006-thai-font: stable manifest ids (font-regular/font-bold/
+    // font-license), only present when the font was embedded.
+    const fonts = this.thaiFont
+      ? THAI_FONT_META.map(
+          (f) => `<item id="${f.manifestId}" href="${f.href}" media-type="${f.mediaType}"/>`
+        ).concat([`<item id="font-license" href="${OFL_LICENSE_HREF}" media-type="text/plain"/>`])
+      : [];
+    return [...chapters, ...assets, ...fonts];
+  }
+
+  private spineItems(): string[] {
+    const cover = this.hasCover() ? [`<itemref idref="cover-page"/>`] : [];
+    return [...cover, ...this.chapters.map((c) => `<itemref idref="${c.id}"/>`)];
+  }
+
   private opf(): string {
-    const m = this.meta;
     const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
-    const hasCover = this.hasCover();
-    const coverItem = hasCover
-      ? `<item id="cover-image" href="images/cover.${m.coverExt}" media-type="image/${m.coverExt === "jpg" ? "jpeg" : m.coverExt}" properties="cover-image"/>`
-      : "";
-    const coverPageItem = hasCover
-      ? `<item id="cover-page" href="text/cover.xhtml" media-type="application/xhtml+xml"/>`
-      : "";
-    const coverMeta = hasCover ? `<meta name="cover" content="cover-image"/>` : "";
-    const items = this.chapters
-      .map(
-        (c) =>
-          `<item id="${c.id}" href="${c.href}" media-type="application/xhtml+xml"${c.hasSvg ? ' properties="svg"' : ""}/>`
-      )
-      .concat(
-        this.assets.map((a, i) => `<item id="asset_${i}" href="${a.href}" media-type="${a.mediaType}"/>`)
-      )
-      // 006-thai-font: stable manifest ids (font-regular/font-bold/
-      // font-license), only present when the font was embedded.
-      .concat(
-        this.thaiFont
-          ? THAI_FONT_META.map(
-              (f) => `<item id="${f.manifestId}" href="${f.href}" media-type="${f.mediaType}"/>`
-            ).concat([`<item id="font-license" href="${OFL_LICENSE_HREF}" media-type="text/plain"/>`])
-          : []
-      )
-      .join("\n    ");
-    const spine = (hasCover ? [`<itemref idref="cover-page"/>`] : [])
-      .concat(this.chapters.map((c) => `<itemref idref="${c.id}"/>`))
-      .join("\n    ");
+    const cover = this.coverManifestItems();
+    const items = this.contentManifestItems().join("\n    ");
+    const spine = this.spineItems().join("\n    ");
     return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="uid">urn:uuid:${cryptoRandomUuid()}</dc:identifier>
-    <dc:title>${escapeXml(m.title)}</dc:title>
-    <dc:language>${escapeXml(m.language)}</dc:language>
-    <dc:creator>${escapeXml(m.author)}</dc:creator>
+    <dc:title>${escapeXml(this.meta.title)}</dc:title>
+    <dc:language>${escapeXml(this.meta.language)}</dc:language>
+    <dc:creator>${escapeXml(this.meta.author)}</dc:creator>
     <meta property="dcterms:modified">${modified}</meta>
-    ${coverMeta}
+    ${cover.meta}
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
     <item id="css" href="style/epub.css" media-type="text/css"/>
-    ${coverItem}
-    ${coverPageItem}
+    ${cover.image}
+    ${cover.page}
     ${items}
   </manifest>
   <spine>

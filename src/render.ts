@@ -75,33 +75,40 @@ const FOREIGN_OBJECT_BLOCK_TAGS = new Set([
 // <br> and block-level children each start a new line so multi-line labels
 // (e.g. "mid = ...<br/>guess = ...") survive as separate lines rather than
 // being smashed together.
-function collectForeignObjectLines(fo: Element): string[] {
+function collectForeignObjectLines(foreignObject: Element): string[] {
   const lines: string[] = [];
-  let current = "";
-  const flush = (): void => {
-    const t = current.replace(/\s+/g, " ").trim();
-    if (t) lines.push(t);
-    current = "";
+  let pendingLine = "";
+
+  const flushPendingLine = (): void => {
+    const normalized = pendingLine.replace(/\s+/g, " ").trim();
+    if (normalized !== "") lines.push(normalized);
+    pendingLine = "";
   };
-  const walk = (node: ChildNode): void => {
+
+  const visit = (node: ChildNode): void => {
     if (node.nodeType === Node.TEXT_NODE) {
-      current += node.textContent ?? "";
+      pendingLine += node.textContent ?? "";
       return;
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
-    const el = node as Element;
-    const tag = el.tagName.toLowerCase();
-    if (tag === "br") {
-      flush();
+
+    const element = node as Element;
+    const tagName = element.tagName.toLowerCase();
+    if (tagName === "br") {
+      flushPendingLine();
       return;
     }
-    const isBlock = FOREIGN_OBJECT_BLOCK_TAGS.has(tag);
-    if (isBlock) flush();
-    Array.from(el.childNodes).forEach(walk);
-    if (isBlock) flush();
+
+    // A block-level child delimits a line on BOTH sides: the line it starts,
+    // and the line it ends. <p>a</p><p>b</p> is therefore two lines, not one.
+    const isBlockLevel = FOREIGN_OBJECT_BLOCK_TAGS.has(tagName);
+    if (isBlockLevel) flushPendingLine();
+    for (const child of Array.from(element.childNodes)) visit(child);
+    if (isBlockLevel) flushPendingLine();
   };
-  Array.from(fo.childNodes).forEach(walk);
-  flush();
+
+  for (const child of Array.from(foreignObject.childNodes)) visit(child);
+  flushPendingLine();
   return lines;
 }
 
@@ -111,34 +118,46 @@ function collectForeignObjectLines(fo: Element): string[] {
 // a <p> nested inside a <span> inside it is invalid XHTML (epubcheck RSC-005
 // "element p not allowed here") — flattening to <text>/<tspan> fixes both.
 function normalizeForeignObjects(svg: SVGElement): void {
-  svg.querySelectorAll("foreignObject").forEach((fo) => {
-    const width = parseFloat(fo.getAttribute("width") ?? "") || 0;
-    const height = parseFloat(fo.getAttribute("height") ?? "") || 0;
-    const lines = collectForeignObjectLines(fo);
+  const foreignObjects = Array.from(svg.querySelectorAll("foreignObject"));
+
+  for (const foreignObject of foreignObjects) {
+    const width = parseFloat(foreignObject.getAttribute("width") ?? "") || 0;
+    const height = parseFloat(foreignObject.getAttribute("height") ?? "") || 0;
+
+    const lines = collectForeignObjectLines(foreignObject);
     if (lines.length === 0) {
       // Empty edge-label placeholder (mermaid emits height="0" width="0"
       // with no text for edges that have no label) — contributes nothing.
-      fo.remove();
-      return;
+      foreignObject.remove();
+      continue;
     }
-    // createElementNS is required here: createElement would place the node
-    // in the XHTML namespace and it would serialize (and render) wrong.
-    const text = document.createElementNS(SVG_NS, "text");
-    const x = width / 2;
-    const y = height / 2;
-    text.setAttribute("x", String(x));
-    text.setAttribute("y", String(y));
-    text.setAttribute("text-anchor", "middle");
-    text.setAttribute("dominant-baseline", "central");
-    lines.forEach((line, i) => {
-      const tspan = document.createElementNS(SVG_NS, "tspan");
-      tspan.setAttribute("x", String(x));
-      tspan.setAttribute("dy", i === 0 ? "0" : "1.2em");
-      tspan.textContent = line;
-      text.appendChild(tspan);
-    });
-    fo.replaceWith(text);
+
+    foreignObject.replaceWith(buildLabelText(lines, width, height));
+  }
+}
+
+// Builds the SVG <text> that stands in for one label foreignObject, centered
+// on the box the foreignObject occupied.
+function buildLabelText(lines: string[], width: number, height: number): SVGElement {
+  // createElementNS is required here: createElement would place the node
+  // in the XHTML namespace and it would serialize (and render) wrong.
+  const text = document.createElementNS(SVG_NS, "text");
+  const centerX = width / 2;
+  const centerY = height / 2;
+  text.setAttribute("x", String(centerX));
+  text.setAttribute("y", String(centerY));
+  text.setAttribute("text-anchor", "middle");
+  text.setAttribute("dominant-baseline", "central");
+
+  lines.forEach((line, lineIndex) => {
+    const tspan = document.createElementNS(SVG_NS, "tspan");
+    tspan.setAttribute("x", String(centerX));
+    tspan.setAttribute("dy", lineIndex === 0 ? "0" : "1.2em");
+    tspan.textContent = line;
+    text.appendChild(tspan);
   });
+
+  return text;
 }
 
 // Escapes a string for safe interpolation into a RegExp source.
@@ -177,45 +196,73 @@ function rewriteStyleIds(styleText: string, idMap: Map<string, string>): string 
 // XHTML chapter collide (epubcheck RSC-005 "Duplicate ID") unless each
 // diagram's ids are made unique.
 function prefixIds(svg: SVGElement, prefix: string): void {
-  const withIds: Element[] = [];
-  if (svg.hasAttribute("id")) withIds.push(svg);
-  svg.querySelectorAll("[id]").forEach((el) => withIds.push(el));
+  const elementsWithIds = collectElementsWithIds(svg);
+  const idRenames = buildIdRenameMap(elementsWithIds, prefix);
+  if (idRenames.size === 0) return;
 
-  const idMap = new Map<string, string>();
-  for (const el of withIds) {
-    const oldId = el.getAttribute("id");
-    if (oldId && !idMap.has(oldId)) idMap.set(oldId, `${prefix}${oldId}`);
+  renameIds(elementsWithIds, idRenames);
+  retargetIdReferences(svg, idRenames);
+  rewriteStyleSheets(svg, idRenames);
+}
+
+// Every element carrying an id, the <svg> itself first: mermaid scopes its
+// stylesheet under the svg's own id, so that one has to be renamed too.
+function collectElementsWithIds(svg: SVGElement): Element[] {
+  const elements: Element[] = [];
+  if (svg.hasAttribute("id")) elements.push(svg);
+  svg.querySelectorAll("[id]").forEach((element) => elements.push(element));
+  return elements;
+}
+
+function buildIdRenameMap(elementsWithIds: Element[], prefix: string): Map<string, string> {
+  const idRenames = new Map<string, string>();
+  for (const element of elementsWithIds) {
+    const oldId = element.getAttribute("id");
+    if (oldId && !idRenames.has(oldId)) idRenames.set(oldId, `${prefix}${oldId}`);
   }
-  if (idMap.size === 0) return;
+  return idRenames;
+}
 
-  for (const el of withIds) {
-    const oldId = el.getAttribute("id");
-    if (oldId) el.setAttribute("id", idMap.get(oldId)!);
+function renameIds(elementsWithIds: Element[], idRenames: Map<string, string>): void {
+  for (const element of elementsWithIds) {
+    const oldId = element.getAttribute("id");
+    const newId = oldId === null ? undefined : idRenames.get(oldId);
+    if (newId !== undefined) element.setAttribute("id", newId);
   }
+}
 
+// Points every reference at the renamed ids: url(#OLD) (fill, stroke, filter,
+// mask, clip-path) and href="#OLD" (<use>, gradients). An attribute that
+// references nothing renamed is left byte-identical.
+function retargetIdReferences(svg: SVGElement, idRenames: Map<string, string>): void {
   const allElements: Element[] = [svg, ...Array.from(svg.querySelectorAll("*"))];
-  for (const el of allElements) {
-    for (const attr of Array.from(el.attributes)) {
-      const { name, value } = attr;
-      if (!value) continue;
+
+  for (const element of allElements) {
+    for (const attribute of Array.from(element.attributes)) {
+      const { name, value } = attribute;
+      if (value === "") continue;
+
       let newValue = value;
       if (newValue.includes("url(#")) {
-        newValue = newValue.replace(/url\(#([^)'"]+)\)/g, (whole, id: string) => {
-          const mapped = idMap.get(id);
-          return mapped ? `url(#${mapped})` : whole;
+        newValue = newValue.replace(/url\(#([^)'"]+)\)/g, (wholeMatch, id: string) => {
+          const newId = idRenames.get(id);
+          return newId === undefined ? wholeMatch : `url(#${newId})`;
         });
       }
       if ((name === "href" || name.endsWith(":href")) && newValue.startsWith("#")) {
-        const mapped = idMap.get(newValue.slice(1));
-        if (mapped) newValue = `#${mapped}`;
+        const newId = idRenames.get(newValue.slice(1));
+        if (newId !== undefined) newValue = `#${newId}`;
       }
-      if (newValue !== value) el.setAttribute(name, newValue);
+      if (newValue !== value) element.setAttribute(name, newValue);
     }
   }
+}
 
+function rewriteStyleSheets(svg: SVGElement, idRenames: Map<string, string>): void {
   svg.querySelectorAll("style").forEach((style) => {
-    const rewritten = rewriteStyleIds(style.textContent ?? "", idMap);
-    if (rewritten !== style.textContent) style.textContent = rewritten;
+    const originalText = style.textContent ?? "";
+    const rewrittenText = rewriteStyleIds(originalText, idRenames);
+    if (rewrittenText !== originalText) style.textContent = rewrittenText;
   });
 }
 
@@ -223,10 +270,11 @@ function prefixIds(svg: SVGElement, prefix: string): void {
 // svg in the export. Give each one a stable 1-based document-order index so
 // its ids never collide with a sibling diagram's ids in the same chapter.
 export function normalizeMermaidSvg(root: HTMLElement): void {
-  root.querySelectorAll("svg").forEach((svg, index) => {
+  const svgs = Array.from(root.querySelectorAll("svg"));
+  for (const [index, svg] of svgs.entries()) {
     normalizeForeignObjects(svg);
     prefixIds(svg, `m${index + 1}_`);
-  });
+  }
 }
 
 // ── Note-embed hardening ───────────────────────────────────────────────────
@@ -291,13 +339,24 @@ export interface EmbedTarget {
 // is nothing positional left to reconstruct.
 export function splitEmbedTarget(src: string): EmbedTarget {
   const raw = src.trim();
-  const blockIdx = raw.indexOf("^");
-  const hashIdx = raw.indexOf("#");
-  const cutIdx = [blockIdx, hashIdx].filter((i) => i !== -1).sort((a, b) => a - b)[0];
-  const linkpath = cutIdx === undefined ? raw : raw.slice(0, cutIdx);
-  const heading = hashIdx !== -1 && hashIdx === cutIdx ? raw.slice(hashIdx + 1) : null;
-  const block = blockIdx !== -1 && blockIdx === cutIdx ? raw.slice(blockIdx + 1) : null;
-  return { raw, linkpath, heading, block };
+
+  const headingIndex = raw.indexOf("#");
+  const blockIndex = raw.indexOf("^");
+  const suffixIndices = [headingIndex, blockIndex].filter((index) => index !== -1);
+
+  // Whichever suffix appears FIRST in the linktext is the one that scopes the
+  // embed ("Note#Heading" scopes by heading, "Note^blockid" by block); a
+  // second suffix, if any, is just part of that scope's name.
+  const firstSuffixIndex = suffixIndices.length === 0 ? null : Math.min(...suffixIndices);
+  const hasHeadingSuffix = headingIndex !== -1 && headingIndex === firstSuffixIndex;
+  const hasBlockSuffix = blockIndex !== -1 && blockIndex === firstSuffixIndex;
+
+  return {
+    raw,
+    linkpath: firstSuffixIndex === null ? raw : raw.slice(0, firstSuffixIndex),
+    heading: hasHeadingSuffix ? raw.slice(headingIndex + 1) : null,
+    block: hasBlockSuffix ? raw.slice(blockIndex + 1) : null,
+  };
 }
 
 /** True when an embed wrapper's src targets an image, not a note. */
@@ -353,14 +412,19 @@ export function findHeadingSection(
   target: string,
   totalLines: number
 ): HeadingSection | null {
-  const needle = target.trim().toLowerCase();
-  const matchIndex = headings.findIndex((h) => h.heading.trim().toLowerCase() === needle);
-  if (matchIndex === -1) return null;
+  const normalizedTarget = target.trim().toLowerCase();
+  const matchedIndex = headings.findIndex(
+    (heading) => heading.heading.trim().toLowerCase() === normalizedTarget
+  );
+  if (matchedIndex === -1) return null;
 
-  const matched = headings[matchIndex];
-  const next = headings.slice(matchIndex + 1).find((h) => h.level <= matched.level);
-  const endLine = next ? next.line - 1 : totalLines - 1;
-  return { startLine: matched.line, endLine };
+  const matchedHeading = headings[matchedIndex];
+  // The section runs until the next heading at the same level or higher.
+  const nextHeading = headings
+    .slice(matchedIndex + 1)
+    .find((heading) => heading.level <= matchedHeading.level);
+  const endLine = nextHeading ? nextHeading.line - 1 : totalLines - 1;
+  return { startLine: matchedHeading.line, endLine };
 }
 
 export interface SectionInfo {
@@ -436,20 +500,20 @@ export function findBlockRange(
 // making this loop forever.
 export function listItemRange(listItems: ListItemInfo[], seed: ListItemInfo): HeadingSection {
   const descendantStarts = new Set<number>([seed.startLine]);
-  const seen = new Set<ListItemInfo>([seed]);
+  const visitedItems = new Set<ListItemInfo>([seed]);
   let endLine = seed.endLine;
 
   // Repeat until no further item joins: a child may appear before its parent
   // in the array, so a single pass could miss part of the chain.
-  let grew = true;
-  while (grew) {
-    grew = false;
+  let addedDescendant = true;
+  while (addedDescendant) {
+    addedDescendant = false;
     for (const candidate of listItems) {
-      if (seen.has(candidate) || !descendantStarts.has(candidate.parent)) continue;
-      seen.add(candidate);
+      if (visitedItems.has(candidate) || !descendantStarts.has(candidate.parent)) continue;
+      visitedItems.add(candidate);
       descendantStarts.add(candidate.startLine);
       if (candidate.endLine > endLine) endLine = candidate.endLine;
-      grew = true;
+      addedDescendant = true;
     }
   }
   return { startLine: seed.startLine, endLine };
@@ -466,9 +530,11 @@ export function listItemRange(listItems: ListItemInfo[], seed: ListItemInfo): He
 // indentation is its meaning (research R3a).
 export function dedentBlock(md: string): string {
   const lines = md.split("\n");
-  const prefix = /^[ \t]*/.exec(lines[0])![0];
-  if (prefix === "") return md;
-  return lines.map((l) => (l.startsWith(prefix) ? l.slice(prefix.length) : l)).join("\n");
+  const leadingWhitespace = /^[ \t]*/.exec(lines[0])?.[0] ?? "";
+  if (leadingWhitespace === "") return md;
+  return lines
+    .map((line) => (line.startsWith(leadingWhitespace) ? line.slice(leadingWhitespace.length) : line))
+    .join("\n");
 }
 
 // Removes the `^id` marker the author wrote to label this block, so it can't
@@ -481,18 +547,28 @@ export function dedentBlock(md: string): string {
 // notation) and silently editing a reader's code would be a worse defect than
 // the stray marker being fixed.
 export function stripBlockMarker(md: string, blockId: string): string {
-  const escaped = blockId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return (
-    md
-      .split("\n")
-      // A marker sitting alone on its line (how Obsidian labels tables, lists
-      // and code blocks) takes the line with it — leaving a blank would split
-      // the block it belongs to.
-      .filter((l) => !new RegExp(`^[ \\t]*\\^${escaped}[ \\t]*$`).test(l))
-      // Otherwise it trails the block's own last line (paragraphs, headings).
-      .map((l) => l.replace(new RegExp(`[ \\t]*\\^${escaped}[ \\t]*$`), ""))
-      .join("\n")
-  );
+  const escapedId = escapeRegExp(blockId);
+  const markerAloneOnLine = new RegExp(`^[ \\t]*\\^${escapedId}[ \\t]*$`);
+  const markerAtEndOfLine = new RegExp(`[ \\t]*\\^${escapedId}[ \\t]*$`);
+
+  const keptLines: string[] = [];
+  for (const line of md.split("\n")) {
+    // A marker sitting alone on its line (how Obsidian labels tables, lists
+    // and code blocks) takes the line with it — leaving a blank would split
+    // the block it belongs to.
+    if (markerAloneOnLine.test(line)) continue;
+    // Otherwise it trails the block's own last line (paragraphs, headings).
+    keptLines.push(line.replace(markerAtEndOfLine, ""));
+  }
+  return keptLines.join("\n");
+}
+
+// With a reason (a Base that WAS attempted and could not be exported) the message
+// says what went wrong; without one it is the general "no EPUB equivalent" text,
+// which is all that is true of an inline ```base block.
+function basesOmittedMessage(name: string, reason?: string | null): string {
+  if (reason) return `bases view omitted: ${name} — ${reason}`;
+  return `bases view omitted (interactive Bases have no EPUB equivalent): ${name}`;
 }
 
 // Maps a populateEmbeds-stamped data-embed-reason to its warning message.
@@ -500,16 +576,15 @@ export function stripBlockMarker(md: string, blockId: string): string {
 // attempts real resolution (findHeadingSection/findSupportedBlock above), so
 // nothing stamps that reason anymore — see spec.md's Scoped Note Embeds
 // feature and its FR-005/FR-006.
-function embedOmissionMessage(reason: string | null, name: string, detail: string | null = null): string {
+function embedOmissionMessage(reason: string | null, name: string, detail?: string | null): string {
   switch (reason) {
     case "render-failed":
       return `embed could not be rendered: ${name}${detail ? ` — ${detail}` : ""}`;
     case "circular":
       return `circular embed skipped: ${name}`;
     case "unsupported-type":
-      return isBasesSrc(name)
-        ? basesOmittedMessage(name, detail)
-        : `unsupported embed type (not a note): ${name}`;
+      if (isBasesSrc(name)) return basesOmittedMessage(name, detail);
+      return `unsupported embed type (not a note): ${name}`;
     case "heading-not-found":
       return `heading not found: ${name}`;
     case "block-not-found":
@@ -519,13 +594,14 @@ function embedOmissionMessage(reason: string | null, name: string, detail: strin
   }
 }
 
-// With a reason (a Base that WAS attempted and could not be exported) the message
-// says what went wrong; without one it is the general "no EPUB equivalent" text,
-// which is all that is true of an inline ```base block.
-const basesOmittedMessage = (name: string, reason?: string | null): string =>
-  reason
-    ? `bases view omitted: ${name} — ${reason}`
-    : `bases view omitted (interactive Bases have no EPUB equivalent): ${name}`;
+// Every omission notice is the same paragraph shape: a reader-visible marker
+// that also feeds the export's warning summary.
+function createOmittedParagraph(text: string): HTMLElement {
+  const paragraph = createEl("p");
+  paragraph.className = "omitted";
+  paragraph.textContent = text;
+  return paragraph;
+}
 
 // An inline ```base code block is a Bases view too, and Obsidian renders its
 // toolbar (buttons, a search <input>, icons) into the DOM even when the render
@@ -537,25 +613,25 @@ const basesOmittedMessage = (name: string, reason?: string | null): string =>
 function omitBasesBlocks(root: HTMLElement): string[] {
   const warnings: string[] = [];
   root.querySelectorAll(".block-language-base").forEach((block) => {
-    const marker = createEl("p");
-    marker.className = "omitted";
-    marker.textContent = "[Bases view omitted: inline base block]";
-    block.replaceWith(marker);
+    block.replaceWith(createOmittedParagraph("[Bases view omitted: inline base block]"));
     warnings.push(basesOmittedMessage("inline base block"));
   });
   return warnings;
 }
 
+// Names the feature that was omitted, so a reader-side marker explains why no
+// table is there (GitHub issue #2: the generic wording read as a failed export).
+function omissionLabel(reason: string | null, name: string): string {
+  const wasBasesView = reason === "unsupported-type" && isBasesSrc(name);
+  return wasBasesView ? "Bases view omitted" : "embedded content omitted";
+}
+
 // The omission marker an embed degrades to when it has no rendered content
 // (spec.md Clarifications Q2 — matches the existing missing-image/
 // cover-download-failure convention of surfacing degraded content in the
-// export's warning summary, not just inline). Bases embeds name their own
-// feature so the reader-side marker explains why no table is there.
+// export's warning summary, not just inline).
 function embedOmissionPlaceholder(reason: string | null, name: string): HTMLElement {
-  const p = createEl("p");
-  p.className = "omitted";
-  p.textContent = `[${reason === "unsupported-type" && isBasesSrc(name) ? "Bases view omitted" : "embedded content omitted"}: ${name}]`;
-  return p;
+  return createOmittedParagraph(`[${omissionLabel(reason, name)}: ${name}]`);
 }
 
 // An embed written on its own line renders as `<p><span.internal-embed/></p>`
@@ -568,10 +644,15 @@ function embedOmissionPlaceholder(reason: string | null, name: string): HTMLElem
 function embedReplaceTarget(wrapper: Element): Element {
   const parent = wrapper.parentElement;
   if (!parent || parent.tagName.toLowerCase() !== "p") return wrapper;
-  const onlyChild = Array.from(parent.childNodes).every(
-    (n) => n === wrapper || (n.nodeType === Node.TEXT_NODE && !(n.textContent ?? "").trim())
+
+  const isOnlyMeaningfulChild = Array.from(parent.childNodes).every(
+    (node) => node === wrapper || isWhitespaceTextNode(node)
   );
-  return onlyChild ? parent : wrapper;
+  return isOnlyMeaningfulChild ? parent : wrapper;
+}
+
+function isWhitespaceTextNode(node: ChildNode): boolean {
+  return node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim() === "";
 }
 
 // Returns any warnings produced while flattening embeds — the caller
@@ -601,56 +682,77 @@ export function flattenEmbeds(root: HTMLElement): string[] {
 function flattenEmbedWrappers(root: HTMLElement): string[] {
   const warnings: string[] = [];
 
-  const wrappers = Array.from(root.querySelectorAll(`.${EMBED_WRAPPER_CLASS}`))
-    .filter((w) => {
-      // Inside Obsidian's own async-rendered embed preview: discarded
-      // wholesale when its host wrapper is replaced — flattening it here
-      // would double-count warnings for content that never ships.
-      return !w.parentElement?.closest(`.${EMBED_CONTENT_CLASS}`);
-    })
-    .reverse(); // document order is outermost-first; process innermost-first
-
-  for (const wrapper of wrappers) {
-    const name =
-      (wrapper.getAttribute("src") ?? wrapper.getAttribute("alt") ?? "unknown").trim() || "unknown";
-
-    if (isImageEmbedSrc(name)) {
-      // Image embed (`![[pic.png]]`): the wrapper span itself is the problem
-      // — its `alt`/`src` attributes are invalid on a span in XHTML
-      // (epubcheck RSC-005, observed on a real-Obsidian export). A resolved
-      // one is unwrapped to its bare <img> (inheriting the wrapper's alt
-      // caption — Obsidian puts the caption on the wrapper, not the img); an
-      // unresolved one (real Obsidian renders "not created yet. Click to
-      // create." text and no <img>) degrades to the placeholder instead of
-      // leaking that text into the book.
-      const img = wrapper.querySelector("img");
-      if (img) {
-        const caption = wrapper.getAttribute("alt");
-        if (caption && !img.getAttribute("alt")) img.setAttribute("alt", caption);
-        wrapper.replaceWith(img);
-      } else {
-        embedReplaceTarget(wrapper).replaceWith(
-          embedOmissionPlaceholder(wrapper.getAttribute("data-embed-reason"), name)
-        );
-        warnings.push(embedOmissionMessage(wrapper.getAttribute("data-embed-reason"), name));
-      }
-      continue;
-    }
-
-    const ourDiv = wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`);
-    const target = embedReplaceTarget(wrapper);
-    if (ourDiv) {
-      // replaceWith accepts multiple nodes directly — no document fragment
-      // needed (and the plugin review flags document.createDocumentFragment).
-      target.replaceWith(...Array.from(ourDiv.childNodes));
-    } else {
-      const reason = wrapper.getAttribute("data-embed-reason");
-      target.replaceWith(embedOmissionPlaceholder(reason, name));
-      warnings.push(embedOmissionMessage(reason, name, wrapper.getAttribute("data-embed-detail")));
-    }
+  for (const wrapper of embedsToFlatten(root)) {
+    const warning = flattenEmbedWrapper(wrapper);
+    if (warning !== null) warnings.push(warning);
   }
 
   return warnings;
+}
+
+// Document order is outermost-first, so reverse it: an embedded note's own
+// nested embeds must flatten before the wrapper that hosts them.
+function embedsToFlatten(root: HTMLElement): Element[] {
+  return Array.from(root.querySelectorAll(`.${EMBED_WRAPPER_CLASS}`))
+    .filter((wrapper) => {
+      // Inside Obsidian's own async-rendered embed preview: discarded
+      // wholesale when its host wrapper is replaced — flattening it here
+      // would double-count warnings for content that never ships.
+      return !wrapper.parentElement?.closest(`.${EMBED_CONTENT_CLASS}`);
+    })
+    .reverse();
+}
+
+// Replaces ONE wrapper with whatever should ship in its place, and returns the
+// warning to report — or null when the embed resolved cleanly.
+function flattenEmbedWrapper(wrapper: Element): string | null {
+  const name = embedDisplayName(wrapper);
+
+  if (isImageEmbedSrc(name)) return unwrapImageEmbed(wrapper, name);
+
+  const renderedContent = wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`);
+  const replaceTarget = embedReplaceTarget(wrapper);
+
+  if (renderedContent) {
+    // replaceWith accepts multiple nodes directly — no document fragment
+    // needed (and the plugin review flags document.createDocumentFragment).
+    replaceTarget.replaceWith(...Array.from(renderedContent.childNodes));
+    return null;
+  }
+
+  const reason = wrapper.getAttribute("data-embed-reason");
+  replaceTarget.replaceWith(embedOmissionPlaceholder(reason, name));
+  return embedOmissionMessage(reason, name, wrapper.getAttribute("data-embed-detail"));
+}
+
+// The wrapper's `src` is authoritative (real Obsidian stamps the exact
+// linkpath the user wrote on it); `alt`, then a literal "unknown", are the
+// fallbacks for a wrapper shape that carries neither.
+function embedDisplayName(wrapper: Element): string {
+  const name = wrapper.getAttribute("src") ?? wrapper.getAttribute("alt") ?? "unknown";
+  return name.trim() || "unknown";
+}
+
+// Image embed (`![[pic.png]]`): the wrapper span itself is the problem
+// — its `alt`/`src` attributes are invalid on a span in XHTML
+// (epubcheck RSC-005, observed on a real-Obsidian export). A resolved
+// one is unwrapped to its bare <img> (inheriting the wrapper's alt
+// caption — Obsidian puts the caption on the wrapper, not the img); an
+// unresolved one (real Obsidian renders "not created yet. Click to
+// create." text and no <img>) degrades to the placeholder instead of
+// leaking that text into the book.
+function unwrapImageEmbed(wrapper: Element, name: string): string | null {
+  const image = wrapper.querySelector("img");
+  if (image) {
+    const caption = wrapper.getAttribute("alt");
+    if (caption && !image.getAttribute("alt")) image.setAttribute("alt", caption);
+    wrapper.replaceWith(image);
+    return null;
+  }
+
+  const reason = wrapper.getAttribute("data-embed-reason");
+  embedReplaceTarget(wrapper).replaceWith(embedOmissionPlaceholder(reason, name));
+  return embedOmissionMessage(reason, name);
 }
 
 // Fallback pass — a bare `.markdown-embed-title` + `.markdown-embed-content`
@@ -660,47 +762,45 @@ function flattenEmbedWrappers(root: HTMLElement): string[] {
 function flattenBareTitlePairs(root: HTMLElement): string[] {
   const warnings: string[] = [];
 
-  root.querySelectorAll(`.${EMBED_TITLE_CLASS}`).forEach((titleEl) => {
-    if (titleEl.closest(`.${EMBED_WRAPPER_CLASS}`)) return; // wrapper pass owns it
-    const contentEl = titleEl.nextElementSibling;
-    if (!contentEl || !contentEl.classList.contains(EMBED_CONTENT_CLASS)) return; // malformed/unexpected: leave alone
-    if (contentEl.childNodes.length > 0) {
+  root.querySelectorAll(`.${EMBED_TITLE_CLASS}`).forEach((titleElement) => {
+    if (titleElement.closest(`.${EMBED_WRAPPER_CLASS}`)) return; // wrapper pass owns it
+
+    const contentElement = titleElement.nextElementSibling;
+    // Malformed/unexpected shape (no `.markdown-embed-content` sibling):
+    // leave it alone rather than guess at what it meant.
+    if (!contentElement || !contentElement.classList.contains(EMBED_CONTENT_CLASS)) return;
+
+    if (contentElement.childNodes.length > 0) {
       // Unwrap: the embedded note's own content already carries whatever
       // title/heading it wants to show, so the bare `.embed-title` text
       // (just the raw link name) is dropped rather than shown twice.
-      Array.from(contentEl.childNodes).forEach((child) => {
-        contentEl.parentNode?.insertBefore(child, contentEl);
-      });
-      contentEl.remove();
-      titleEl.remove();
+      unwrapContentsIntoParent(contentElement);
     } else {
-      const reason = contentEl.getAttribute("data-embed-reason");
-      const name = (titleEl.textContent ?? "unknown").trim();
-      contentEl.replaceWith(embedOmissionPlaceholder(reason, name));
-      titleEl.remove();
+      const reason = contentElement.getAttribute("data-embed-reason");
+      const name = (titleElement.textContent ?? "unknown").trim();
+      contentElement.replaceWith(embedOmissionPlaceholder(reason, name));
       warnings.push(embedOmissionMessage(reason, name));
     }
+    titleElement.remove();
   });
 
   return warnings;
 }
 
+// Moves `element`'s children up to where `element` itself sat, then drops the
+// now-empty element.
+function unwrapContentsIntoParent(element: Element): void {
+  const parent = element.parentNode;
+  for (const child of Array.from(element.childNodes)) parent?.insertBefore(child, element);
+  element.remove();
+}
+
 export function cleanupDom(root: HTMLElement): string[] {
   normalizeMermaidSvg(root);
-  for (const sel of CHROME_SELECTORS) root.querySelectorAll(sel).forEach((n) => n.remove());
-  root.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-    const glyph = (input as HTMLInputElement).checked ? "☑ " : "☐ ";
-    input.replaceWith(document.createTextNode(glyph));
-  });
-  root.querySelectorAll("a.tag").forEach((a) => {
-    // Obsidian renders inline #tags as <a class="tag" href="#tagname" ...>
-    // with no data-href, so rewriteLinks's internal-link/data-href check
-    // never sees them — they'd otherwise pass through as dead fragment
-    // links in the EPUB (epubcheck RSC-012; dead taps on e-ink readers).
-    const span = createSpan();
-    span.textContent = a.textContent ?? "";
-    a.replaceWith(span);
-  });
+  removeRendererChrome(root);
+  replaceCheckboxesWithGlyphs(root);
+  replaceTagAnchorsWithText(root);
+
   const warnings = flattenEmbeds(root);
   // AFTER flattenEmbeds, not before: it discards Obsidian's own async-populated
   // preview of each embed (which can hold a base block of its own), and a
@@ -709,29 +809,60 @@ export function cleanupDom(root: HTMLElement): string[] {
   return warnings;
 }
 
+function removeRendererChrome(root: HTMLElement): void {
+  for (const selector of CHROME_SELECTORS) {
+    root.querySelectorAll(selector).forEach((element) => element.remove());
+  }
+}
+
+// A task-list item renders as a disabled <input type="checkbox">, which no
+// EPUB reader can toggle — swap in the glyph a reader CAN show.
+function replaceCheckboxesWithGlyphs(root: HTMLElement): void {
+  root.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+    const isChecked = (input as HTMLInputElement).checked;
+    input.replaceWith(document.createTextNode(isChecked ? "☑ " : "☐ "));
+  });
+}
+
+function replaceTagAnchorsWithText(root: HTMLElement): void {
+  // Obsidian renders inline #tags as <a class="tag" href="#tagname" ...>
+  // with no data-href, so rewriteLinks's internal-link/data-href check
+  // never sees them — they'd otherwise pass through as dead fragment
+  // links in the EPUB (epubcheck RSC-012; dead taps on e-ink readers).
+  root.querySelectorAll("a.tag").forEach((tagAnchor) => replaceWithPlainTextSpan(tagAnchor));
+}
+
+// Drops a link-shaped element but keeps what it said: an internal link with
+// nothing to point at is still text the reader should see.
+function replaceWithPlainTextSpan(element: Element): void {
+  const span = createSpan();
+  span.textContent = element.textContent ?? "";
+  element.replaceWith(span);
+}
+
 export function rewriteLinks(
   root: HTMLElement,
   hrefByPath: Map<string, string>,
   resolve: (linkpath: string) => string | null
 ): void {
-  root.querySelectorAll("a").forEach((a) => {
-    const dataHref = a.getAttribute("data-href");
-    const isInternal = a.classList.contains("internal-link") || dataHref !== null;
-    if (!isInternal) return; // external link: leave untouched
+  root.querySelectorAll("a").forEach((anchor) => {
+    const dataHref = anchor.getAttribute("data-href");
+    const isInternalLink = anchor.classList.contains("internal-link") || dataHref !== null;
+    if (!isInternalLink) return; // external link: leave untouched
+
     const targetPath = dataHref ? resolve(dataHref) : null;
-    const chapter = targetPath ? hrefByPath.get(targetPath) : undefined;
-    if (chapter) {
-      // Chapters live side by side in text/, so link by filename only.
-      a.setAttribute("href", chapter.replace(/^text\//, ""));
-      a.removeAttribute("data-href");
-      a.removeAttribute("class");
-      a.removeAttribute("target");
-      a.removeAttribute("rel");
-    } else {
-      const span = createSpan();
-      span.textContent = a.textContent ?? "";
-      a.replaceWith(span);
+    const chapterHref = targetPath ? hrefByPath.get(targetPath) : undefined;
+    if (!chapterHref) {
+      replaceWithPlainTextSpan(anchor);
+      return;
     }
+
+    // Chapters live side by side in text/, so link by filename only.
+    anchor.setAttribute("href", chapterHref.replace(/^text\//, ""));
+    anchor.removeAttribute("data-href");
+    anchor.removeAttribute("class");
+    anchor.removeAttribute("target");
+    anchor.removeAttribute("rel");
   });
 }
 
@@ -746,10 +877,10 @@ function vaultPathFromSrc(
   basePath: string,
   warn?: (message: string) => void
 ): string | null {
-  const noQueryOrFragment = src.split(/[?#]/)[0];
-  let decoded: string;
+  const pathWithoutQueryOrFragment = src.split(/[?#]/)[0];
+  let decodedPath: string;
   try {
-    decoded = decodeURIComponent(noQueryOrFragment);
+    decodedPath = decodeURIComponent(pathWithoutQueryOrFragment);
   } catch {
     // Malformed URI (e.g., literal % in filename): skip this image, but
     // say so — the src stays as it was, which no reader can open.
@@ -759,27 +890,57 @@ function vaultPathFromSrc(
 
   if (scheme !== "app") {
     // Relative or vault-absolute markdown image path (not app://-resolved).
-    return decoded;
+    return decodedPath;
   }
 
   // 008-mobile-support — INVARIANT: the empty check is NOT redundant with
-  // `at === -1`. `"anything".indexOf("")` returns 0, not -1, so an empty
-  // basePath takes the "found at position 0" branch, slices off nothing,
+  // `basePathIndex === -1`. `"anything".indexOf("")` returns 0, not -1, so an
+  // empty basePath takes the "found at position 0" branch, slices off nothing,
   // and hands the caller the entire `app://…` URL as a vault path — the
   // exact failure the fallback below was written to prevent. An empty
   // basePath is not exotic: main.ts produces it whenever the vault adapter
   // is not a FileSystemAdapter, which is EVERY export on Obsidian mobile.
-  const at = basePath === "" ? -1 : decoded.indexOf(basePath);
-  if (at === -1) {
+  const basePathIndex = basePath === "" ? -1 : decodedPath.indexOf(basePath);
+  if (basePathIndex === -1) {
     // Path doesn't contain the given basePath (multi-vault, symlinked
     // attachment folders, path-case differences). Fall through with just
     // the basename so the caller's fuzzy resolver (getFirstLinkpathDest)
     // gets a chance, and failing that, the missing-image warning fires —
     // every image ends up either embedded or warned, never silently
     // left as a broken app:// href.
-    return decoded.split("/").pop() ?? decoded;
+    return decodedPath.split("/").pop() ?? decodedPath;
   }
-  return decoded.slice(at + basePath.length).replace(/^\//, "");
+  return decodedPath.slice(basePathIndex + basePath.length).replace(/^\//, "");
+}
+
+// An <img> src already produced by this function on an earlier pass.
+// Idempotence guard: it matches only what we ourselves emit, not an arbitrary
+// note-relative "../images/..." reference from a sibling folder.
+const ALREADY_REWRITTEN_IMAGE_SRC = /^\.\.\/images\/img_\d+\.[a-z0-9]+$/i;
+
+// What to do with one <img> src. The parsed scheme travels with the decision
+// so the caller doesn't have to parse the src a second time.
+type ImageSrcDecision = { action: "leave" } | { action: "rewrite"; scheme: string | undefined };
+
+function decideImageSrc(src: string): ImageSrcDecision {
+  // Missing/empty src: nothing to resolve, nothing to warn about.
+  if (src === "") return { action: "leave" };
+  // Protocol-relative (scheme-less): leave completely untouched.
+  if (/^\/\//.test(src)) return { action: "leave" };
+  // Any other scheme (http:, https:, data:, blob:, file:, mailto:, ...)
+  // except our own "app://" internal-resource scheme: leave untouched.
+  // Case-insensitive per RFC 3986 (scheme names are not case sensitive).
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(src)?.[1].toLowerCase();
+  if (scheme && scheme !== "app") return { action: "leave" };
+  if (ALREADY_REWRITTEN_IMAGE_SRC.test(src)) return { action: "leave" };
+  return { action: "rewrite", scheme };
+}
+
+// Every image asset in a book lives at images/img_NNN.<ext>; the shared
+// numbering keeps two chapters' images, and rasterized diagrams, from
+// colliding with each other.
+function numberedImageHref(imageNumber: number, extension: string): string {
+  return `../images/img_${String(imageNumber).padStart(3, "0")}.${extension}`;
 }
 
 export function rewriteImages(
@@ -789,51 +950,39 @@ export function rewriteImages(
   warn?: (message: string) => void
 ): { vaultPath: string; newHref: string }[] {
   const found: { vaultPath: string; newHref: string }[] = [];
-  root.querySelectorAll("img").forEach((img) => {
-    const src = img.getAttribute("src") ?? "";
-    // Missing/empty src: nothing to resolve, nothing to warn about.
-    if (src === "") return;
-    // Protocol-relative (scheme-less): leave completely untouched.
-    if (/^\/\//.test(src)) return;
-    // Any other scheme (http:, https:, data:, blob:, file:, mailto:, ...)
-    // except our own "app://" internal-resource scheme: leave untouched.
-    // Case-insensitive per RFC 3986 (scheme names are not case sensitive).
-    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(src)?.[1].toLowerCase();
-    if (scheme && scheme !== "app") return;
-    // Already rewritten by a previous pass: idempotence guard. Matches only
-    // what this function itself emits, not an arbitrary note-relative
-    // "../images/..." reference from a sibling folder.
-    if (/^\.\.\/images\/img_\d+\.[a-z0-9]+$/i.test(src)) return;
 
-    const vaultPath = vaultPathFromSrc(src, scheme, basePath, warn);
+  root.querySelectorAll("img").forEach((image) => {
+    const src = image.getAttribute("src") ?? "";
+    const decision = decideImageSrc(src);
+    if (decision.action === "leave") return;
+
+    const vaultPath = vaultPathFromSrc(src, decision.scheme, basePath, warn);
     if (vaultPath === null) return;
 
-    const extMatch = /\.(\w+)$/.exec(vaultPath);
-    const ext = extMatch ? extMatch[1].toLowerCase() : "png";
+    const extension = /\.(\w+)$/.exec(vaultPath)?.[1].toLowerCase() ?? "png";
     // startIndex offsets numbering so images from different chapters in the
     // same export never collide (each call only sees one chapter's <img>s).
-    const newHref = `../images/img_${String(startIndex + found.length + 1).padStart(3, "0")}.${ext}`;
+    const newHref = numberedImageHref(startIndex + found.length + 1, extension);
     found.push({ vaultPath, newHref });
-    img.setAttribute("src", newHref);
-    if (!img.getAttribute("alt")) img.setAttribute("alt", "");
+    image.setAttribute("src", newHref);
+    if (!image.getAttribute("alt")) image.setAttribute("alt", "");
   });
+
   return found;
 }
 
 export function serializeBody(root: HTMLElement): string {
-  // Guard: empty root returns empty string.
   if (root.childNodes.length === 0) return "";
 
-  const s = new XMLSerializer();
   // Serialize the root element once (includes xmlns handling).
-  const whole = s.serializeToString(root);
+  const serializedRoot = new XMLSerializer().serializeToString(root);
 
   // Strip root's opening and closing tags positionally (not regex).
   // First ">" ends root's start tag, last "</" starts root's close tag.
-  const inner = whole.slice(whole.indexOf(">") + 1, whole.lastIndexOf("</"));
+  const innerXml = serializedRoot.slice(serializedRoot.indexOf(">") + 1, serializedRoot.lastIndexOf("</"));
 
   // Normalize <br /> to <br/>.
-  return inner.replace(/ \/>/g, "/>");
+  return innerXml.replace(/ \/>/g, "/>");
 }
 
 // ── Mermaid rasterization (Round 3) ───────────────────────────────────────
@@ -867,6 +1016,44 @@ export type SvgRasterizer = (
 const RASTER_SCALE = 2;
 const MAX_CANVAS_DIM = 4096;
 
+// The canvas size to rasterize at: RASTER_SCALE, unless that would push either
+// axis past MAX_CANVAS_DIM, in which case the diagram is scaled down just far
+// enough to fit. Never below 1px, so a degenerate svg can't produce a
+// zero-width canvas that throws on drawImage.
+function canvasSizeForDiagram(cssWidth: number, cssHeight: number): { width: number; height: number } {
+  let scale = RASTER_SCALE;
+  if (cssWidth * scale > MAX_CANVAS_DIM || cssHeight * scale > MAX_CANVAS_DIM) {
+    scale = Math.min(MAX_CANVAS_DIM / cssWidth, MAX_CANVAS_DIM / cssHeight);
+  }
+  return {
+    width: Math.max(1, Math.round(cssWidth * scale)),
+    height: Math.max(1, Math.round(cssHeight * scale)),
+  };
+}
+
+// Resolves true once the image has decoded, false when the browser refuses it.
+// Never rejects: to the caller this is a fallback, not an error.
+function loadImageFromUrl(image: HTMLImageElement, url: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    image.onload = () => resolve(true);
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
+}
+
+// PNG data URL -> raw PNG bytes; null when the URL carries no base64 payload.
+function pngBytesFromDataUrl(dataUrl: string): Uint8Array | null {
+  const payloadStart = dataUrl.indexOf(",");
+  if (payloadStart === -1) return null;
+
+  const binary = atob(dataUrl.slice(payloadStart + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
 // Real (Electron-renderer) rasterizer: serialize -> Blob URL -> Image ->
 // canvas -> PNG bytes. Returns null on ANY failure instead of throwing —
 // callers treat null as "keep the inline SVG fallback", not an export error.
@@ -877,45 +1064,34 @@ async function defaultRasterizeSvg(
   const cssHeight = parseFloat(svg.getAttribute("height") ?? "") || 0;
   if (cssWidth <= 0 || cssHeight <= 0) return null;
 
-  let scale = RASTER_SCALE;
-  if (cssWidth * scale > MAX_CANVAS_DIM || cssHeight * scale > MAX_CANVAS_DIM) {
-    scale = Math.min(MAX_CANVAS_DIM / cssWidth, MAX_CANVAS_DIM / cssHeight);
-  }
-  const canvasWidth = Math.max(1, Math.round(cssWidth * scale));
-  const canvasHeight = Math.max(1, Math.round(cssHeight * scale));
+  const canvasSize = canvasSizeForDiagram(cssWidth, cssHeight);
 
   let blobUrl: string | null = null;
   try {
-    const serialized = new XMLSerializer().serializeToString(svg);
-    const blob = new Blob([serialized], { type: "image/svg+xml" });
+    const serializedSvg = new XMLSerializer().serializeToString(svg);
+    const blob = new Blob([serializedSvg], { type: "image/svg+xml" });
     blobUrl = URL.createObjectURL(blob);
 
-    const img = new Image();
-    const loaded = await new Promise<boolean>((resolve) => {
-      img.onload = () => resolve(true);
-      img.onerror = () => resolve(false);
-      img.src = blobUrl!;
-    });
+    const image = new Image();
+    const loaded = await loadImageFromUrl(image, blobUrl);
     if (!loaded) return null;
 
     const canvas = createEl("canvas");
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null; // jsdom (no "canvas" package installed): no 2d context
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
+    const context = canvas.getContext("2d");
+    if (!context) return null; // jsdom (no "canvas" package installed): no 2d context
 
     // Fill white first: e-ink readers, and PNG would otherwise be transparent.
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvasSize.width, canvasSize.height);
+    context.drawImage(image, 0, 0, canvasSize.width, canvasSize.height);
 
-    const dataUrl = canvas.toDataURL("image/png");
-    const comma = dataUrl.indexOf(",");
-    if (comma === -1) return null;
-    const binary = atob(dataUrl.slice(comma + 1));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const bytes = pngBytesFromDataUrl(canvas.toDataURL("image/png"));
+    if (bytes === null) return null;
 
+    // Report the CSS size, not the canvas size: the PNG is embedded at the
+    // size the diagram was authored at (its own scale is carried by the file).
     return { bytes, width: cssWidth, height: cssHeight };
   } catch {
     return null;
@@ -926,7 +1102,6 @@ async function defaultRasterizeSvg(
 
 let svgRasterizer: SvgRasterizer = defaultRasterizeSvg;
 
-/** Install a deterministic rasterizer for tests. `null` restores the default (real) one. */
 /**
  * The contract is "null on failure", but an injected rasterizer (or a browser
  * API under it) may throw instead. Either way the caller keeps the inline SVG
@@ -943,8 +1118,9 @@ export async function rasterizeOrNull(
   }
 }
 
-export function setSvgRasterizer(fn: SvgRasterizer | null): void {
-  svgRasterizer = fn ?? defaultRasterizeSvg;
+/** Install a deterministic rasterizer for tests. `null` restores the default (real) one. */
+export function setSvgRasterizer(rasterizer: SvgRasterizer | null): void {
+  svgRasterizer = rasterizer ?? defaultRasterizeSvg;
 }
 
 /** Read the currently-installed rasterizer (used by math.ts's renderMath). */
@@ -967,75 +1143,109 @@ export interface RasterizedMermaidImage {
 // so the two compose); one that doesn't is left exactly as-is (the
 // spec-valid inline-SVG fallback), and a single warning is emitted per
 // chapter no matter how many diagrams in it fell back.
+// Obsidian's vault-trust gate for Mermaid (observed on a real 2026-07
+// export): when the vault hasn't been allowed to render Mermaid, the
+// diagram renders as guard UI instead of an svg —
+//   <div class="mermaid-wrapper is-guarded">
+//     <div class="mermaid-guard-header">…"Display Mermaid diagrams in this
+//       vault?" text and an <button>Allow</button>…</div>
+//     <div class="mermaid-guard-source"><pre class="language-mermaid">…</pre></div>
+//   </div>
+// Serializing that verbatim ships an inert "Allow" button into the book. Keep
+// the readable part (the highlighted source fence), drop the UI chrome, and
+// return the warning telling the user how to get the real diagram — or null
+// when there was no guarded wrapper.
+function unguardMermaidWrappers(root: HTMLElement): string | null {
+  const guarded = root.querySelectorAll(".mermaid-wrapper.is-guarded");
+  if (guarded.length === 0) return null;
+  guarded.forEach((wrapper) => {
+    const source = wrapper.querySelector(".mermaid-guard-source pre");
+    if (source) wrapper.replaceWith(source);
+    else wrapper.remove();
+  });
+  return "mermaid diagram not rendered: Obsidian hasn't been allowed to display Mermaid in this vault — open the note in reading view, click Allow on the diagram, then re-export";
+}
+
+// Every mermaid diagram in the chapter: div.mermaid (the shape a real Obsidian
+// export produces, see tests/fixtures/mermaid-real.xhtml) plus a defensive
+// svg.mermaid-with-no-wrapper-div variant.
+function mermaidHosts(root: HTMLElement): Element[] {
+  const hosts: Element[] = [];
+  root.querySelectorAll("div.mermaid").forEach((div) => hosts.push(div));
+  root.querySelectorAll("svg.mermaid").forEach((svg) => {
+    if (!svg.closest("div.mermaid")) hosts.push(svg);
+  });
+  return hosts;
+}
+
+// Replaces a rasterized diagram's host with its PNG and returns the image the
+// caller numbers into the chapter.
+function embedRasterizedDiagram(
+  host: Element,
+  imageNumber: number,
+  rasterized: { bytes: Uint8Array; width: number; height: number }
+): RasterizedMermaidImage {
+  const newHref = numberedImageHref(imageNumber, "png");
+  const image = createEl("img");
+  image.setAttribute("src", newHref);
+  image.setAttribute("alt", "diagram");
+  // XHTML's `width` attribute must be an integer (epubcheck RSC-005: "must
+  // be a decimal number without any significant digits after the decimal
+  // point") — a real mermaid svg's width is fractional (e.g.
+  // "774.8046875"), so round it. Omit the attribute entirely rather than
+  // writing "NaN" if the width is missing/non-finite.
+  if (Number.isFinite(rasterized.width)) {
+    image.setAttribute("width", String(Math.round(rasterized.width)));
+  }
+  const paragraph = createEl("p");
+  paragraph.appendChild(image);
+  host.replaceWith(paragraph);
+  return { newHref, bytes: rasterized.bytes, mediaType: "image/png" };
+}
+
+// Finds every mermaid diagram in `root` and rasterizes each one via the
+// currently-installed rasterizer. A diagram that rasterizes successfully has
+// its whole host replaced with a <p><img></p> (numbered starting at
+// startIndex+1, continuing rewriteImages's numbering so the two compose); one
+// that doesn't is left exactly as-is (the spec-valid inline-SVG fallback), and
+// a single warning is emitted per chapter no matter how many diagrams in it
+// fell back.
 export async function rasterizeMermaidDiagrams(
   root: HTMLElement,
   startIndex: number
 ): Promise<{ images: RasterizedMermaidImage[]; warnings: string[] }> {
   const images: RasterizedMermaidImage[] = [];
   const warnings: string[] = [];
-  let warned = false;
+  let fallbackWarned = false;
 
-  // Obsidian's vault-trust gate for Mermaid (observed on a real 2026-07
-  // export): when the vault hasn't been allowed to render Mermaid, the
-  // diagram renders as guard UI instead of an svg —
-  //   <div class="mermaid-wrapper is-guarded">
-  //     <div class="mermaid-guard-header">…"Display Mermaid diagrams in this
-  //       vault?" text and an <button>Allow</button>…</div>
-  //     <div class="mermaid-guard-source"><pre class="language-mermaid">…</pre></div>
-  //   </div>
-  // Serializing that verbatim ships an inert "Allow" button into the book.
-  // Keep the readable part (the highlighted source fence), drop the UI
-  // chrome, and tell the user how to get the real diagram.
-  const guarded = root.querySelectorAll(".mermaid-wrapper.is-guarded");
-  if (guarded.length > 0) {
-    guarded.forEach((wrapper) => {
-      const source = wrapper.querySelector(".mermaid-guard-source pre");
-      if (source) wrapper.replaceWith(source);
-      else wrapper.remove();
-    });
-    warnings.push(
-      "mermaid diagram not rendered: Obsidian hasn't been allowed to display Mermaid in this vault — open the note in reading view, click Allow on the diagram, then re-export"
-    );
-  }
+  const guardWarning = unguardMermaidWrappers(root);
+  if (guardWarning) warnings.push(guardWarning);
 
-  const hosts: Element[] = [];
-  root.querySelectorAll("div.mermaid").forEach((div) => hosts.push(div));
-  root.querySelectorAll("svg.mermaid").forEach((svg) => {
-    if (!svg.closest("div.mermaid")) hosts.push(svg);
-  });
-
-  for (const host of hosts) {
-    const svg = (
-      host.tagName.toLowerCase() === "svg" ? host : host.querySelector("svg")
-    ) as SVGSVGElement | null;
+  for (const host of mermaidHosts(root)) {
+    const svg = mermaidSvgIn(host);
     if (!svg) continue;
 
-    const result = await rasterizeOrNull(svgRasterizer, svg);
-    if (result) {
-      const index = startIndex + images.length + 1;
-      const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;
-      const img = createEl("img");
-      img.setAttribute("src", newHref);
-      img.setAttribute("alt", "diagram");
-      // XHTML's `width` attribute must be an integer (epubcheck RSC-005: "must
-      // be a decimal number without any significant digits after the decimal
-      // point") — a real mermaid svg's width is fractional (e.g.
-      // "774.8046875"), so round it. Omit the attribute entirely rather than
-      // writing "NaN" if the width is missing/non-finite.
-      if (Number.isFinite(result.width)) {
-        img.setAttribute("width", String(Math.round(result.width)));
-      }
-      const p = createEl("p");
-      p.appendChild(img);
-      host.replaceWith(p);
-      images.push({ newHref, bytes: result.bytes, mediaType: "image/png" });
-    } else if (!warned) {
+    const rasterized = await rasterizeOrNull(svgRasterizer, svg);
+    if (rasterized) {
+      images.push(embedRasterizedDiagram(host, startIndex + images.length + 1, rasterized));
+      continue;
+    }
+
+    // ONE warning per chapter, however many of its diagrams fell back.
+    if (!fallbackWarned) {
       warnings.push("mermaid rasterization unavailable — kept inline SVG (may not render on e-ink)");
-      warned = true;
+      fallbackWarned = true;
     }
   }
 
   return { images, warnings };
+}
+
+// The diagram's own <svg>: the host itself for the defensive svg.mermaid
+// variant, otherwise the svg inside the div.mermaid wrapper.
+function mermaidSvgIn(host: Element): SVGSVGElement | null {
+  const svg = host.tagName.toLowerCase() === "svg" ? host : host.querySelector("svg");
+  return svg as SVGSVGElement | null;
 }
 
 // ── Heading-level TOC collection (004-heading-toc) ────────────────────────
@@ -1088,43 +1298,64 @@ export function sanitizeHeadingId(text: string): string {
 // not of the heading: "Part A" + marker "1" would otherwise become the entry "Part A1" and
 // the id "part-a1" (011-footnote-semantics FR-012). Headings without a marker take the
 // untouched textContent path, so every existing book's TOC is unchanged.
-function headingText(el: Element): string {
-  if (!el.querySelector("sup.footnote-ref")) return (el.textContent ?? "").trim();
-  const clone = el.cloneNode(true) as Element;
-  clone.querySelectorAll("sup.footnote-ref").forEach((n) => n.remove());
+function headingText(heading: Element): string {
+  if (!heading.querySelector("sup.footnote-ref")) return (heading.textContent ?? "").trim();
+
+  // Clone before stripping: the marker must vanish from the collected TEXT
+  // without being removed from the rendered page.
+  const clone = heading.cloneNode(true) as Element;
+  clone.querySelectorAll("sup.footnote-ref").forEach((marker) => marker.remove());
   return (clone.textContent ?? "").trim();
 }
 
+// Sanitizes `text` into an id, then suffixes "-2", "-3", ... until it is one
+// the document isn't already using (a duplicate id is an invalid book).
+function uniqueHeadingId(text: string, usedIds: Set<string>): string {
+  const baseId = sanitizeHeadingId(text);
+  let id = baseId;
+  for (let suffix = 2; usedIds.has(id); suffix++) id = `${baseId}-${suffix}`;
+  return id;
+}
+
 export function collectHeadingToc(root: HTMLElement, maxDepth: number): TocEntry[] {
-  const entries: TocEntry[] = [];
+  // Depth 0 means "no heading entries at all". Returning before anything is
+  // read or stamped keeps that identity promise from the comment above true
+  // even for a caller that forgets not to call this.
+  if (maxDepth <= 0) return [];
+
   // Seeded with ids already on NON-heading elements (the footnote pass mints fn-N /
   // fnref-N ids before this runs), so a heading whose text sanitizes to one of them is
   // renamed instead of producing a duplicate id — an invalid book. Where nothing clashes
   // this changes nothing, so existing output is byte-identical.
-  const used = new Set<string>();
-  for (const el of Array.from(root.querySelectorAll("[id]"))) {
-    if (!/^h[1-6]$/i.test(el.tagName)) used.add(el.id);
+  const usedIds = new Set<string>();
+  for (const element of Array.from(root.querySelectorAll("[id]"))) {
+    if (!/^h[1-6]$/i.test(element.tagName)) usedIds.add(element.id);
   }
-  if (maxDepth <= 0) return entries;
+
+  const entries: TocEntry[] = [];
   const headings = Array.from(root.querySelectorAll("h1,h2,h3,h4,h5,h6"));
-  headings.forEach((el, i) => {
+
+  for (const [headingIndex, heading] of headings.entries()) {
     // A heading inside a footnote is part of a note, not of the chapter's outline
     // (011-footnote-semantics FR-012: the notes section adds nothing to the TOC).
-    if (el.closest(".footnotes")) return;
-    const level = parseInt(el.tagName.slice(1), 10);
-    if (level > maxDepth) return;
+    if (heading.closest(".footnotes")) continue;
+
+    const level = parseInt(heading.tagName.slice(1), 10);
+    if (level > maxDepth) continue;
+
     // The chapter's first heading, when it is an H1, is its title — the
     // nav already lists the chapter itself, so the H1 would be a duplicate
     // entry (FR-004).
-    if (i === 0 && level === 1) return;
-    const text = headingText(el);
-    if (text === "") return;
-    let id = sanitizeHeadingId(text);
-    let n = 2;
-    while (used.has(id)) id = `${sanitizeHeadingId(text)}-${n++}`;
-    used.add(id);
-    el.setAttribute("id", id);
+    if (headingIndex === 0 && level === 1) continue;
+
+    const text = headingText(heading);
+    if (text === "") continue;
+
+    const id = uniqueHeadingId(text, usedIds);
+    usedIds.add(id);
+    heading.setAttribute("id", id);
     entries.push({ level, text, id });
-  });
+  }
+
   return entries;
 }

@@ -694,23 +694,39 @@ export default class EpubExportPlugin extends Plugin {
     this.lastShareTarget =
       dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
 
-    let pushMsg = "";
-    if (this.settings.pushAfterExport && this.settings.booxUrl) {
-      try {
-        notice.setMessage("Pushing to Boox…");
-        // dest.fileName, not a path split at the call site: BooxDrop must
-        // upload under the same name on both platforms (FR-010).
-        await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
-        pushMsg = " and pushed to Boox ✓";
-      } catch (e) {
-        const msg = errorMessage(e);
-        pushMsg = ` — saved locally, push failed: ${msg}`;
-        collector.forBook()(`push to Boox failed: ${msg}`);
-      }
-    }
+    const pushMsg = await this.pushToBoox(dest, bytes, notice, collector);
     const warnMsg = summarizeWarnings(collector.messages());
     const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
 
+    this.showExportNotice(savedText, job, collector);
+  }
+
+  // Pushes the finished book when the setting is on, returning the fragment the
+  // completion notice shows. A push failure is a warning, never a failed
+  // export — the book is already safely on disk.
+  private async pushToBoox(
+    dest: ExportDestination,
+    bytes: Uint8Array,
+    notice: Notice,
+    collector: WarningCollector
+  ): Promise<string> {
+    if (!this.settings.pushAfterExport || !this.settings.booxUrl) return "";
+    try {
+      notice.setMessage("Pushing to Boox…");
+      // dest.fileName, not a path split at the call site: BooxDrop must
+      // upload under the same name on both platforms (FR-010).
+      await new BooxDropClient(this.settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);
+      return " and pushed to Boox ✓";
+    } catch (e) {
+      const msg = errorMessage(e);
+      collector.forBook()(`push to Boox failed: ${msg}`);
+      return ` — saved locally, push failed: ${msg}`;
+    }
+  }
+
+  // Builds the export report and shows the completion notice — clickable when
+  // the report has warnings, byte-identical to the pre-report notice otherwise.
+  private showExportNotice(savedText: string, job: Job, collector: WarningCollector): void {
     // 010-export-report. Built and wired in its own try: everything above
     // has already succeeded and the book IS on disk, so a bug in the report
     // must not fall through to the outer catch and tell the reader the
@@ -748,11 +764,11 @@ export default class EpubExportPlugin extends Plugin {
         }),
         8000
       );
-    } else {
-      // FR-003: a warning-free export's notice is byte-identical to what it
-      // was before this feature, and nothing about it is clickable.
-      new Notice(savedText, 8000);
+      return;
     }
+    // FR-003: a warning-free export's notice is byte-identical to what it
+    // was before this feature, and nothing about it is clickable.
+    new Notice(savedText, 8000);
   }
 
   // 008-mobile-support: the ONLY place this plugin decides what platform it is

@@ -146,61 +146,82 @@ async function populateEmbeds(
   let index = startIndex;
 
   for (const wrapper of topLevelEmbedWrappers(container)) {
-    const src = (wrapper.getAttribute("src") ?? "").trim();
-    if (!src || isImageEmbedSrc(src)) continue; // image embed: rewriteImages' job
-
-    const target = splitEmbedTarget(src);
-    const dest = pipeline.app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
-    if (!(dest instanceof TFile)) {
-      wrapper.setAttribute("data-embed-reason", "unresolved");
-      continue;
-    }
-    if (dest.extension === "base") {
-      const base = await expandBaseEmbed(pipeline.app, src, sourcePath);
-      if (base.kind === "unsupported") {
-        // A card view, a grouped table, an error, a timeout: the same
-        // "unsupported-type" marker as any other non-note embed, now with
-        // Obsidian's reason attached.
-        wrapper.setAttribute("data-embed-reason", "unsupported-type");
-        wrapper.setAttribute("data-embed-detail", base.reason);
-        continue;
-      }
-      // A Bases TABLE view becomes a static table. No rewriteLinks here: a
-      // cell's link to a note is finalised by the pass of whatever encloses
-      // this embed (the embedded note's own, or the chapter's), resolving
-      // against the note the Base is written in. It points at that note's
-      // chapter if the note is in the book, and degrades to plain text if not.
-      const ourDiv = wrapper.createDiv();
-      ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-      ourDiv.appendChild(base.table);
-      if (base.warning) warnings.push(`${base.warning}: ${src} (referenced by ${sourcePath})`);
-      continue;
-    }
-    if (dest.extension !== "md") {
-      wrapper.setAttribute("data-embed-reason", "unsupported-type");
-      continue;
-    }
-    if (visited.has(dest.path)) {
-      // Runs before any heading/block lookup, so a scoped embed targeting a
-      // note already in the current chain (including itself) degrades as
-      // circular the same way a whole-note embed would — no separate
-      // self-reference check needed (spec.md FR-008).
-      wrapper.setAttribute("data-embed-reason", "circular");
-      continue;
-    }
-
-    // The render below can throw (a note that cannot be read, a renderer that
-    // rejects, a rasterizer that throws inside the recursive call).
-    // expandMarkdownEmbed catches that, so it costs this one embed and never
-    // the host chapter; on failure nothing is added to `images`, so the next
-    // wrapper still numbers its own from `index`.
-    const expanded = await expandMarkdownEmbed(wrapper, dest, target, sourcePath, index, visited, pipeline);
+    const expanded = await expandOneWrapper(wrapper, sourcePath, index, visited, pipeline);
     warnings.push(...expanded.warnings);
     images.push(...expanded.images);
     index += expanded.images.length;
   }
 
   return { warnings, images };
+}
+
+// Expands ONE top-level embed wrapper. Image embeds are left to rewriteImages;
+// a broken link, unsupported type, or circular note degrades in place with its
+// reason; a markdown note renders its own copy. Returns the wrapper's warnings
+// and images (both empty when it was skipped or degraded in place).
+async function expandOneWrapper(
+  wrapper: HTMLElement,
+  sourcePath: string,
+  startIndex: number,
+  visited: ReadonlySet<string>,
+  pipeline: EmbedPipeline
+): Promise<EmbedExpansion> {
+  const src = (wrapper.getAttribute("src") ?? "").trim();
+  if (!src || isImageEmbedSrc(src)) return { warnings: [], images: [] }; // image embed: rewriteImages' job
+
+  const target = splitEmbedTarget(src);
+  const dest = pipeline.app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
+  if (!(dest instanceof TFile)) {
+    wrapper.setAttribute("data-embed-reason", "unresolved");
+    return { warnings: [], images: [] };
+  }
+  if (dest.extension === "base") return attachBaseTable(wrapper, src, sourcePath, pipeline);
+  if (dest.extension !== "md") {
+    wrapper.setAttribute("data-embed-reason", "unsupported-type");
+    return { warnings: [], images: [] };
+  }
+  if (visited.has(dest.path)) {
+    // Runs before any heading/block lookup, so a scoped embed targeting a
+    // note already in the current chain (including itself) degrades as
+    // circular the same way a whole-note embed would — no separate
+    // self-reference check needed (spec.md FR-008).
+    wrapper.setAttribute("data-embed-reason", "circular");
+    return { warnings: [], images: [] };
+  }
+
+  // The render can throw (a note that cannot be read, a renderer that
+  // rejects, a rasterizer that throws inside the recursive call).
+  // expandMarkdownEmbed catches that, so it costs this one embed and never
+  // the host chapter; on failure nothing is added to `images`, so the next
+  // wrapper still numbers its own from `index`.
+  return expandMarkdownEmbed(wrapper, dest, target, sourcePath, startIndex, visited, pipeline);
+}
+
+// A .base embed whose table view rendered becomes a stamped div; anything else
+// (a card view, a grouped table, an error, a timeout) degrades to the
+// "unsupported-type" marker, with Obsidian's reason attached.
+async function attachBaseTable(
+  wrapper: HTMLElement,
+  src: string,
+  sourcePath: string,
+  pipeline: EmbedPipeline
+): Promise<EmbedExpansion> {
+  const base = await expandBaseEmbed(pipeline.app, src, sourcePath);
+  if (base.kind === "unsupported") {
+    wrapper.setAttribute("data-embed-reason", "unsupported-type");
+    wrapper.setAttribute("data-embed-detail", base.reason);
+    return { warnings: [], images: [] };
+  }
+  // A Bases TABLE view becomes a static table. No rewriteLinks here: a
+  // cell's link to a note is finalised by the pass of whatever encloses
+  // this embed (the embedded note's own, or the chapter's), resolving
+  // against the note the Base is written in. It points at that note's
+  // chapter if the note is in the book, and degrades to plain text if not.
+  const ourDiv = wrapper.createDiv();
+  ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
+  ourDiv.appendChild(base.table);
+  const warnings = base.warning ? [`${base.warning}: ${src} (referenced by ${sourcePath})`] : [];
+  return { warnings, images: [] };
 }
 
 function topLevelEmbedWrappers(container: HTMLElement): HTMLElement[] {

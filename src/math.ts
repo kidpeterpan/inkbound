@@ -236,6 +236,58 @@ function svgStringToElement(svgString: string): SVGSVGElement | null {
   }
 }
 
+// Restores the original `$…$` source as plain text — the readable fallback per
+// constitution II — and returns the warning to record. The two failure reasons
+// are told apart so a parser crash is not reported as a Thai-text limitation.
+function keepMathSourceText(
+  placeholder: Element,
+  span: MathSpan,
+  reason: "charset" | "error" | undefined,
+  detail: string | undefined,
+  sourcePath: string
+): string {
+  const source = span.display ? `$$${span.tex}$$` : `$${span.tex}$`;
+  placeholder.replaceWith(createTextNodeSafe(source));
+  return reason === "error"
+    ? `math could not be rendered: ${span.tex} — ${detail ?? "unknown error"} — kept as source text (referenced by ${sourcePath})`
+    : `math contains non-Latin characters that cannot be rendered — kept as source text (referenced by ${sourcePath})`;
+}
+
+// Replaces the placeholder with the rasterized PNG — inside a block <p> for
+// display math, as a bare <img> inline — and returns the image the caller
+// numbers into the chapter.
+function embedMathImage(
+  svgEl: SVGSVGElement,
+  placeholder: Element,
+  span: MathSpan,
+  imageNumber: number,
+  rasterized: { bytes: Uint8Array; width: number; height: number }
+): RenderedMathImage {
+  const newHref = `../images/img_${String(imageNumber).padStart(3, "0")}.png`;
+  const img = createEl("img");
+  img.setAttribute("src", newHref);
+  img.setAttribute("alt", span.tex);
+  // XHTML width must be an integer (epubcheck RSC-005), same rule the
+  // Mermaid rasterization applies — round it.
+  if (Number.isFinite(rasterized.width)) {
+    img.setAttribute("width", String(Math.round(rasterized.width)));
+  }
+  // MathJax computes the baseline offset relative to its own ex unit;
+  // CSS ex on the img resolves against the inherited font size, which
+  // matches at the 16px typesetting scale.
+  const style = svgEl.getAttribute("style");
+  if (style) img.setAttribute("style", style);
+  if (span.display) {
+    const p = createEl("p");
+    p.classList.add("math-block");
+    p.appendChild(img);
+    placeholder.replaceWith(p);
+  } else {
+    placeholder.replaceWith(img);
+  }
+  return { newHref, bytes: rasterized.bytes, mediaType: "image/png" };
+}
+
 export async function renderMath(
   root: HTMLElement,
   spans: MathSpan[],
@@ -257,18 +309,9 @@ export async function renderMath(
 
     const { svg, ok, reason, detail } = renderMathToSvg(span.tex, span.display);
 
-    // Nothing to typeset (unrenderable charset, or MathJax itself threw):
-    // restore the original source text — the readable fallback per
-    // constitution II. The two are told apart in the warning so a parser
-    // crash is not reported as a Thai-text limitation.
+    // Nothing to typeset (unrenderable charset, or MathJax itself threw).
     if (!ok && svg === "") {
-      const source = span.display ? `$$${span.tex}$$` : `$${span.tex}$`;
-      placeholder.replaceWith(createTextNodeSafe(source));
-      warnings.push(
-        reason === "error"
-          ? `math could not be rendered: ${span.tex} — ${detail ?? "unknown error"} — kept as source text (referenced by ${sourcePath})`
-          : `math contains non-Latin characters that cannot be rendered — kept as source text (referenced by ${sourcePath})`
-      );
+      warnings.push(keepMathSourceText(placeholder, span, reason, detail, sourcePath));
       continue;
     }
 
@@ -286,39 +329,16 @@ export async function renderMath(
 
     const result = await rasterizeOrNull(getSvgRasterizer(), svgEl);
     if (result) {
-      const index = startIndex + images.length + 1;
-      const newHref = `../images/img_${String(index).padStart(3, "0")}.png`;
-      const img = createEl("img");
-      img.setAttribute("src", newHref);
-      img.setAttribute("alt", span.tex);
-      // XHTML width must be an integer (epubcheck RSC-005), same rule the
-      // Mermaid rasterization applies — round it.
-      if (Number.isFinite(result.width)) {
-        img.setAttribute("width", String(Math.round(result.width)));
-      }
-      // MathJax computes the baseline offset relative to its own ex unit;
-      // CSS ex on the img resolves against the inherited font size, which
-      // matches at the 16px typesetting scale.
-      const style = svgEl.getAttribute("style");
-      if (style) img.setAttribute("style", style);
-      if (span.display) {
-        const p = createEl("p");
-        p.classList.add("math-block");
-        p.appendChild(img);
-        placeholder.replaceWith(p);
-      } else {
-        placeholder.replaceWith(img);
-      }
-      images.push({ newHref, bytes: result.bytes, mediaType: "image/png" });
-    } else {
-      // Keep the (normalized, px-sized) inline SVG — epub.ts stamps
-      // properties="svg" on chapters whose body contains <svg>, so this is
-      // still a spec-valid book.
-      placeholder.replaceWith(svgEl);
-      if (!warnedFallback) {
-        warnings.push("math rasterization unavailable — kept inline SVG (may not render on e-ink)");
-        warnedFallback = true;
-      }
+      images.push(embedMathImage(svgEl, placeholder, span, startIndex + images.length + 1, result));
+      continue;
+    }
+    // Keep the (normalized, px-sized) inline SVG — epub.ts stamps
+    // properties="svg" on chapters whose body contains <svg>, so this is
+    // still a spec-valid book.
+    placeholder.replaceWith(svgEl);
+    if (!warnedFallback) {
+      warnings.push("math rasterization unavailable — kept inline SVG (may not render on e-ink)");
+      warnedFallback = true;
     }
   }
 
