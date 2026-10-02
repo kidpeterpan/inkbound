@@ -2,13 +2,11 @@ import {
   FileSystemAdapter,
   Menu,
   Notice,
-  Platform,
   Plugin,
   TAbstractFile,
   TFile,
   TFolder,
   parseLinktext,
-  requestUrl,
 } from "obsidian";
 import { EpubBuilder, chapterHref, type NavItem } from "./epub";
 import { escapeXml } from "./xml";
@@ -18,7 +16,8 @@ import { computeBacklinks, renderBacklinksFragment } from "./backlinks";
 import { orderChapters, pickIndexNote, bfsLinked } from "./collect";
 import { renderUnitToChapter } from "./render-adapter";
 import { slugify, deriveChapterTitle } from "./naming";
-import { resolveDestination, type ExportDestination, type PlatformKind } from "./output";
+import { resolveDestination, type ExportDestination } from "./output";
+import { desktopHomedir, platformKind, writeBook } from "./output-adapter";
 import { canShareEpub, shareEpub, type ShareTarget } from "./share";
 import { resolveChapterAssets, type AssetVault } from "./chapter-assets";
 import { BooxDropClient } from "./booxdrop";
@@ -31,8 +30,8 @@ import {
   summarizeWarnings,
 } from "./settings";
 import type { ExportMeta } from "./types";
-import { resolveMeta, MetaDefaults } from "./metadata";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt, type CoverValue } from "./cover";
+import type { MetaDefaults } from "./metadata";
+import { NoteMetaSource } from "./meta-adapter";
 import { containsThai } from "./fonts";
 import { getThaiFontLoader } from "./font-assets";
 import { createWarningCollector, buildReport, type ExportReport, type WarningCollector } from "./report";
@@ -207,120 +206,16 @@ export default class EpubExportPlugin extends Plugin {
     };
   }
 
-  // Resolves EPUB metadata from a note's own frontmatter, then attaches a
-  // cover if one can be found.
+  // Resolves EPUB metadata from a note's own frontmatter and attaches a cover.
+  // The resolution policy — field precedence, the three cover sources, every
+  // degradation path — lives in meta-adapter.ts; what stays here is the
+  // settings read it needs, done per export so a settings change is picked up.
   private async metaFromNote(
     file: TFile | null,
     fallbackBasename: string,
     warn: (message: string) => void
   ): Promise<ExportMeta> {
-    const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
-    const resolved = resolveMeta(fm, file ? file.basename : fallbackBasename, this.metaDefaults());
-    const meta: ExportMeta = {
-      title: resolved.title,
-      author: resolved.author,
-      language: resolved.language,
-    };
-    await this.attachCover(meta, parseCoverValue(fm?.cover), resolved.coverUrl, file, warn);
-    return meta;
-  }
-
-  // Cover resolution order (FR-007, research R5): explicit `cover:` field →
-  // legacy `coverUrl:` field → first image embed in the metadata note's
-  // source (fallback, FR-003). Every failure mode degrades to a coverless
-  // export with a warning — never fails an export over artwork (spec +
-  // constitution II).
-  private async attachCover(
-    meta: ExportMeta,
-    coverValue: CoverValue | null,
-    legacyCoverUrl: string | null,
-    file: TFile | null,
-    warn: (message: string) => void
-  ): Promise<void> {
-    if (coverValue?.kind === "url") {
-      await this.downloadCover(meta, coverValue.url, warn);
-      return;
-    }
-    if (coverValue?.kind === "path") {
-      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`, warn);
-      return;
-    }
-    if (legacyCoverUrl) {
-      await this.downloadCover(meta, legacyCoverUrl, warn);
-      return;
-    }
-    if (!file) return;
-    // No cover frontmatter at all — fall back to the first image embed of
-    // the metadata note itself (code-fence-aware scan in cover.ts). Keep
-    // scanning: an embed that is missing or unsupported is skipped in
-    // favor of the next one (spec edge case).
-    const md = await this.app.vault.cachedRead(file).catch(() => null);
-    if (md === null) return;
-    for (const target of findImageEmbeds(md)) {
-      // Fallback candidates are skipped SILENTLY: a note whose first
-      // embed is a gif or a stale link but whose second is a fine png
-      // gets a cover with no noise. Warnings are reserved for the
-      // explicitly declared `cover:` (US4).
-      if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, null)) return;
-    }
-  }
-
-  // Remote cover: fetch and sniff png/webp from the content-type; anything
-  // else is treated as jpeg (existing coverUrl behavior, extended with webp).
-  private async downloadCover(meta: ExportMeta, url: string, warn: (message: string) => void): Promise<void> {
-    try {
-      const res = await requestUrl({ url, throw: false });
-      if (res.status === 200) {
-        const contentType = res.headers["content-type"] ?? "";
-        meta.coverBytes = new Uint8Array(res.arrayBuffer);
-        meta.coverExt = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
-      } else {
-        warn(`cover download failed: ${url} (status ${res.status})`);
-      }
-    } catch (e) {
-      warn(`cover download failed: ${url} (${errorMessage(e)})`);
-    }
-  }
-
-  // Local cover: resolve like any body image (vault path first, then
-  // Obsidian's link resolver for bare filenames / note-relative paths),
-  // accept only the cover allowlist, and read the bytes. Returns whether a
-  // cover was attached, so the fallback loop can stop at the first usable
-  // image. Warnings name the reference for every failure mode (FR-006); a
-  // null sink means the caller wants silence (the first-image fallback scan).
-  private async embedLocalCover(
-    meta: ExportMeta,
-    target: string,
-    sourceFile: TFile | null,
-    ref: string,
-    warn: ((message: string) => void) | null
-  ): Promise<boolean> {
-    let af: TAbstractFile | null = null;
-    if (sourceFile) {
-      af = this.app.vault.getAbstractFileByPath(target);
-      if (!(af instanceof TFile)) {
-        af = this.app.metadataCache.getFirstLinkpathDest(target, sourceFile.path);
-      }
-    }
-    if (!(af instanceof TFile)) {
-      warn?.(`cover not found: ${target} (${ref})`);
-      return false;
-    }
-    const ext = af.extension.toLowerCase();
-    if (!isSupportedCoverExt(ext)) {
-      warn?.(`unsupported cover type: ${target} (${ref})`);
-      return false;
-    }
-    try {
-      meta.coverBytes = new Uint8Array(await this.app.vault.readBinary(af));
-      // Builder maps jpeg→image/jpeg via the "jpg" key; keep coverExt in its
-      // canonical three-value shape ("jpg" | "png" | "webp").
-      meta.coverExt = ext === "jpeg" ? "jpg" : (ext as "jpg" | "png" | "webp");
-      return true;
-    } catch (e) {
-      warn?.(`cover read failed: ${target} (${errorMessage(e)})`);
-      return false;
-    }
+    return new NoteMetaSource(this.app, this.metaDefaults()).resolve(file, fallbackBasename, warn);
   }
 
   async exportSingle(file: TFile) {
@@ -684,7 +579,7 @@ export default class EpubExportPlugin extends Plugin {
     collector: WarningCollector,
     notice: Notice
   ): Promise<void> {
-    const kind = this.platformKind();
+    const kind = platformKind();
     const dest = resolveDestination(
       kind,
       this.settings,
@@ -693,9 +588,9 @@ export default class EpubExportPlugin extends Plugin {
       // carries the platform guard itself and answers "" on mobile — one
       // guard, in the place that owns the node import, instead of the same
       // condition written twice and drifting.
-      await this.desktopHomedir()
+      await desktopHomedir()
     );
-    await this.writeBook(dest, bytes); // save ALWAYS precedes push (spec)
+    await writeBook(dest, bytes, this.app.vault); // save ALWAYS precedes push (spec)
     this.lastShareTarget =
       dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
 
@@ -774,84 +669,6 @@ export default class EpubExportPlugin extends Plugin {
     // FR-003: a warning-free export's notice is byte-identical to what it
     // was before this feature, and nothing about it is clickable.
     new Notice(savedText, 8000);
-  }
-
-  // 008-mobile-support: the ONLY place this plugin decides what platform it is
-  // on. Everything downstream takes the resulting PlatformKind as a plain
-  // value, which keeps `obsidian` out of the pure modules (constitution IV) and
-  // makes every placement rule unit-testable with no stub at all.
-  private platformKind(): PlatformKind {
-    // Platform.isDesktop, not isDesktopApp: one flag decides both the
-    // destination shape and the write mechanism, so they cannot drift — and it
-    // is the property Obsidian's own guidance and lint recognize as the
-    // node-availability guard.
-    return Platform.isDesktop ? "desktop" : "mobile";
-  }
-
-  // 008-mobile-support — INVARIANT, do not "tidy" these imports to the top of
-  // the file. esbuild.config.mjs sets platform: "node", so a static
-  // `import { promises as fs } from "fs"` compiles to a require("fs") at the
-  // TOP LEVEL of the bundle, which executes the moment Obsidian loads main.js.
-  // Obsidian mobile has no require(), so a top-level one does not degrade the
-  // plugin — it stops the plugin from loading at all, before onload() runs and
-  // before any Platform check could guard anything. Inside a function body the
-  // same import compiles to a require() that only executes if this function is
-  // called, which on mobile it never is.
-  //
-  // That last sentence is true ONLY because esbuild.config.mjs sets
-  // `supported: { "dynamic-import": false }`. Without it esbuild emits these
-  // `await import("os")` calls verbatim, Obsidian hands them to the browser's
-  // ESM loader, and export dies with "Failed to resolve module specifier 'os'"
-  // — on desktop, where the require-scan had nothing to find. Read that flag's
-  // comment before touching either import below.
-  // `npm run check-mobile-safe` fails the build if this ever regresses.
-  // See specs/008-mobile-support/contracts/platform-seam.md.
-  private async desktopHomedir(): Promise<string> {
-    // The guard is lexical, not just at the call site: it is what proves — to a
-    // reader and to Obsidian's plugin-review lint — that this import cannot run
-    // on mobile. "" is the right answer there, since mobile resolution never
-    // consults a home directory (see resolveDestination in output.ts).
-    if (!Platform.isDesktop) {
-      return "";
-    }
-    const { homedir } = await import("os");
-    return homedir();
-  }
-
-  // One write, of a byte array that is already complete in memory
-  // (EpubBuilder.build() returns the whole book before this is called). There
-  // is no streaming write to interrupt, which is the whole of FR-011's
-  // "never leave a partial or corrupt book behind" — no temp-file dance needed.
-  private async writeBook(dest: ExportDestination, bytes: Uint8Array): Promise<void> {
-    // Branches on Platform rather than dest.kind so the node import sits
-    // lexically inside its guard. The two cannot disagree: dest.kind comes from
-    // platformKind(), which reads this same flag — so the write mechanism and
-    // the shape of the path resolveDestination produced always match.
-    if (Platform.isDesktop) {
-      const { promises: fs } = await import("fs"); // lazy — see the invariant above
-      await fs.mkdir(dest.path.slice(0, dest.path.lastIndexOf("/")), { recursive: true });
-      await fs.writeFile(dest.path, bytes);
-      return;
-    }
-    // Mobile: the vault adapter is the only write surface that exists, and it
-    // takes vault-relative paths — which is what resolveDestination guarantees.
-    const adapter = this.app.vault.adapter;
-    const folder = dest.path.slice(0, dest.path.lastIndexOf("/"));
-    if (folder) {
-      // Created segment by segment rather than in one call: Obsidian's
-      // DataAdapter.mkdir is NOT documented to create intermediate parents, so
-      // a nested output folder ("Books/EPUB") could fail on a device even
-      // though a recursive test stub would happily accept it.
-      let sofar = "";
-      for (const segment of folder.split("/")) {
-        sofar = sofar === "" ? segment : `${sofar}/${segment}`;
-        if (!(await adapter.exists(sofar))) await adapter.mkdir(sofar);
-      }
-    }
-    // Copy through a standalone ArrayBuffer: `bytes.buffer` can be a larger
-    // pooled buffer with a non-zero byteOffset, which would write garbage.
-    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    await adapter.writeBinary(dest.path, buffer);
   }
 
   async loadSettings() {
