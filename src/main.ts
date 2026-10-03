@@ -1,7 +1,14 @@
 import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } from "obsidian";
 import type { NavItem } from "./core/epub";
-import { planBook, type FolderInput, type NoteInput, type NavPlanNode } from "./core/book-tree";
-import { orderChapters, pickIndexNote, bfsLinked } from "./core/collect";
+import type { FolderInput, NoteInput } from "./core/book-tree";
+import { bfsLinked } from "./core/collect";
+import {
+  chapterOrderFallbackWarning,
+  legacyChapterOrder,
+  normalizeTags,
+  orderedLinkTargets,
+  planFolderOrder,
+} from "./core/book-plan";
 import { deriveChapterTitle } from "./core/naming";
 import { canShareEpub, shareEpub, type ShareTarget } from "./core/share";
 import { DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab } from "./adapters/settings";
@@ -10,7 +17,6 @@ import type { MetaDefaults } from "./core/metadata";
 import { NoteMetaSource } from "./adapters/meta-adapter";
 import type { ExportReport } from "./core/report";
 import { openExportReport } from "./adapters/report-view";
-import { errorMessage } from "./core/error-text";
 import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
 
 export default class EpubExportPlugin extends Plugin {
@@ -173,35 +179,29 @@ export default class EpubExportPlugin extends Plugin {
     await this.runExport({ meta, files, warnings });
   }
 
-  // Frontmatter `tags` can be a scalar string (e.g. `tags: handbook`)
-  // rather than a list. pickIndexNote's `.includes(...)` checks are
-  // Array.prototype.includes for list-shaped tags, but a string scalar
-  // would silently fall through to String.prototype.includes, which is
-  // substring matching and can misfire (e.g. "notebook mainframe"
-  // contains both "book" and "main"). Only genuine arrays count.
+  // The frontmatter read; the shape rule (why a scalar `tags` string is NOT
+  // tags) lives in core/book-plan.ts normalizeTags.
   private tagsOf(f: TFile): string[] {
-    const tags: unknown = this.app.metadataCache.getFileCache(f)?.frontmatter?.tags;
-    return Array.isArray(tags) ? (tags as string[]) : [];
+    return normalizeTags(this.app.metadataCache.getFileCache(f)?.frontmatter?.tags);
   }
 
-  // 009-index-order-parts (research R4): an index note's REGULAR links, in
-  // document order, resolved to vault paths. Obsidian keeps embeds in
-  // `embeds` and frontmatter links in `frontmatterLinks`, so reading `links`
-  // alone is what makes FR-005 ("embeds never order") hold — do not widen
-  // this to resolvedLinks, whose key order is not document order.
-  private orderedLinkTargets(file: TFile): string[] {
+  // Reads one note's regular links off the metadata cache and hands them to
+  // the pure rule in core/book-plan.ts (document order, no self-links, notes
+  // only). Obsidian keeps embeds in `embeds` and frontmatter links in
+  // `frontmatterLinks`, so reading `links` alone is what makes FR-005
+  // ("embeds never order") hold — do not widen this to resolvedLinks, whose
+  // key order is not document order.
+  private linkTargetsOf(file: TFile): string[] {
     const links = [...(this.app.metadataCache.getFileCache(file)?.links ?? [])];
-    links.sort((a, b) => a.position.start.offset - b.position.start.offset);
-    const targets: string[] = [];
-    for (const l of links) {
-      const { path } = parseLinktext(l.link);
-      if (path === "") continue; // [[#heading]] — a link to the note itself
-      const dest = this.app.metadataCache.getFirstLinkpathDest(path, file.path);
-      // Notes only (FR-004): a plain link to an image inside `Part I/` would
-      // otherwise resolve to a path under that folder and drag the Part with it.
-      if (dest instanceof TFile && dest.extension === "md") targets.push(dest.path);
-    }
-    return targets;
+    return orderedLinkTargets(
+      links.map((l) => ({ path: parseLinktext(l.link).path, startOffset: l.position.start.offset })),
+      (linkpath) => {
+        const dest = this.app.metadataCache.getFirstLinkpathDest(linkpath, file.path);
+        // Notes only (FR-004): a plain link to an image inside `Part I/` would
+        // otherwise resolve to a path under that folder and drag the Part with it.
+        return dest instanceof TFile && dest.extension === "md" ? dest.path : null;
+      }
+    );
   }
 
   // Plain-data mirror of a TFolder subtree for the pure planner. Only `.md`
@@ -218,7 +218,7 @@ export default class EpubExportPlugin extends Plugin {
           path: child.path,
           basename: child.basename,
           tags: this.tagsOf(child),
-          linkTargets: this.orderedLinkTargets(child),
+          linkTargets: this.linkTargetsOf(child),
         });
       } else if (child instanceof TFolder) {
         subfolders.push(this.buildFolderInput(child, byPath));
@@ -228,65 +228,67 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   // Pre-009 folder collection: direct children only, index first, NN_ then
-  // alphabetical. Kept as the fallback the planner degrades to (research R5)
-  // and as the reference for FR-013 ("flat folders export identically").
+  // alphabetical — the shape the planner degrades to (research R5) and the
+  // reference for FR-013 ("flat folders export identically"). The ordering
+  // rules live in core/book-plan.ts; this maps the basenames back to TFiles
+  // (unique within one folder — these are direct children of a single TFolder).
   private legacyFolderOrder(mdFiles: TFile[], folder: TFolder): { index: TFile | null; files: TFile[] } {
-    const candidates = mdFiles.map((f) => ({ basename: f.basename, tags: this.tagsOf(f) }));
-    const indexName = pickIndexNote(candidates, folder.name);
-    const index = mdFiles.find((f) => f.basename === indexName) ?? null;
-    const chapterNames = orderChapters(mdFiles.filter((f) => f !== index).map((f) => f.basename));
-    const files = chapterNames.map((n) => mdFiles.find((f) => f.basename === n)!);
-    if (index) files.unshift(index);
-    return { index, files };
+    const { indexBasename, order } = legacyChapterOrder(
+      mdFiles.map((f) => ({ basename: f.basename, tags: this.tagsOf(f) })),
+      folder.name
+    );
+    const fileNamed = (basename: string): TFile => mdFiles.find((f) => f.basename === basename)!;
+    return {
+      index: indexBasename === null ? null : fileNamed(indexBasename),
+      files: order.map(fileNamed),
+    };
   }
 
   // Plans a folder export's reading order and nav tree. Returns null after
   // notifying when the folder has no Markdown notes; a planner failure
   // degrades to the legacy flat order with a warning, never aborts
-  // (Constitution II / FR-016).
+  // (Constitution II / FR-016 — the degradation itself lives in
+  // core/book-plan.ts, where it is unit-tested).
   private planFolderExport(
     folder: TFolder,
     legacy: { index: TFile | null; files: TFile[] }
   ): { files: TFile[]; nav?: NavItem[]; warnings: string[] } | null {
-    const warnings: string[] = [];
-    let files = legacy.files;
-    let nav: NavItem[] | undefined;
+    const byPath = new Map<string, TFile>();
+    let input: FolderInput;
     try {
-      const byPath = new Map<string, TFile>();
-      const input = this.buildFolderInput(folder, byPath);
-      if (byPath.size === 0) {
-        new Notice("Folder has no Markdown notes.");
-        return null;
-      }
-      const plan = planBook(input);
-      // Path-keyed, not basename-keyed: two subfolders may hold same-named notes (FR-018).
-      files = plan.order.map((p) => byPath.get(p)!);
-      // The nav tree references chapters by POSITION in `files` (research
-      // R2): runExport's hrefByPath and the failed-chapter placeholder are
-      // both position-derived, so an index-keyed tree stays aligned with
-      // them for free. Only set when there is at least one Part — a flat
-      // folder keeps the flat nav untouched (FR-013).
-      const position = new Map(plan.order.map((p, i) => [p, i]));
-      const toNavItem = (node: NavPlanNode): NavItem =>
-        node.kind === "chapter"
-          ? { kind: "chapter", chapter: position.get(node.path)! }
-          : {
-              kind: "part",
-              title: node.indexPath ? this.titleFor(byPath.get(node.indexPath)!) : node.folderName,
-              indexChapter: node.indexPath ? position.get(node.indexPath)! : null,
-              children: node.children.map(toNavItem),
-            };
-      if (plan.nav.some((n) => n.kind === "part")) nav = plan.nav.map(toNavItem);
+      input = this.buildFolderInput(folder, byPath);
     } catch (e) {
-      // Constitution II / FR-016: ordering is structure, not content — a bug
-      // here degrades to the pre-009 flat order and says so, never aborts.
-      warnings.push(`chapter ordering fell back to filename order: ${errorMessage(e)}`);
-      if (files.length === 0) {
+      // The WALK can fail where the planner is written never to (research R5):
+      // it reads the metadata cache once per note. Degrade to the legacy
+      // TFiles this export already holds — byPath may be half-filled, so its
+      // paths must not be re-derived through it.
+      if (legacy.files.length === 0) {
         new Notice("Folder has no Markdown notes.");
         return null;
       }
+      return { files: legacy.files, warnings: [chapterOrderFallbackWarning(e)] };
     }
-    return { files, nav, warnings };
+    if (byPath.size === 0) {
+      new Notice("Folder has no Markdown notes.");
+      return null;
+    }
+    // A planning failure degrades to the legacy flat order inside here
+    // (Constitution II / FR-016).
+    const plan = planFolderOrder(
+      input,
+      legacy.files.map((f) => f.path),
+      (path) => this.titleFor(byPath.get(path)!)
+    );
+    // Path-keyed, not basename-keyed: two subfolders may hold same-named
+    // notes (FR-018).
+    const files = plan.order.map((path) => byPath.get(path)!);
+    // Reachable only through the degraded branch: the folder's notes live in
+    // subfolders, so the legacy direct-children list was empty.
+    if (files.length === 0) {
+      new Notice("Folder has no Markdown notes.");
+      return null;
+    }
+    return { files, nav: plan.nav, warnings: plan.warnings };
   }
 
   async exportFolder(folder: TFolder) {

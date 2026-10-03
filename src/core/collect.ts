@@ -24,7 +24,7 @@ export function orderByName<T>(items: T[], key: (item: T) => string): T[] {
 }
 
 export function pickIndexNote(
-  candidates: { basename: string; tags: string[] }[],
+  candidates: readonly { basename: string; tags: string[] }[],
   folderName: string
 ): string | null {
   const tagged = candidates.find((c) => c.tags.includes("book") && c.tags.includes("main"));
