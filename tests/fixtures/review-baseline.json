@@ -1,0 +1,36 @@
+{
+  "books": {
+    "smoke-vault/Book": {
+      "META-INF/container.xml": "bcc0d597a725325618e4552c38a2673a515a3c204f8834ad836930c35c1b6a06",
+      "OEBPS/fonts/NotoSansThai-Bold.ttf": "9a7b73eac6d3d5b82ca4dbdc21f0b89fbfdb5acc021e6ae05dd8203f73213424",
+      "OEBPS/fonts/NotoSansThai-Regular.ttf": "3b6d9ea58a49dbbaff20cf70005428baf9810af63126d6849ec9763768b3dccf",
+      "OEBPS/fonts/OFL.txt": "a697efb16e501c077666db9da36ca88bc73627174256848a139f788feb91e505",
+      "OEBPS/images/cover.png": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "OEBPS/images/img_001.png": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "OEBPS/nav.xhtml": "a639c20bbd4c0163894189b5e1ed7771cabbc7d77ec1d5f507be849de2ce7398",
+      "OEBPS/package.opf": "8edd72b1b0c85887d58c3e19f295058acc9632a803a215c1a74ae0fb3dd91cc7",
+      "OEBPS/style/epub.css": "b03d84f8580a8424a5076e86582645424cf1f26664eeaea4523ef924e16d9ee0",
+      "OEBPS/text/chapter_001.xhtml": "eebd1895c008b3aa574cea301d7a5bac6b6fd9e2898d083fb6a317f561e324d4",
+      "OEBPS/text/chapter_002.xhtml": "ec7326aa42da72cf9665fc087f738b96426704e0bd89d137234d5f71dd77410e",
+      "OEBPS/text/chapter_003.xhtml": "8df7d78ee8f5739ee442ff3d78460e2f29462c2b8f3b00aa117512deeda0e081",
+      "OEBPS/text/cover.xhtml": "dd40bece09610d558dd0f06232b977ab42abedf940add4fff79578eb0fb8a12f",
+      "mimetype": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b"
+    },
+    "smoke-vault/Footnotes": {
+      "META-INF/container.xml": "bcc0d597a725325618e4552c38a2673a515a3c204f8834ad836930c35c1b6a06",
+      "OEBPS/images/img_001.png": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "OEBPS/nav.xhtml": "72b4e9893fe0d239c2bcda8c872f450c53ae4b22142edb08daccd8b4f53c2efa",
+      "OEBPS/package.opf": "4f7add9f6792e2f74ec1f66a46d71f2388570f1f17ee1637539584f7b6aa4465",
+      "OEBPS/style/epub.css": "dec1c247033a31b447499da4619d91764ea68848452fa35f9f45a2b9dd0ed412",
+      "OEBPS/text/chapter_001.xhtml": "b0ed81e73a0eede856293f69452a0ff74f2eb170726e2a526d946afd4f862c06",
+      "OEBPS/text/chapter_002.xhtml": "e710fd1f7d49d1da359997b0c9984820af7d7408c642f292c10fbccff2cf855a",
+      "OEBPS/text/chapter_003.xhtml": "4df6d7736baeb132b7d8e17759e4540f40f7980c9c75786bfe72cfe79f58aea9",
+      "OEBPS/text/chapter_004.xhtml": "f47ddf196463ed897f372a2a141c48692d87bec6dc64c4f5aa8206e88401231f",
+      "OEBPS/text/chapter_005.xhtml": "cbc0e6d4e4bf16ec6b273dc0cb845baee0cf63316b7b797569bb5e2763cc3d81",
+      "OEBPS/text/chapter_006.xhtml": "d8d0ef0b169898418b3495bd14300aa1f9b864b71b9e619639bea84f97913ad6",
+      "OEBPS/text/chapter_007.xhtml": "56a4a8edc28fec32a90ddec3c3d6fab31ddb4bf34eab61ffaf56d9eac7d29074",
+      "OEBPS/text/chapter_008.xhtml": "31f700ec3a0c5fed992ae5712090f65012cc3b1844f625c447185c7a6caa0d66",
+      "mimetype": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b"
+    }
+  }
+}

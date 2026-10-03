@@ -58,7 +58,12 @@ export default defineConfig({
       provider: "v8",
       // scripts/lib/obsidian-drift.ts is the one non-src file held to the gate: it is
       // pure decision logic (the drift canary's rules), with no I/O of its own.
-      include: ["src/**/*.ts", "scripts/lib/obsidian-drift.ts", "scripts/lib/release-notes.ts"],
+      include: [
+        "src/**/*.ts",
+        "scripts/lib/obsidian-drift.ts",
+        "scripts/lib/release-notes.ts",
+        "scripts/lib/review-pack.ts",
+      ],
       // Interfaces only — emits no JS, so v8 reports 0/0 and would fail any threshold.
       exclude: ["src/core/types.ts"],
       reporter: ["text", "html", "lcov"],
