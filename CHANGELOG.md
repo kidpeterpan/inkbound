@@ -3,6 +3,25 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.5
+
+No change to exported books — this release is internal structure work, plus two
+new commands for cutting releases safely.
+
+- **The folder scope-planning rules moved into the pure core**
+  (`core/book-plan.ts`): frontmatter tag shape, the pre-009 flat order,
+  index-note link ordering, the position-keyed nav tree, and the degradation to
+  flat order are plain functions with 25 unit tests that run in milliseconds.
+  They used to be reachable only by running a whole export through the plugin.
+- **`npm run release:check` fails before a tag is pushed** when the two version
+  files disagree or `CHANGELOG.md` has no section for the current version, so
+  the release workflow no longer discovers that after the tag is public. It runs
+  in CI on every push.
+- **`npm run review-pack` reports what changed in the fixture books** since the
+  last reviewed baseline, so the manual pass in real Obsidian — the only check
+  that can see a real-renderer regression — only has to look at what moved.
+  `docs/RELEASE-CHECKLIST.md` is the runbook around it.
+
 ## 1.10.4
 
 No change to exported books — this release is internal structure work.
