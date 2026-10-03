@@ -23,6 +23,7 @@
     "epubcheck": "tsx scripts/build-sample.ts && tsx scripts/epubcheck.ts sample.epub",
     "local-export": "tsx scripts/local-export.ts",
     "release:check": "tsx scripts/release-check.ts",
+    "review-pack": "tsx scripts/review-pack.ts",
     "version:check": "tsx scripts/version.ts check",
     "version:bump": "tsx scripts/version.ts bump",
     "lint": "eslint .",
