@@ -36,7 +36,13 @@ export default class EpubExportPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new EpubExportSettingTab(this.app, this));
+    this.registerCommands();
+    this.registerFileMenu();
+  }
 
+  // Every command the plugin contributes to the palette (5) — kept together
+  // so adding one is a single place to look.
+  private registerCommands(): void {
     this.addCommand({
       id: "export-note",
       name: "Export note to EPUB",
@@ -91,7 +97,10 @@ export default class EpubExportPlugin extends Plugin {
         return true;
       },
     });
+  }
 
+  // The right-click entries for notes and folders.
+  private registerFileMenu(): void {
     this.registerEvent(
       this.app.workspace.on("file-menu", (menu: Menu, file: TAbstractFile) => {
         if (file instanceof TFile && file.extension === "md") {

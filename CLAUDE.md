@@ -155,10 +155,10 @@ from coverage for that reason.
    `main.ts` builds it and the placeholder invariant below for why.
 2. `render-adapter.ts`'s `renderUnitToChapter` renders each note's markdown
    through Obsidian's real `MarkdownRenderer`, then hands the DOM to the pure
-   functions in `render.ts`: `stripFrontmatter`/`stripDynamicBlocks`,
+   modules behind `render.ts` (`stripFrontmatter`/`stripDynamicBlocks`,
    `cleanupDom`, `rewriteLinks` (retargets wikilinks to sibling chapter
    hrefs), `rewriteImages`, `rasterizeMermaidDiagrams` (Mermaid → PNG, since
-   e-ink readers can't render live diagrams), `serializeBody`.
+   e-ink readers can't render live diagrams), `serializeBody`).
    Footnotes: `footnotes.ts`'s `processFootnotes` runs AFTER math and BEFORE
    `collectHeadingToc` — after `flattenEmbeds` so each embed's own `section.footnotes`
    is in the DOM, after links/images/math so a note's contents are processed, before

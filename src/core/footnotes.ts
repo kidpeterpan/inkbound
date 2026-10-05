@@ -223,7 +223,8 @@ function create<K extends keyof HTMLElementTagNameMap>(
   text?: string
 ): HTMLElementTagNameMap[K] {
   // The bare global `createEl` (Obsidian's; polyfilled for tests in obsidian-stub.ts) — the
-  // same one render.ts uses — rather than document.createElement, per the plugin-review lint.
+  // same one the render modules use — rather than document.createElement, per the
+  // plugin-review lint.
   const el = createEl(tag);
   for (const [name, value] of attrs) el.setAttribute(name, value);
   if (text !== undefined) el.textContent = text;

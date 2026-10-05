@@ -35,7 +35,7 @@ interface Asset {
 
 // ── Heading sub-entries (004-heading-toc) ─────────────────────────────────
 //
-// Each chapter's toc entries (collected in render.ts and stamped as ids on
+// Each chapter's toc entries (collected in render-toc.ts and stamped as ids on
 // the chapter's heading elements) render as nested <ol> sub-entries inside
 // the chapter's own <li>. Nesting mirrors the document hierarchy: every
 // heading nests under the nearest PRECEDING heading of a shallower level,
@@ -74,7 +74,7 @@ function tocNodeLis(nodes: TocNode[], href: string): string[] {
     // children already carries its own <ol> wrapper (or "" when leaf) —
     // wrapping it again would nest two <ol>s at the same level.
     const children = renderTocNodes(n.children, href);
-    // Ids are sanitized by render.ts to XML NCName chars — no escaping
+    // Ids are sanitized by render-toc.ts to XML NCName chars — no escaping
     // needed in the href; the display text gets the same escapeXml the
     // chapter titles already get (FR-009).
     return `<li><a href="${href}#${n.entry.id}">${escapeXml(n.entry.text)}</a>${children}</li>`;

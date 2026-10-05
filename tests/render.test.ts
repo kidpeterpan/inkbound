@@ -30,7 +30,7 @@ function div(html: string): HTMLElement {
 }
 
 // Builds the confirmed real-Obsidian note-embed wrapper shape (see
-// render.ts's "Note-embed hardening" comment) PROGRAMMATICALLY — the way the
+// render-embeds.ts's "Note-embed hardening" comment) PROGRAMMATICALLY — the way the
 // real app builds it. It cannot be built via innerHTML: the HTML parser
 // hoists block <div>s out of a <span> inside a <p>, silently destroying the
 // exact structure under test.
@@ -96,13 +96,14 @@ function assertAllReferencesResolve(root: HTMLElement): void {
 
 // tests/fixtures/obsidian-stub.ts installs a bare-global `createEl` (loaded
 // via tests/setup/no-network.ts for every test file) mirroring Obsidian's
-// ambient global declared in node_modules/obsidian/obsidian.d.ts. src/core/render.ts
-// calls this global directly (see its top-of-file comment) for every
+// ambient global declared in node_modules/obsidian/obsidian.d.ts. The
+// src/core/render-*.ts modules call this global directly (see render.ts's
+// top-of-file comment) for every
 // plain-HTML-element site the obsidianmd/prefer-create-el review warning
 // flagged. The one behavior that differs from the Node.prototype method of
 // the same name — no auto-append to a parent — is asserted here directly,
 // since getting that wrong would silently change DOM structure everywhere
-// render.ts uses it.
+// the render modules use it.
 describe("global createEl polyfill (test harness)", () => {
   it("creates the requested tag without appending it to any parent", () => {
     const el = createEl("span");
@@ -1358,10 +1359,10 @@ describe("rasterizeMermaidDiagrams", () => {
   });
 
   describe("default (real) rasterizer, browser APIs mocked", () => {
-    // render.ts's default rasterizer drives real browser APIs (Image, canvas,
+    // render-raster.ts's default rasterizer drives real browser APIs (Image, canvas,
     // Blob, URL.createObjectURL) that jsdom either doesn't implement at all
     // (URL.createObjectURL) or implements as a stub that always returns null
-    // (canvas 2d context) — see the module comment in src/core/render.ts. These
+    // (canvas 2d context) — see the module comment in src/core/render-raster.ts. These
     // tests stub just enough of that surface to walk the rest of the
     // function's branches deterministically; they do NOT prove the real
     // Electron/Chromium canvas pipeline draws correctly (that needs a real

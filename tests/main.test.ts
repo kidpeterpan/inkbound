@@ -2228,7 +2228,7 @@ describe("mobile export path (008-mobile-support)", () => {
 });
 
 // 008-mobile-support: documents the code path that makes the empty-basePath
-// case in render.ts's rewriteImages the NORMAL one rather than an exotic one.
+// case in render-links.ts's rewriteImages the NORMAL one rather than an exotic one.
 // Mobile's vault adapter is not a FileSystemAdapter, so main.ts has no base
 // path to hand the renderer.
 describe("basePath on a non-FileSystemAdapter vault (008-mobile-support)", () => {

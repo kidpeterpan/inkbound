@@ -174,8 +174,12 @@ describe("the pure/adapter module boundary", () => {
     // Guards the parser itself: the assertions above are silent if
     // IMPORT_SPECIFIER stops matching the shapes the code actually uses.
     expect(importedSpecifiers("main.ts")).toContain("obsidian"); // multi-line from
-    expect(importedSpecifiers("core/render.ts")).not.toContain("obsidian");
-    expect(importedSpecifiers("core/render.ts").length).toBe(0);
+    // A zero-import module: error-text.ts is a leaf by construction (it exists
+    // to be the one shared string coercion). render.ts used to be this
+    // exemplar; it is now a re-export facade, so the "no imports at all" case
+    // needs a module that still has none.
+    expect(importedSpecifiers("core/error-text.ts")).not.toContain("obsidian");
+    expect(importedSpecifiers("core/error-text.ts").length).toBe(0);
     expect(importedSpecifiers("adapters/render-adapter.ts")).toContain("obsidian");
     // Dynamic import: adapters/output-adapter.ts does `await import("fs")`.
     expect(importedSpecifiers("adapters/output-adapter.ts")).toContain("fs");
