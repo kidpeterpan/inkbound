@@ -3,6 +3,22 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.7
+
+No change to exported books — this release is internal structure work.
+
+- **The `(referenced by X)` warning-attribution suffix is one function, not
+  four independent copies.** `core/footnotes.ts`, `core/chapter-assets.ts`,
+  `core/math.ts`, and `adapters/render-adapter.ts` each re-derived the same
+  string template at 12+ call sites; they now all go through a single
+  `attributedTo` helper in `core/error-text.ts`.
+- **`render-adapter.ts`'s embed-recursion functions take one `EmbedContext`
+  instead of repeating the same three arguments.** `populateEmbeds`,
+  `expandOneWrapper`, and `expandMarkdownEmbed` each took `sourcePath`,
+  `startIndex`, and `visited` as separate positional parameters (5-7 args per
+  call); those three travel together across every recursion level and are now
+  one object, mirroring the existing `EmbedPipeline` grouping.
+
 ## 1.10.6
 
 No change to exported books — this release is internal structure work.
