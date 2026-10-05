@@ -34,7 +34,7 @@ import { liteAdaptor } from "mathjax-full/js/adaptors/liteAdaptor.js";
 import { RegisterHTMLHandler } from "mathjax-full/js/handlers/html.js";
 import { AllPackages } from "mathjax-full/js/input/tex/AllPackages.js";
 import { getSvgRasterizer, rasterizeOrNull } from "./render";
-import { errorMessage } from "./error-text";
+import { attributedTo, errorMessage } from "./error-text";
 
 // One shared headless document: convert() creates a fresh math tree per
 // call, and output is deterministic (verified: byte-identical repeats).
@@ -244,13 +244,15 @@ function keepMathSourceText(
   span: MathSpan,
   reason: "charset" | "error" | undefined,
   detail: string | undefined,
-  sourcePath: string
+  attribute: (message: string) => string
 ): string {
   const source = span.display ? `$$${span.tex}$$` : `$${span.tex}$`;
   placeholder.replaceWith(createTextNodeSafe(source));
-  return reason === "error"
-    ? `math could not be rendered: ${span.tex} — ${detail ?? "unknown error"} — kept as source text (referenced by ${sourcePath})`
-    : `math contains non-Latin characters that cannot be rendered — kept as source text (referenced by ${sourcePath})`;
+  return attribute(
+    reason === "error"
+      ? `math could not be rendered: ${span.tex} — ${detail ?? "unknown error"} — kept as source text`
+      : `math contains non-Latin characters that cannot be rendered — kept as source text`
+  );
 }
 
 // Replaces the placeholder with the rasterized PNG — inside a block <p> for
@@ -297,13 +299,12 @@ export async function renderMath(
   const images: RenderedMathImage[] = [];
   const warnings: string[] = [];
   let warnedFallback = false;
+  const attribute = attributedTo(sourcePath);
 
   for (const span of spans) {
     const placeholder = root.querySelector(`[data-inkbound-math="${span.index}"]`);
     if (!placeholder) {
-      warnings.push(
-        `math placeholder ${span.index} missing after render — expression skipped (referenced by ${sourcePath})`
-      );
+      warnings.push(attribute(`math placeholder ${span.index} missing after render — expression skipped`));
       continue;
     }
 
@@ -311,18 +312,18 @@ export async function renderMath(
 
     // Nothing to typeset (unrenderable charset, or MathJax itself threw).
     if (!ok && svg === "") {
-      warnings.push(keepMathSourceText(placeholder, span, reason, detail, sourcePath));
+      warnings.push(keepMathSourceText(placeholder, span, reason, detail, attribute));
       continue;
     }
 
     if (!ok) {
-      warnings.push(`math could not be rendered: ${span.tex} (referenced by ${sourcePath})`);
+      warnings.push(attribute(`math could not be rendered: ${span.tex}`));
     }
 
     const svgEl = svgStringToElement(svg);
     if (!svgEl) {
       placeholder.remove();
-      warnings.push(`math SVG could not be parsed — expression removed (referenced by ${sourcePath})`);
+      warnings.push(attribute(`math SVG could not be parsed — expression removed`));
       continue;
     }
     normalizeMathSvg(svgEl);

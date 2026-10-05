@@ -19,6 +19,8 @@
 //   - the DOM half (`processFootnotes`) rewrites what survived, and degrades defensively
 //     if a renderer ever does hand it an orphan.
 
+import { attributedTo } from "./error-text";
+
 export interface FootnoteSourceScan {
   orphanRefs: string[];
   unusedDefs: string[];
@@ -134,13 +136,13 @@ export function scanFootnoteSource(markdown: string): FootnoteSourceScan {
 // One warning per label, orphans first, each naming the note whose source holds the
 // problem — worded like the pipeline's other per-note warnings.
 export function footnoteSourceWarnings(scan: FootnoteSourceScan, sourcePath: string): string[] {
+  const attribute = attributedTo(sourcePath);
   return [
-    ...scan.orphanRefs.map(
-      (label) => `Footnote [^${label}] is referenced but has no matching note (referenced by ${sourcePath})`
+    ...scan.orphanRefs.map((label) =>
+      attribute(`Footnote [^${label}] is referenced but has no matching note`)
     ),
-    ...scan.unusedDefs.map(
-      (label) =>
-        `Footnote note [^${label}] is never referenced and was left out (referenced by ${sourcePath})`
+    ...scan.unusedDefs.map((label) =>
+      attribute(`Footnote note [^${label}] is never referenced and was left out`)
     ),
   ];
 }
