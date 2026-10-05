@@ -118,7 +118,7 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
     notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
     const adapter = deps.app.vault.adapter;
     // "" on mobile: the mobile vault adapter is not a FileSystemAdapter and
-    // has no filesystem base path to give. rewriteImages in render.ts has an
+    // has no filesystem base path to give. rewriteImages in render-links.ts has an
     // explicit empty-basePath guard because of this — see the invariant
     // comment there before assuming "" is an impossible or harmless value.
     const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
@@ -265,7 +265,7 @@ function backlinkDecorator(
       const source = fileByPath.get(path);
       const href = hrefByPath.get(path);
       // Chapters live side by side in text/, so link by filename only
-      // (same convention as rewriteLinks in render.ts).
+      // (same convention as rewriteLinks in render-links.ts).
       return source && href ? [{ title: deps.titleFor(source), href: href.replace(/^text\//, "") }] : [];
     });
     const fragment = renderBacklinksFragment(entries);

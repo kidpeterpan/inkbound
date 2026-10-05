@@ -126,17 +126,17 @@ if (typeof Node !== "undefined" && !("createSpan" in Node.prototype)) {
 // `createFragment` as bare AMBIENT GLOBAL FUNCTIONS (inside a
 // `declare global { ... }` block, not the `interface Node` augmentation) —
 // the real Obsidian app installs both forms before plugin code runs.
-// src/core/render.ts (a pure module with ZERO "obsidian" imports, so it can't
-// reference the Node.prototype method's `this` and can't import a value from
-// "obsidian" either) calls the bare global form directly for its
-// plain-HTML-element sites. jsdom has neither form, so both need polyfilling
-// for tests to exercise those call sites.
+// The src/core/render-*.ts modules (a pure library with ZERO "obsidian"
+// imports, so they can't reference the Node.prototype method's `this` and
+// can't import a value from "obsidian" either) call the bare global form
+// directly for their plain-HTML-element sites. jsdom has neither form, so
+// both need polyfilling for tests to exercise those call sites.
 //
 // CRITICAL DIFFERENCE from the Node.prototype method: the real bare global
 // does NOT append the created element to any parent — it only creates and
 // (optionally) configures it, leaving placement entirely to the caller.
 // Getting this wrong (e.g. copy-pasting the Node.prototype body including its
-// `appendChild`) would silently change DOM structure for every render.ts call
+// `appendChild`) would silently change DOM structure for every render-module call
 // site; asserted directly in tests/render.test.ts ("global createEl does not
 // append to any parent").
 if (typeof (globalThis as { createEl?: unknown }).createEl === "undefined") {
@@ -153,7 +153,7 @@ if (typeof (globalThis as { createEl?: unknown }).createEl === "undefined") {
 }
 
 // Bare-global createDiv/createSpan — same no-append contract as the global
-// createEl above (the real app installs both forms; render.ts calls the
+// createEl above (the real app installs both forms; the render modules call the
 // shortcut form because the plugin-review lint prefers it).
 if (typeof (globalThis as { createDiv?: unknown }).createDiv === "undefined") {
   (globalThis as { createDiv?: unknown }).createDiv = function createDiv(
@@ -841,7 +841,7 @@ function transformLine(line: string, app: RenderApp, sourcePath: string, basePat
         }
       } else {
         // Note-to-note embed: real Obsidian synchronously renders a wrapper
-        // carrying the authoritative linktext on `src` (see render.ts's
+        // carrying the authoritative linktext on `src` (see render-embeds.ts's
         // "Note-embed hardening" comment — confirmed via live console
         // diagnostics inside a real export run, 2026-07-31):
         //   <span alt src class="internal-embed markdown-embed inline-embed">

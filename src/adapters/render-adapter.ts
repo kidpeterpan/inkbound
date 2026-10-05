@@ -109,18 +109,24 @@ function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] 
 // guards (see render.ts) mean an already-finalized nested region is safely
 // skipped when a shallower pass later scans over it.
 
+// The chapter-wide math accumulator (005-latex-math): placeholder indices stay
+// unique across the host note and every embed it pulls in, so a single
+// renderMath pass over the final DOM can resolve them all. Shared by reference
+// between the chapter build and every embed expansion below.
+interface MathSink {
+  counter: { next: number };
+  spans: MathSpan[];
+}
+
 // State threaded through an embed expansion that does not change between
 // recursion levels: the Obsidian runtime, the chapter's link/image bookkeeping,
-// and the chapter-wide math accumulator (005-latex-math: placeholder indices
-// stay unique across the host note and every embed it pulls in, so a single
-// renderMath pass over the final DOM can resolve them all).
+// and the shared math accumulator.
 interface EmbedPipeline {
   app: App;
   component: Component;
   hrefByPath: Map<string, string>;
   basePath: string;
-  mathCounter: { next: number };
-  mathSpans: MathSpan[];
+  math: MathSink;
 }
 
 interface EmbeddedImage {
@@ -288,6 +294,54 @@ function offsetMathPlaceholderIndices(md: string, offset: number): string {
   );
 }
 
+// The vault-path resolver rewriteLinks needs, bound to the note a run of DOM
+// came from: a chapter's own path for its body, an embedded note's path for
+// that note's contents.
+function vaultLinkResolver(app: App, sourcePath: string): (linkpath: string) => string | null {
+  return (linkpath) => {
+    const f = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
+    return f instanceof TFile ? f.path : null;
+  };
+}
+
+// Adds `md`'s math spans to the chapter accumulator and returns the markdown to
+// render with its placeholders re-keyed chapter-uniquely. The host note seeds
+// the accumulator (offset 0, markdown returned unchanged); each embed appends
+// at the counter's current value, because protectMath numbers every render
+// from 0 and only the shared sink can keep the indices unique (005-latex-math).
+function protectIntoChapter(md: string, sink: MathSink): string {
+  const protectedMd = protectMath(md);
+  const offset = sink.counter.next;
+  sink.spans.push(
+    ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
+  );
+  sink.counter.next += protectedMd.spans.length;
+  return offset === 0 ? protectedMd.md : offsetMathPlaceholderIndices(protectedMd.md, offset);
+}
+
+// Finalises one run of rendered DOM: wikilinks become chapter hrefs, images
+// become numbered hrefs continuing the caller's count, and warnings are
+// attributed to the note whose content produced them. Returns the images tagged
+// for that note.
+function finalizeLinksAndImages(
+  root: HTMLElement,
+  sourcePath: string,
+  startImageIndex: number,
+  pipeline: EmbedPipeline,
+  warnings: string[]
+): EmbeddedImage[] {
+  rewriteLinks(root, pipeline.hrefByPath, vaultLinkResolver(pipeline.app, sourcePath));
+  const found = rewriteImages(root, pipeline.basePath, startImageIndex, (w) =>
+    warnings.push(`${w} (referenced by ${sourcePath})`)
+  );
+  // Tagged with the note the image came from — a relative (non-app://) image
+  // reference inside embed content must resolve against that note, not the host
+  // chapter (FR-006), and this is the only point that still has that context
+  // before it flows into main.ts. A chapter's OWN images stay untagged
+  // (sourcePath absent = resolve against the chapter file).
+  return found.map((f) => ({ ...f, sourcePath }));
+}
+
 // Renders `dest` into the wrapper's own copy and finalises its links and
 // images. On any failure the wrapper is marked "render-failed", the
 // partially-built content is discarded, and the caller's image numbering does
@@ -302,7 +356,7 @@ async function expandMarkdownEmbed(
   pipeline: EmbedPipeline
 ): Promise<EmbedExpansion> {
   const warnings: string[] = [];
-  const spansBefore = pipeline.mathSpans.length;
+  const spansBefore = pipeline.math.spans.length;
   try {
     const rawMd = await pipeline.app.vault.cachedRead(dest);
     const source = embedSource(pipeline.app, dest, target, rawMd);
@@ -319,18 +373,9 @@ async function expandMarkdownEmbed(
 
     const ourDiv = wrapper.createDiv();
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
-    // 005-latex-math: protect math in the embed's source the same way the
-    // host note is protected, with chapter-unique placeholder indices
-    // re-keyed against the shared counter (protectMath numbers from 0).
-    const protectedMd = protectMath(source.md);
-    const offset = pipeline.mathCounter.next;
-    pipeline.mathSpans.push(
-      ...protectedMd.spans.map((s) => ({ tex: s.tex, display: s.display, index: s.index + offset }))
-    );
-    pipeline.mathCounter.next += protectedMd.spans.length;
     await MarkdownRenderer.render(
       pipeline.app,
-      offsetMathPlaceholderIndices(protectedMd.md, offset),
+      protectIntoChapter(source.md, pipeline.math),
       ourDiv,
       dest.path,
       pipeline.component
@@ -341,28 +386,20 @@ async function expandMarkdownEmbed(
     const child = await populateEmbeds(ourDiv, dest.path, startIndex, childVisited, pipeline);
     warnings.push(...child.warnings);
 
-    const resolve = (linkpath: string): string | null => {
-      const f = pipeline.app.metadataCache.getFirstLinkpathDest(linkpath, dest.path);
-      return f instanceof TFile ? f.path : null;
-    };
-    rewriteLinks(ourDiv, pipeline.hrefByPath, resolve);
-    const found = rewriteImages(ourDiv, pipeline.basePath, startIndex + child.images.length, (w) =>
-      warnings.push(`${w} (referenced by ${dest.path})`)
+    const found = finalizeLinksAndImages(
+      ourDiv,
+      dest.path,
+      startIndex + child.images.length,
+      pipeline,
+      warnings
     );
-    // Tagged with the embed's own resolved path — a relative (non-app://)
-    // image reference inside this embed's content must resolve against the
-    // note it came from, not the host chapter (FR-006), and this is the only
-    // point that still has that context before it flows into main.ts.
-    return {
-      warnings,
-      images: [...child.images, ...found.map((f) => ({ ...f, sourcePath: dest.path }))],
-    };
+    return { warnings, images: [...child.images, ...found] };
   } catch (e) {
     wrapper.querySelector(`:scope > [${EMBED_RENDERED_ATTR}]`)?.remove();
     // The div is gone, so the image hrefs and math placeholders stamped into
     // it no longer exist and must not be counted. The counter itself is not
     // rolled back: placeholder indices only need to be unique, not dense.
-    pipeline.mathSpans.length = spansBefore;
+    pipeline.math.spans.length = spansBefore;
     wrapper.setAttribute("data-embed-reason", "render-failed");
     wrapper.setAttribute("data-embed-detail", errorMessage(e));
     return { warnings, images: [] };
@@ -387,6 +424,100 @@ export interface ChapterRender {
   toc: TocEntry[];
 }
 
+// Mutable state for one chapter's build, threaded through the finalisation
+// phases below. The image counter is load-bearing: every phase stamps image
+// hrefs into the DOM in pipeline order and continues the previous phase's
+// numbering (see the invariant comment on `renderUnitToChapter`).
+interface ChapterBuild {
+  warnings: string[];
+  images: ChapterImage[];
+  nextImageNumber: number;
+  math: MathSink;
+}
+
+// Phase 1 — steps 2-4 of the pipeline: render the note, render our own copy
+// of every embed, then clean the DOM.
+async function renderChapterDom(
+  build: ChapterBuild,
+  el: HTMLElement,
+  pipeline: EmbedPipeline,
+  protectedMd: string,
+  sourcePath: string
+): Promise<void> {
+  await MarkdownRenderer.render(pipeline.app, protectedMd, el, sourcePath, pipeline.component);
+  // Render our own copy of every embedded note's content BEFORE cleanupDom's
+  // flattenEmbeds replaces the embed wrappers (with our copy, or with the
+  // placeholder) and that structure is lost. Obsidian's own async embed
+  // population is never consulted — see populateEmbeds' comment.
+  const embedRewrite = await populateEmbeds(
+    el,
+    sourcePath,
+    build.nextImageNumber,
+    new Set([sourcePath]),
+    pipeline
+  );
+  build.warnings.push(...embedRewrite.warnings);
+  build.images.push(...embedRewrite.images);
+  build.nextImageNumber += embedRewrite.images.length;
+
+  build.warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
+}
+
+// Phase 2 — steps 5-6: wikilinks and images. Only touches whatever cleanupDom
+// left — embed-internal links/images were already finalized above and are
+// skipped here (idempotence guards).
+function finalizeChapterLinks(
+  build: ChapterBuild,
+  el: HTMLElement,
+  pipeline: EmbedPipeline,
+  sourcePath: string
+): void {
+  rewriteLinks(el, pipeline.hrefByPath, vaultLinkResolver(pipeline.app, sourcePath));
+  const images = rewriteImages(el, pipeline.basePath, build.nextImageNumber, (w) =>
+    build.warnings.push(`${w} (referenced by ${sourcePath})`)
+  );
+  build.images.push(...images);
+  build.nextImageNumber += images.length;
+}
+
+// Phase 3 — steps 7-8: Mermaid diagrams and math expressions. Both continue the
+// running image counter so no two images ever collide (see the chapter/image
+// href numbering invariant in CLAUDE.md).
+async function finalizeChapterMedia(build: ChapterBuild, el: HTMLElement, sourcePath: string): Promise<void> {
+  // Composes with rewriteImages's numbering: mermaid PNGs continue where the
+  // regular images left off, so this MUST run after finalizeChapterLinks.
+  const mermaid = await rasterizeMermaidDiagrams(el, build.nextImageNumber);
+  build.warnings.push(...mermaid.warnings);
+  build.images.push(...mermaid.images);
+  build.nextImageNumber += mermaid.images.length;
+
+  const math = await renderMath(el, build.math.spans, build.nextImageNumber, sourcePath);
+  build.warnings.push(...math.warnings);
+  build.images.push(...math.images);
+}
+
+// Phase 4 — steps 9-10: footnotes, then the heading TOC. The POSITION is
+// load-bearing (research R9):
+//   - after cleanupDom's flattenEmbeds, so each embed's own `section.footnotes`
+//     (one per render, each numbered from 1) is already in this DOM;
+//   - after rewriteLinks / rewriteImages / renderMath, so a link, image or
+//     expression INSIDE a note is processed as body content before the note is
+//     moved;
+//   - before collectHeadingToc, so heading text can exclude markers and heading
+//     ids can avoid the footnote ids minted here.
+// Moving nodes does not disturb the image-href numbering invariant (main.ts's
+// imageCount): numbers are stamped into `src` attributes, not derived from
+// position. A chapter with no footnotes is returned untouched (FR-023).
+function finalizeChapterFootnotes(build: ChapterBuild, el: HTMLElement, tocDepth: number): TocEntry[] {
+  build.warnings.push(...processFootnotes(el));
+  // Depth-0 identity (FR-006): collectHeadingToc is NOT called at all when
+  // tocDepth is 0, so no ids are stamped and the serialized body is
+  // byte-identical to pre-feature output. It runs after embeds are flattened
+  // (flattenEmbeds inside cleanupDom), so headings from inlined note embeds
+  // are legitimately part of this chapter's toc (research R5).
+  return tocDepth > 0 ? collectHeadingToc(el, tocDepth) : [];
+}
+
 /**
  * Turns one note's markdown into a chapter: rendered XHTML, the images it
  * needs, its warnings, and its heading TOC.
@@ -395,22 +526,22 @@ export interface ChapterRender {
  * order-sensitive in ways that are not obvious from the calls alone:
  *
  *   1. protectMath             — placeholders in, before any renderer sees $…$
- *   2. MarkdownRenderer.render — the real renderer, once per note
- *   3. populateEmbeds          — our own copy of every embedded note
- *   4. cleanupDom              — flattenEmbeds + renderer chrome + Bases
- *   5. rewriteLinks            — wikilinks -> sibling chapter hrefs
- *   6. rewriteImages           — vault images -> numbered ../images/img_NNN
- *   7. rasterizeMermaidDiagrams— Mermaid -> PNG
- *   8. renderMath              — placeholders -> PNG
- *   9. processFootnotes        — every note -> one EPUB 3 notes section
- *  10. collectHeadingToc       — heading ids + nav entries (skipped at depth 0)
- *  11. serializeBody           — the finished XHTML
+ *   2. MarkdownRenderer.render — the real renderer, once per note      ┐
+ *   3. populateEmbeds          — our own copy of every embedded note   ├ renderChapterDom
+ *   4. cleanupDom              — flattenEmbeds + chrome + Bases        ┘
+ *   5. rewriteLinks            — wikilinks -> sibling chapter hrefs    ┐ finalizeChapterLinks
+ *   6. rewriteImages           — vault images -> numbered ../images/…  ┘
+ *   7. rasterizeMermaidDiagrams— Mermaid -> PNG                        ┐ finalizeChapterMedia
+ *   8. renderMath              — placeholders -> PNG                   ┘
+ *   9. processFootnotes        — every note -> one EPUB 3 notes area   ┐ finalizeChapterFootnotes
+ *  10. collectHeadingToc       — heading ids + nav entries (depth > 0) ┘
+ *  11. serializeBody           — the finished XHTML (below)
  *
  * The load-bearing constraints: footnotes must run AFTER flattenEmbeds (each
  * embed brings its own `section.footnotes` into the DOM) and BEFORE heading
  * ids (so heading text can exclude markers and ids can avoid the footnote
  * ids). Steps 3-8 all stamp `<img>` hrefs into the chapter, so they share ONE
- * running image counter, advanced in step order — see `nextImageNumber` below.
+ * running image counter (ChapterBuild.nextImageNumber), advanced in step order.
  */
 export async function renderUnitToChapter(
   app: App,
@@ -422,18 +553,22 @@ export async function renderUnitToChapter(
   startImageIndex: number,
   tocDepth = 0
 ): Promise<ChapterRender> {
-  const warnings: string[] = [];
+  const build: ChapterBuild = {
+    warnings: [],
+    images: [],
+    nextImageNumber: startImageIndex,
+    math: { counter: { next: 0 }, spans: [] },
+  };
   const md = stripDynamicBlocks(stripFrontmatter(markdown));
   // 011-footnote-semantics: orphan footnotes in the host note itself. See the matching call
   // in populateEmbeds for why this reads the source rather than the rendered DOM.
-  warnings.push(...footnoteSourceWarnings(scanFootnoteSource(md), sourcePath));
+  build.warnings.push(...footnoteSourceWarnings(scanFootnoteSource(md), sourcePath));
   // 005-latex-math: swap math for placeholders BEFORE rendering, so neither
   // the real renderer's MathJax output nor the stub's raw $...$ text leaks
-  // into the DOM. Indices stay chapter-unique via mathCounter as embeds
+  // into the DOM. Indices stay chapter-unique via the shared sink as embeds
   // add their own spans.
-  const protectedMd = protectMath(md);
-  const mathCounter = { next: protectedMd.spans.length };
-  const mathSpans: MathSpan[] = [...protectedMd.spans];
+  const protectedMd = protectIntoChapter(md, build.math);
+  const pipeline: EmbedPipeline = { app, component, hrefByPath, basePath, math: build.math };
   // Obsidian's createEl (ambient Node.prototype augmentation installed by the
   // real app before plugin code runs — see tests/fixtures/obsidian-stub.ts's
   // polyfill of the same) both creates the element and appends it to `this`
@@ -443,76 +578,14 @@ export async function renderUnitToChapter(
     // Every image this chapter ends up with — embed content, regular images,
     // rasterized Mermaid, rendered math — becomes an
     // `<img src="../images/img_NNN.ext">` in the SAME chapter, so all four are
-    // numbered from one running counter. Each stage advances it by however many
-    // images it stamped; no stage recomputes the sum, so inserting a stage
+    // numbered from one running counter. Each phase advances it by however many
+    // images it stamped; no phase recomputes the sum, so inserting a phase
     // cannot leave a later one reusing a number already burned into the HTML.
-    let nextImageNumber = startImageIndex;
-
-    await MarkdownRenderer.render(app, protectedMd.md, el, sourcePath, component);
-    // Render our own copy of every embedded note's content BEFORE cleanupDom's
-    // flattenEmbeds replaces the embed wrappers (with our copy, or with the
-    // placeholder) and that structure is lost. Obsidian's own async embed
-    // population is never consulted — see populateEmbeds' comment.
-    const embedRewrite = await populateEmbeds(el, sourcePath, nextImageNumber, new Set([sourcePath]), {
-      app,
-      component,
-      hrefByPath,
-      basePath,
-      mathCounter,
-      mathSpans,
-    });
-    warnings.push(...embedRewrite.warnings);
-    nextImageNumber += embedRewrite.images.length;
-
-    warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
-    const resolve = (linkpath: string): string | null => {
-      const f = app.metadataCache.getFirstLinkpathDest(linkpath, sourcePath);
-      return f instanceof TFile ? f.path : null;
-    };
-    // Only touches whatever's left — embed-internal links/images were
-    // already finalized above and are skipped here (idempotence guards).
-    rewriteLinks(el, hrefByPath, resolve);
-    const images = rewriteImages(el, basePath, nextImageNumber, (w) =>
-      warnings.push(`${w} (referenced by ${sourcePath})`)
-    );
-    nextImageNumber += images.length;
-
-    // Composes with rewriteImages's numbering: mermaid PNGs continue where
-    // the regular images left off, so run this AFTER rewriteImages.
-    const mermaid = await rasterizeMermaidDiagrams(el, nextImageNumber);
-    warnings.push(...mermaid.warnings);
-    nextImageNumber += mermaid.images.length;
-
-    // 005-latex-math: math PNGs continue where mermaid's left off — all four
-    // sources share the one counter above so no two images ever collide (see
-    // the chapter/image href numbering invariant in CLAUDE.md).
-    const math = await renderMath(el, mathSpans, nextImageNumber, sourcePath);
-    warnings.push(...math.warnings);
-    // 011-footnote-semantics: gather every note in the chapter into one section of EPUB 3
-    // footnotes. The POSITION is load-bearing (research R9):
-    //   - after cleanupDom's flattenEmbeds, so each embed's own `section.footnotes` (one
-    //     per render, each numbered from 1) is already in this DOM;
-    //   - after rewriteLinks / rewriteImages / renderMath, so a link, image or expression
-    //     INSIDE a note is processed as body content before the note is moved;
-    //   - before collectHeadingToc, so heading text can exclude markers and heading ids
-    //     can avoid the footnote ids minted here.
-    // Moving nodes does not disturb the image-href numbering invariant (main.ts's
-    // imageCount): numbers are stamped into `src` attributes above, not derived from
-    // position. A chapter with no footnotes is returned untouched (FR-023).
-    warnings.push(...processFootnotes(el));
-    // Depth-0 identity (FR-006): collectHeadingToc is NOT called at all when
-    // tocDepth is 0, so no ids are stamped and the serialized body is
-    // byte-identical to pre-feature output. It runs after embeds are
-    // flattened (flattenEmbeds inside cleanupDom), so headings from inlined
-    // note embeds are legitimately part of this chapter's toc (research R5).
-    const toc = tocDepth > 0 ? collectHeadingToc(el, tocDepth) : [];
-    const xhtmlBody = serializeBody(el);
-    return {
-      xhtmlBody,
-      images: [...embedRewrite.images, ...images, ...mermaid.images, ...math.images],
-      warnings,
-      toc,
-    };
+    await renderChapterDom(build, el, pipeline, protectedMd, sourcePath);
+    finalizeChapterLinks(build, el, pipeline, sourcePath);
+    await finalizeChapterMedia(build, el, sourcePath);
+    const toc = finalizeChapterFootnotes(build, el, tocDepth);
+    return { xhtmlBody: serializeBody(el), images: build.images, warnings: build.warnings, toc };
   } finally {
     el.remove();
   }

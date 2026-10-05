@@ -111,7 +111,7 @@ the fixture diff, and read that test's failures as the new manual checklist:
 - The `app://` image-`src` branch (images Obsidian serves through an
   `app://` URL rather than a plain vault-relative path). The fixtures replace
   the vault's absolute path with `/VAULT`, so they carry no home directory.
-- The `CHROME_SELECTORS` cleanup list in `src/core/render.ts`, as far as
+- The `CHROME_SELECTORS` cleanup list in `src/core/render-dom.ts`, as far as
   `MarkdownRenderer` can show it: the code-block copy button is proven
   present and removed. The frontmatter selectors never fire in production
   (`stripFrontmatter` runs on the markdown first) and the collapse, pusher
