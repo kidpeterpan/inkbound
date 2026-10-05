@@ -3,7 +3,7 @@
 // here so the "one bad image costs one warning, never the chapter" rule can be
 // tested with a fake vault instead of the obsidian stub.
 import { mediaTypeForExt } from "./media-types";
-import { errorMessage } from "./error-text";
+import { attributedTo, errorMessage } from "./error-text";
 import type { ChapterImage } from "./types";
 
 // What resolving an image needs from the vault. `F` is whatever the caller
@@ -23,6 +23,7 @@ export async function resolveChapterAssets<F>(
   addAsset: (href: string, bytes: Uint8Array, mediaType: string) => void,
   warn: (message: string) => void
 ): Promise<void> {
+  const attribute = attributedTo(chapterPath);
   for (const img of images) {
     // Chapters live in text/, images in images/, so newHref is "../images/…";
     // the archive path the builder wants has no leading "../".
@@ -49,7 +50,7 @@ export async function resolveChapterAssets<F>(
         // Outside the allowlist (e.g. .bmp/.tiff/.avif/.md): embedding it
         // would mislabel the asset and epubcheck flags malformed images /
         // non-core media types. Skip, don't embed.
-        warn(`unsupported image type: ${img.vaultPath} (referenced by ${chapterPath})`);
+        warn(attribute(`unsupported image type: ${img.vaultPath}`));
         continue;
       }
       addAsset(assetHref, new Uint8Array(await vault.read(file)), mediaType);
@@ -58,9 +59,11 @@ export async function resolveChapterAssets<F>(
       // image's href stays dangling in the chapter HTML, but the chapter
       // itself is still added by the caller.
       warn(
-        img.bytes
-          ? `image could not be added: ${img.newHref} — ${errorMessage(e)} (referenced by ${chapterPath})`
-          : `missing image: ${img.vaultPath} (referenced by ${chapterPath})`
+        attribute(
+          img.bytes
+            ? `image could not be added: ${img.newHref} — ${errorMessage(e)}`
+            : `missing image: ${img.vaultPath}`
+        )
       );
     }
   }

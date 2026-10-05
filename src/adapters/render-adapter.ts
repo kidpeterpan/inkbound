@@ -5,7 +5,6 @@
 // declarations only, no runtime JS (node_modules/obsidian/package.json has
 // "main": ""). MarkdownRenderer.render(...) and `instanceof TFile` are real
 // VALUE usages, not just type positions, so that import can't be elided —
-import { errorMessage } from "../core/error-text";
 // bundling it into render.ts would make Vite try to eagerly resolve the
 // "obsidian" package the moment anything in render.ts is loaded, which
 // breaks every pure-function test in tests/render.test.ts (verified: it
@@ -13,6 +12,7 @@ import { errorMessage } from "../core/error-text";
 // adapter out mirrors the same fix already applied to settings.ts/
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
+import { attributedTo, errorMessage } from "../core/error-text";
 import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "../core/footnotes";
 import type { ChapterImage } from "../core/types";
 import {
@@ -140,19 +140,30 @@ interface EmbedExpansion {
   images: EmbeddedImage[];
 }
 
+// Per-recursion-level state for one embed expansion: the note the current
+// content came from, the running image-number counter continuing the
+// caller's count, and the set of note paths already expanded along THIS
+// chain (the cycle guard — see the "Recursion + cycle safety" note above).
+// Bundled together because populateEmbeds/expandOneWrapper/expandMarkdownEmbed
+// all three change it together one recursion level at a time; EmbedPipeline
+// stays a separate parameter because its fields DON'T change across levels.
+interface EmbedContext {
+  sourcePath: string;
+  startIndex: number;
+  visited: ReadonlySet<string>;
+}
+
 async function populateEmbeds(
   container: HTMLElement,
-  sourcePath: string,
-  startIndex: number,
-  visited: ReadonlySet<string>,
+  context: EmbedContext,
   pipeline: EmbedPipeline
 ): Promise<EmbedExpansion> {
   const warnings: string[] = [];
   const images: EmbeddedImage[] = [];
-  let index = startIndex;
+  let index = context.startIndex;
 
   for (const wrapper of topLevelEmbedWrappers(container)) {
-    const expanded = await expandOneWrapper(wrapper, sourcePath, index, visited, pipeline);
+    const expanded = await expandOneWrapper(wrapper, { ...context, startIndex: index }, pipeline);
     warnings.push(...expanded.warnings);
     images.push(...expanded.images);
     index += expanded.images.length;
@@ -167,26 +178,24 @@ async function populateEmbeds(
 // and images (both empty when it was skipped or degraded in place).
 async function expandOneWrapper(
   wrapper: HTMLElement,
-  sourcePath: string,
-  startIndex: number,
-  visited: ReadonlySet<string>,
+  context: EmbedContext,
   pipeline: EmbedPipeline
 ): Promise<EmbedExpansion> {
   const src = (wrapper.getAttribute("src") ?? "").trim();
   if (!src || isImageEmbedSrc(src)) return { warnings: [], images: [] }; // image embed: rewriteImages' job
 
   const target = splitEmbedTarget(src);
-  const dest = pipeline.app.metadataCache.getFirstLinkpathDest(target.linkpath, sourcePath);
+  const dest = pipeline.app.metadataCache.getFirstLinkpathDest(target.linkpath, context.sourcePath);
   if (!(dest instanceof TFile)) {
     wrapper.setAttribute("data-embed-reason", "unresolved");
     return { warnings: [], images: [] };
   }
-  if (dest.extension === "base") return attachBaseTable(wrapper, src, sourcePath, pipeline);
+  if (dest.extension === "base") return attachBaseTable(wrapper, src, context.sourcePath, pipeline);
   if (dest.extension !== "md") {
     wrapper.setAttribute("data-embed-reason", "unsupported-type");
     return { warnings: [], images: [] };
   }
-  if (visited.has(dest.path)) {
+  if (context.visited.has(dest.path)) {
     // Runs before any heading/block lookup, so a scoped embed targeting a
     // note already in the current chain (including itself) degrades as
     // circular the same way a whole-note embed would — no separate
@@ -200,7 +209,7 @@ async function expandOneWrapper(
   // expandMarkdownEmbed catches that, so it costs this one embed and never
   // the host chapter; on failure nothing is added to `images`, so the next
   // wrapper still numbers its own from `index`.
-  return expandMarkdownEmbed(wrapper, dest, target, sourcePath, startIndex, visited, pipeline);
+  return expandMarkdownEmbed(wrapper, dest, target, context, pipeline);
 }
 
 // A .base embed whose table view rendered becomes a stamped div; anything else
@@ -226,7 +235,7 @@ async function attachBaseTable(
   const ourDiv = wrapper.createDiv();
   ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
   ourDiv.appendChild(base.table);
-  const warnings = base.warning ? [`${base.warning}: ${src} (referenced by ${sourcePath})`] : [];
+  const warnings = base.warning ? [attributedTo(sourcePath)(`${base.warning}: ${src}`)] : [];
   return { warnings, images: [] };
 }
 
@@ -332,7 +341,7 @@ function finalizeLinksAndImages(
 ): EmbeddedImage[] {
   rewriteLinks(root, pipeline.hrefByPath, vaultLinkResolver(pipeline.app, sourcePath));
   const found = rewriteImages(root, pipeline.basePath, startImageIndex, (w) =>
-    warnings.push(`${w} (referenced by ${sourcePath})`)
+    warnings.push(attributedTo(sourcePath)(w))
   );
   // Tagged with the note the image came from — a relative (non-app://) image
   // reference inside embed content must resolve against that note, not the host
@@ -350,9 +359,7 @@ async function expandMarkdownEmbed(
   wrapper: HTMLElement,
   dest: TFile,
   target: EmbedTarget,
-  sourcePath: string,
-  startIndex: number,
-  visited: ReadonlySet<string>,
+  context: EmbedContext,
   pipeline: EmbedPipeline
 ): Promise<EmbedExpansion> {
   const warnings: string[] = [];
@@ -381,15 +388,20 @@ async function expandMarkdownEmbed(
       pipeline.component
     );
 
-    const childVisited = new Set(visited);
+    const childVisited = new Set(context.visited);
     childVisited.add(dest.path);
-    const child = await populateEmbeds(ourDiv, dest.path, startIndex, childVisited, pipeline);
+    const childContext: EmbedContext = {
+      sourcePath: dest.path,
+      startIndex: context.startIndex,
+      visited: childVisited,
+    };
+    const child = await populateEmbeds(ourDiv, childContext, pipeline);
     warnings.push(...child.warnings);
 
     const found = finalizeLinksAndImages(
       ourDiv,
       dest.path,
-      startIndex + child.images.length,
+      context.startIndex + child.images.length,
       pipeline,
       warnings
     );
@@ -451,16 +463,14 @@ async function renderChapterDom(
   // population is never consulted — see populateEmbeds' comment.
   const embedRewrite = await populateEmbeds(
     el,
-    sourcePath,
-    build.nextImageNumber,
-    new Set([sourcePath]),
+    { sourcePath, startIndex: build.nextImageNumber, visited: new Set([sourcePath]) },
     pipeline
   );
   build.warnings.push(...embedRewrite.warnings);
   build.images.push(...embedRewrite.images);
   build.nextImageNumber += embedRewrite.images.length;
 
-  build.warnings.push(...cleanupDom(el).map((w) => `${w} (referenced by ${sourcePath})`));
+  build.warnings.push(...cleanupDom(el).map(attributedTo(sourcePath)));
 }
 
 // Phase 2 — steps 5-6: wikilinks and images. Only touches whatever cleanupDom
@@ -474,7 +484,7 @@ function finalizeChapterLinks(
 ): void {
   rewriteLinks(el, pipeline.hrefByPath, vaultLinkResolver(pipeline.app, sourcePath));
   const images = rewriteImages(el, pipeline.basePath, build.nextImageNumber, (w) =>
-    build.warnings.push(`${w} (referenced by ${sourcePath})`)
+    build.warnings.push(attributedTo(sourcePath)(w))
   );
   build.images.push(...images);
   build.nextImageNumber += images.length;

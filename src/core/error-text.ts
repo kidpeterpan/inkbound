@@ -5,3 +5,11 @@
 export function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
+
+// The "(referenced by X)" suffix that attributes a warning to the note/chapter
+// that produced it. footnotes.ts, chapter-assets.ts, math.ts and
+// render-adapter.ts each report their own warnings and were independently
+// re-deriving this same string template — one copy here instead of four.
+export function attributedTo(sourcePath: string): (message: string) => string {
+  return (message) => `${message} (referenced by ${sourcePath})`;
+}
