@@ -3,6 +3,24 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.6
+
+No change to exported books — this release is internal structure work.
+
+- **`core/render.ts` is split into a small library of focused modules**
+  (`render-md`, `render-svg`, `render-embeds`, `render-dom`, `render-links`,
+  `render-raster`, `render-toc`), with `render.ts` left as the public facade.
+  The 1361-line file mixed markdown stripping, Mermaid normalization, embed
+  flattening, DOM cleanup, link/image rewriting, rasterization, and the heading
+  TOC; each concern now has a module that says what it does.
+- **The chapter pipeline reads as its phases** (`renderChapterDom`,
+  `finalizeChapterLinks`, `finalizeChapterMedia`, `finalizeChapterFootnotes`):
+  `renderUnitToChapter` dropped from 105 lines to about 25, and the running
+  image counter is one piece of chapter state instead of a local threaded by
+  hand.
+- **`main.ts`'s `onload` is registration only** — the commands and the
+  file-menu entries moved to `registerCommands` / `registerFileMenu`.
+
 ## 1.10.5
 
 No change to exported books — this release is internal structure work, plus two
