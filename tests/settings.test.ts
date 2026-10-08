@@ -13,6 +13,9 @@ import {
   coerceTocHeadingDepth,
   coerceEmbedThaiFont,
   coerceMobileOutputFolder,
+  coerceOptimizeImages,
+  coerceGrayscaleImages,
+  coerceImageMaxWidth,
   DEFAULT_MOBILE_OUTPUT_FOLDER,
 } from "../src/core/delivery/settings-core";
 import { EpubExportSettingTab } from "../src/adapters/settings";
@@ -88,7 +91,66 @@ describe("DEFAULT_SETTINGS", () => {
       backlinkPosition: "start",
       tocHeadingDepth: 3,
       embedThaiFont: true,
+      // 013-eink-image-optimization FR-012: ON for everyone, 1200 px (plan D2).
+      optimizeImages: true,
+      imageMaxWidth: 1200,
+      // Off, because a color e-ink device would lose its color for nothing.
+      grayscaleImages: false,
     });
+  });
+});
+
+describe("coerceOptimizeImages", () => {
+  it("passes booleans through", () => {
+    expect(coerceOptimizeImages(true)).toBe(true);
+    expect(coerceOptimizeImages(false)).toBe(false);
+  });
+  it("degrades anything else to the default ON (a hand-edited data.json must never turn the feature off by accident)", () => {
+    for (const bad of ["false", "true", 0, 1, null, undefined, {}, []]) {
+      expect(coerceOptimizeImages(bad)).toBe(true);
+    }
+  });
+});
+
+describe("coerceImageMaxWidth", () => {
+  it("keeps an integer inside 600-3000, bounds included", () => {
+    for (const ok of [600, 800, 1200, 1250, 3000]) {
+      expect(coerceImageMaxWidth(ok)).toBe(ok);
+    }
+  });
+  it("degrades everything else to 1200 (FR-011)", () => {
+    const bad = [
+      NaN,
+      Infinity,
+      -Infinity,
+      "1200",
+      "abc",
+      1200.5,
+      599,
+      3001,
+      0,
+      -800,
+      1e9,
+      null,
+      undefined,
+      {},
+      [],
+    ];
+    for (const value of bad) {
+      expect(coerceImageMaxWidth(value)).toBe(1200);
+    }
+  });
+});
+
+describe("coerceGrayscaleImages", () => {
+  it("passes booleans through", () => {
+    expect(coerceGrayscaleImages(true)).toBe(true);
+    expect(coerceGrayscaleImages(false)).toBe(false);
+  });
+  it("degrades anything else to the default OFF (a stray value must never strip a reader's color)", () => {
+    for (const bad of ["true", "false", 0, 1, null, undefined, {}, []]) {
+      expect(coerceGrayscaleImages(bad)).toBe(false);
+    }
   });
 });
 
@@ -156,6 +218,9 @@ describe("EpubExportSettingTab", () => {
       "Backlink listing position",
       "TOC heading depth",
       "Embed Thai font",
+      "Optimize images for e-ink",
+      "Image width (px)",
+      "Convert images to grayscale",
       "Language (dc:language)",
       "Fallback author",
       "BooxDrop",
@@ -222,6 +287,46 @@ describe("EpubExportSettingTab", () => {
     expect(saveCalls).toBe(1);
   });
 
+  // 013-eink-image-optimization
+  it("case 6h: the optimize-images toggle shows ON by default, flips optimizeImages and saves", () => {
+    const { plugin } = makeTab();
+    const control = controlFor("Optimize images for e-ink");
+    expect(control.value).toBe(true);
+    control.onChangeFn?.(false);
+    expect(plugin.settings.optimizeImages).toBe(false);
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6i: the image-width slider is limited to 600-3000 in steps of 100, shows 1200, and stores a number", () => {
+    const { plugin } = makeTab();
+    const control = controlFor("Image width (px)");
+    expect(control.limits).toEqual([600, 3000, 100]);
+    expect(control.value).toBe(1200);
+    control.onChangeFn?.(800);
+    expect(plugin.settings.imageMaxWidth).toBe(800);
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6j: a raw out-of-range width is coerced to the default before it is stored", () => {
+    const { plugin } = makeTab();
+    controlFor("Image width (px)").onChangeFn?.(50);
+    expect(plugin.settings.imageMaxWidth).toBe(1200);
+  });
+
+  it("case 6l: the grayscale toggle shows OFF by default, flips grayscaleImages and saves", () => {
+    const { plugin } = makeTab();
+    const control = controlFor("Convert images to grayscale");
+    expect(control.value).toBe(false);
+    control.onChangeFn?.(true);
+    expect(plugin.settings.grayscaleImages).toBe(true);
+    expect(saveCalls).toBe(1);
+  });
+
+  it("case 6k: a saved width that is not usable does not break the tab, which shows the default (US2-4, FR-011)", () => {
+    expect(() => makeTab({ imageMaxWidth: "abc" as unknown as number })).not.toThrow();
+    expect(controlFor("Image width (px)").value).toBe(1200);
+  });
+
   it("case 6b: the backlink-position dropdown offers start/end/both, defaults to start, writes the field and saves", () => {
     const { plugin } = makeTab();
     const control = controlFor("Backlink listing position");
@@ -252,6 +357,19 @@ describe("EpubExportSettingTab", () => {
     expect(plugin.settings.backlinkPosition).toBe("start");
     expect(plugin.settings.outputFolder).toBe("~/exports");
     expect(plugin.settings.linkDepth).toBe(2);
+  });
+
+  // 013-eink-image-optimization FR-012: nothing migrates an existing data.json.
+  // The defaults merge in loadSettings is the whole mechanism, so this pins it.
+  it("case 6g: a saved data.json without the image keys loads with optimization ON and every other saved value kept", async () => {
+    const plugin = new EpubExportPlugin({} as never, {} as never);
+    await plugin.saveData({ outputFolder: "~/exports", linkDepth: 2, embedThaiFont: false });
+    await plugin.loadSettings();
+    expect(plugin.settings.optimizeImages).toBe(true);
+    expect(plugin.settings.imageMaxWidth).toBe(1200);
+    expect(plugin.settings.outputFolder).toBe("~/exports");
+    expect(plugin.settings.linkDepth).toBe(2);
+    expect(plugin.settings.embedThaiFont).toBe(false);
   });
 
   it("case 7: test connection with no device URL set shows a notice", async () => {
@@ -294,6 +412,9 @@ describe("EpubExportSettingTab", () => {
       "Backlink listing position",
       "TOC heading depth",
       "Embed Thai font",
+      "Optimize images for e-ink",
+      "Image width (px)",
+      "Convert images to grayscale",
       "Language (dc:language)",
       "Fallback author",
       "Device URL",
@@ -366,6 +487,39 @@ describe("EpubExportSettingTab", () => {
     controlFor("TOC heading depth").onChangeFn?.("99");
     expect(plugin.settings.tocHeadingDepth).toBe(3);
     expect(saveCalls).toBe(1);
+  });
+
+  it("case 12d: the optimize-images definition is a toggle keyed to optimizeImages, worded exactly as display() words it", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const def = flat.find((d) => d.name === "Optimize images for e-ink") as SettingDefinitionControl;
+    const displayed = SETTINGS.find((s) => s.nameEl.textContent === "Optimize images for e-ink")!;
+    expect(def.control).toMatchObject({ type: "toggle", key: "optimizeImages" });
+    expect(def.desc).toBe(displayed.descEl.textContent);
+  });
+
+  it("case 12f: the grayscale definition is a toggle keyed to grayscaleImages, worded exactly as display() words it", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const def = flat.find((d) => d.name === "Convert images to grayscale") as SettingDefinitionControl;
+    const displayed = SETTINGS.find((s) => s.nameEl.textContent === "Convert images to grayscale")!;
+    expect(def.control).toMatchObject({ type: "toggle", key: "grayscaleImages" });
+    expect(def.desc).toBe(displayed.descEl.textContent);
+  });
+
+  it("case 12e: the image-width definition is a 600-3000 slider in steps of 100 keyed to imageMaxWidth, worded as display() words it", () => {
+    const { tab } = makeTab();
+    const flat = flattenDefinitions(tab.getSettingDefinitions());
+    const def = flat.find((d) => d.name === "Image width (px)") as SettingDefinitionControl;
+    const displayed = SETTINGS.find((s) => s.nameEl.textContent === "Image width (px)")!;
+    expect(def.control).toMatchObject({
+      type: "slider",
+      key: "imageMaxWidth",
+      min: 600,
+      max: 3000,
+      step: 100,
+    });
+    expect(def.desc).toBe(displayed.descEl.textContent);
   });
 
   it("case 12c: the TOC depth definition is a dropdown keyed to tocHeadingDepth with the same options as display()", () => {

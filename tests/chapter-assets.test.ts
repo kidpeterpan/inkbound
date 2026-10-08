@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { resolveChapterAssets, type AssetVault } from "../src/core/epub/chapter-assets";
+import type { ImageOptimizer, OptimizeOutcome } from "../src/core/epub/image-optimizer";
 import type { ChapterImage } from "../src/core/types";
 
 // resolveChapterAssets is pure — no "obsidian" import — so these tests use a
@@ -189,5 +190,123 @@ describe("resolveChapterAssets: several images", () => {
     );
     expect(s.add).toHaveBeenCalledTimes(2);
     expect(s.locate).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── 013-eink-image-optimization: the optional `optimize` argument ─────────
+
+describe("resolveChapterAssets: image optimization", () => {
+  const ORIGINAL = new Uint8Array([1, 2, 3, 4, 5]);
+  const SMALLER = new Uint8Array([9]);
+  const image: ChapterImage = { newHref: "../images/img_001.png", vaultPath: "fig.png" };
+
+  const optimizerReturning = (outcome: OptimizeOutcome) => vi.fn<ImageOptimizer>(async () => outcome);
+
+  const runOptimized = (images: ChapterImage[], s: ReturnType<typeof setup>, optimize: ImageOptimizer) =>
+    resolveChapterAssets(images, "notes/ch.md", s.vault, s.add, s.warn, optimize);
+
+  it("adds the optimized bytes under the same href and media type", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    const optimize = optimizerReturning({ kind: "optimized", bytes: SMALLER });
+
+    await runOptimized([image], s, optimize);
+
+    expectOnce(s.add, "images/img_001.png", SMALLER, "image/png");
+    expectOnce(optimize, ORIGINAL, "image/png");
+    expect(s.warn).not.toHaveBeenCalled();
+  });
+
+  it("adds the original bytes when the optimizer keeps the image", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    await runOptimized([image], s, optimizerReturning({ kind: "kept" }));
+
+    expect(Array.from(s.add.mock.calls[0]![1])).toEqual(Array.from(ORIGINAL));
+    expect(s.warn).not.toHaveBeenCalled();
+  });
+
+  it("embeds the original and warns by name when the optimizer reports a failure", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    await runOptimized([image], s, optimizerReturning({ kind: "failed", reason: "could not be decoded" }));
+
+    expect(Array.from(s.add.mock.calls[0]![1])).toEqual(Array.from(ORIGINAL));
+    expectOnce(s.warn, "image not optimized: fig.png — could not be decoded (referenced by notes/ch.md)");
+  });
+
+  it("embeds the original and warns — NOT 'missing image' — when the optimizer throws, and carries on", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL, "next.png": new Uint8Array([7]) } });
+    const optimize = vi
+      .fn<ImageOptimizer>()
+      .mockRejectedValueOnce(new Error("optimizer exploded"))
+      .mockResolvedValueOnce({ kind: "kept" });
+    const next: ChapterImage = { newHref: "../images/img_002.png", vaultPath: "next.png" };
+
+    await runOptimized([image, next], s, optimize);
+
+    expect(s.add).toHaveBeenCalledTimes(2);
+    expect(Array.from(s.add.mock.calls[0]![1])).toEqual(Array.from(ORIGINAL));
+    expectOnce(s.warn, "image not optimized: fig.png — optimizer exploded (referenced by notes/ch.md)");
+  });
+
+  it("never hands rasterized diagrams or math (images that already carry bytes) to the optimizer", async () => {
+    const s = setup();
+    const optimize = optimizerReturning({ kind: "optimized", bytes: SMALLER });
+    const diagram: ChapterImage = {
+      newHref: "../images/img_003.png",
+      bytes: ORIGINAL,
+      mediaType: "image/png",
+    };
+
+    await runOptimized([diagram], s, optimize);
+
+    expectOnce(s.add, "images/img_003.png", ORIGINAL, "image/png");
+    expect(optimize).not.toHaveBeenCalled();
+  });
+
+  it("never reads or optimizes a type outside the allowlist", async () => {
+    const s = setup({ files: { "pic.bmp": ORIGINAL } });
+    const optimize = optimizerReturning({ kind: "optimized", bytes: SMALLER });
+
+    await runOptimized([{ newHref: "../images/img_001.bmp", vaultPath: "pic.bmp" }], s, optimize);
+
+    expect(optimize).not.toHaveBeenCalled();
+    expectOnce(s.warn, "unsupported image type: pic.bmp (referenced by notes/ch.md)");
+  });
+
+  it("optimizes an image that came from an embedded note exactly like any other (US1-6)", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    const optimize = optimizerReturning({ kind: "optimized", bytes: SMALLER });
+    const embedded: ChapterImage = { ...image, sourcePath: "embedded/inner.md" };
+
+    await runOptimized([embedded], s, optimize);
+
+    expectOnce(s.locate, "fig.png", "embedded/inner.md");
+    expectOnce(s.add, "images/img_001.png", SMALLER, "image/png");
+  });
+
+  it("adds one asset per reference when the same vault image is referenced three times (US1-5)", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    const optimize = optimizerReturning({ kind: "optimized", bytes: SMALLER });
+    const references = [1, 2, 3].map((n): ChapterImage => ({
+      newHref: `../images/img_00${n}.png`,
+      vaultPath: "fig.png",
+    }));
+
+    await runOptimized(references, s, optimize);
+
+    expect(s.add.mock.calls.map((call) => call[0])).toEqual([
+      "images/img_001.png",
+      "images/img_002.png",
+      "images/img_003.png",
+    ]);
+    expect(optimize).toHaveBeenCalledTimes(3);
+    expect(s.warn).not.toHaveBeenCalled();
+  });
+
+  it("is exactly today's behavior when no optimizer is given", async () => {
+    const s = setup({ files: { "fig.png": ORIGINAL } });
+    await resolveChapterAssets([image], "notes/ch.md", s.vault, s.add, s.warn);
+
+    expect(Array.from(s.add.mock.calls[0]![1])).toEqual(Array.from(ORIGINAL));
+    expect(s.warn).not.toHaveBeenCalled();
   });
 });

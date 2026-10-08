@@ -18,6 +18,8 @@ import { escapeXml } from "../core/common/xml";
 import { systemBookIdentity } from "../core/epub/book-identity";
 import { renderUnitToChapter } from "./render-adapter";
 import { resolveChapterAssets, type AssetVault } from "../core/epub/chapter-assets";
+import { getImageCodec } from "../core/epub/image-codec";
+import { createImageOptimizer, type ImageOptimizer } from "../core/epub/image-optimizer";
 import { computeBacklinks, renderBacklinksFragment } from "../core/book/backlinks";
 import { BooxDropClient } from "../core/delivery/booxdrop";
 import { obsidianHttp } from "./http";
@@ -27,6 +29,9 @@ import { showExportNotice } from "./export-notice";
 import { createWarningCollector, type ExportReport, type WarningCollector } from "../core/delivery/report";
 import {
   coerceBacklinkPosition,
+  coerceGrayscaleImages,
+  coerceImageMaxWidth,
+  coerceOptimizeImages,
   summarizeWarnings,
   type EpubExportSettings,
 } from "../core/delivery/settings-core";
@@ -75,6 +80,9 @@ interface ChapterPass {
   hrefByPath: Map<string, string>;
   basePath: string;
   assetVault: AssetVault<TFile>;
+  // 013-eink-image-optimization: absent when optimization is OFF, which leaves
+  // every vault image on the original byte-for-byte path (FR-008).
+  optimizeImage?: ImageOptimizer;
   withBacklinks: (file: TFile, xhtmlBody: string) => string;
   // Running total of images rewriteImages has STAMPED into chapter HTML
   // so far — not the count that later loaded as assets. The <img> hrefs
@@ -140,6 +148,7 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
       hrefByPath,
       basePath,
       assetVault: assetVaultFor(deps.app),
+      optimizeImage: imageOptimizerFor(deps.settings, collector.forBook()),
       withBacklinks,
       imageCount: 0,
       hasThai: false,
@@ -195,6 +204,24 @@ function assetVaultFor(app: App): AssetVault<TFile> {
   };
 }
 
+// 013-eink-image-optimization: the image settings are coerced HERE, where they
+// are used, because loadSettings is a plain defaults merge and Obsidian 1.13+'s
+// declarative settings path writes a control's raw value straight past any
+// coercion in display() (see coerceImageMaxWidth). Returns undefined when
+// optimization is OFF.
+function imageOptimizerFor(
+  settings: EpubExportSettings,
+  warnBook: (message: string) => void
+): ImageOptimizer | undefined {
+  if (!coerceOptimizeImages(settings.optimizeImages)) return undefined;
+
+  const options = {
+    maxWidth: coerceImageMaxWidth(settings.imageMaxWidth),
+    grayscale: coerceGrayscaleImages(settings.grayscaleImages),
+  };
+  return createImageOptimizer(options, getImageCodec(), warnBook);
+}
+
 // Renders one chapter and adds it — or a failure placeholder — to the book,
 // resolving its images and advancing the pass's running totals. The whole
 // body of the chapter loop above, split out so the loop reads as a loop.
@@ -226,7 +253,8 @@ async function renderAndAddChapter(
       file.path,
       pass.assetVault,
       (href, bytes, mediaType) => pass.builder.addAsset(href, bytes, mediaType),
-      warn
+      warn,
+      pass.optimizeImage
     );
     pass.builder.addChapter(deps.titleFor(file), pass.withBacklinks(file, r.xhtmlBody), r.toc);
   } catch (e) {
