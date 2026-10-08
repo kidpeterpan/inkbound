@@ -1,5 +1,6 @@
 import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } from "obsidian";
 import type { NavItem } from "./core/epub/epub";
+import type { CoverPlan } from "./core/epub/cover";
 import type { FolderInput, NoteInput } from "./core/book/book-tree";
 import { bfsLinked } from "./core/book/collect";
 import {
@@ -18,6 +19,29 @@ import { NoteMetaSource } from "./adapters/meta-adapter";
 import type { ExportReport } from "./core/delivery/report";
 import { openExportReport } from "./adapters/report-view";
 import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
+
+// 014-preview-before-export: a book that has been DECIDED but not yet built —
+// which notes, in what order, under which Parts, with what title, author and
+// language, and where its cover will come from. Nothing in it is rendered, read
+// from an image file or fetched.
+//
+// This is the seam between planning and running. An export plans and runs in
+// one go; a preview plans, shows this, and runs it only if the reader asks. Both
+// call the same planFolder/planLinked and the same exportPlanned, so the book a
+// preview describes is the book the export writes — there is no second copy of
+// the ordering rules to drift out of step.
+interface PlannedExport {
+  files: TFile[];
+  /** Nested table-of-contents plan (folder exports with Parts), by position in `files`. */
+  nav?: NavItem[];
+  /** Planning warnings known before anything renders, e.g. the filename-order fallback. */
+  warnings: string[];
+  /** Title, author and language only: the cover is attached when the export runs. */
+  meta: ExportMeta;
+  cover: CoverPlan;
+  /** The note the metadata was read from, which the cover is also resolved against. */
+  metaFile: TFile | null;
+}
 
 export default class EpubExportPlugin extends Plugin {
   settings: EpubExportSettings = DEFAULT_SETTINGS;
@@ -51,12 +75,7 @@ export default class EpubExportPlugin extends Plugin {
     this.addCommand({
       id: "export-folder",
       name: "Export folder as EPUB (active note's folder)",
-      callback: () =>
-        this.withActiveFile((f) =>
-          f.parent instanceof TFolder
-            ? void this.exportFolder(f.parent)
-            : new Notice("Active note has no parent folder.")
-        ),
+      callback: () => this.withActiveFolder((folder) => void this.exportFolder(folder)),
     });
     this.addCommand({
       id: "export-linked",
@@ -142,6 +161,14 @@ export default class EpubExportPlugin extends Plugin {
     fn(f);
   }
 
+  // The folder of the active note, for the commands that work on a whole folder.
+  private withActiveFolder(fn: (folder: TFolder) => void) {
+    this.withActiveFile((f) => {
+      if (f.parent instanceof TFolder) fn(f.parent);
+      else new Notice("Active note has no parent folder.");
+    });
+  }
+
   // ── scope builders ──────────────────────────────────────────────
 
   private titleFor(f: TFile): string {
@@ -169,7 +196,13 @@ export default class EpubExportPlugin extends Plugin {
     fallbackBasename: string,
     warn: (message: string) => void
   ): Promise<ExportMeta> {
-    return new NoteMetaSource(this.app, this.metaDefaults()).resolve(file, fallbackBasename, warn);
+    return this.metaSource().resolve(file, fallbackBasename, warn);
+  }
+
+  // Built per use, not held: the defaults it reads come from settings, which
+  // the reader can change between exports.
+  private metaSource(): NoteMetaSource {
+    return new NoteMetaSource(this.app, this.metaDefaults());
   }
 
   async exportSingle(file: TFile) {
@@ -179,13 +212,18 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   async exportLinked(file: TFile) {
+    await this.exportPlanned(await this.planLinked(file));
+  }
+
+  // The notes the link walk reaches at the reader's link depth, in the order
+  // the export will use. Shared with the linked-notes preview.
+  private async planLinked(file: TFile): Promise<PlannedExport> {
     const paths = bfsLinked(this.app.metadataCache.resolvedLinks, file.path, this.settings.linkDepth);
     const files = paths
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
-    const warnings: string[] = [];
-    const meta = await this.metaFromNote(file, file.basename, (m) => warnings.push(m));
-    await this.runExport({ meta, files, warnings });
+    const { meta, cover } = await this.metaSource().plan(file, file.basename);
+    return { files, warnings: [], meta, cover, metaFile: file };
   }
 
   // The frontmatter read; the shape rule (why a scalar `tags` string is NOT
@@ -301,13 +339,32 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   async exportFolder(folder: TFolder) {
+    const planned = await this.planFolder(folder);
+    if (!planned) return;
+    await this.exportPlanned(planned);
+  }
+
+  // A folder's book, decided: chapter order and Parts (planFolderExport), then
+  // the metadata of its index note. Null after the notice when the folder has
+  // no Markdown notes. Shared with the folder preview.
+  private async planFolder(folder: TFolder): Promise<PlannedExport | null> {
     const mdFiles = folder.children.filter((c): c is TFile => c instanceof TFile && c.extension === "md");
     const legacy = this.legacyFolderOrder(mdFiles, folder);
     const plan = this.planFolderExport(folder, legacy);
-    if (!plan) return;
+    if (!plan) return null;
 
-    const meta = await this.metaFromNote(legacy.index, folder.name, (m) => plan.warnings.push(m));
-    await this.runExport({ meta, files: plan.files, nav: plan.nav, warnings: plan.warnings });
+    const { meta, cover } = await this.metaSource().plan(legacy.index, folder.name);
+    return { files: plan.files, nav: plan.nav, warnings: plan.warnings, meta, cover, metaFile: legacy.index };
+  }
+
+  // Builds the book a PlannedExport describes. It works on COPIES of the plan's
+  // metadata and warnings because attaching the cover adds to both, and the
+  // same PlannedExport may be what a preview window is still holding.
+  private async exportPlanned(planned: PlannedExport): Promise<void> {
+    const meta = { ...planned.meta };
+    const warnings = [...planned.warnings];
+    await this.metaSource().attachCover(meta, planned.cover, planned.metaFile, (m) => warnings.push(m));
+    await this.runExport({ meta, files: planned.files, nav: planned.nav, warnings });
   }
 
   // ── orchestrator ────────────────────────────────────────────────

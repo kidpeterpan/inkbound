@@ -13,6 +13,7 @@ import {
   orderedLinkTargets,
   planFolderOrder,
   toNavItems,
+  tocFallbackWarning,
   type IndexCandidate,
   type OrderedLink,
 } from "../src/core/book/book-plan";
@@ -300,6 +301,23 @@ describe("degradedFolderPlan and its warning text", () => {
   it("reads a thrown non-Error the same way the export path does", () => {
     expect(chapterOrderFallbackWarning("plain string")).toBe(
       "chapter ordering fell back to filename order: plain string"
+    );
+  });
+});
+
+// 014-preview-before-export: one sentence for "the table of contents fell back
+// to a flat list", shared by the export pipeline and the preview so the two
+// cannot word it differently. Scripts parse the export's console line.
+describe("tocFallbackWarning", () => {
+  it("keeps the wording the export has always used", () => {
+    expect(tocFallbackWarning(new Error("bad tree"))).toBe(
+      "table of contents fell back to a flat list: bad tree"
+    );
+  });
+
+  it("reads a thrown non-Error the same way the other fallback warning does", () => {
+    expect(tocFallbackWarning("plain string")).toBe(
+      "table of contents fell back to a flat list: plain string"
     );
   });
 });

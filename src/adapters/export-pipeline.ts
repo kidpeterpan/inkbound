@@ -36,6 +36,7 @@ import {
   type EpubExportSettings,
 } from "../core/delivery/settings-core";
 import { slugify } from "../core/book/naming";
+import { tocFallbackWarning } from "../core/book/book-plan";
 import { getThaiFontLoader } from "../core/epub/font-assets";
 import { containsThai } from "../core/epub/fonts";
 import { errorMessage } from "../core/common/error-text";
@@ -339,7 +340,7 @@ function applyNavTree(builder: EpubBuilder, nav: NavItem[] | undefined, collecto
   try {
     builder.setNavTree(nav);
   } catch (e) {
-    collector.forBook()(`table of contents fell back to a flat list: ${errorMessage(e)}`);
+    collector.forBook()(tocFallbackWarning(e));
   }
 }
 

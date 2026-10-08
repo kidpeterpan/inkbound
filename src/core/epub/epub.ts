@@ -96,7 +96,7 @@ export function renderTocSubEntries(entries: TocEntry[], href: string): string {
 // every Part can be opened (an index-less Part needs a descendant chapter to
 // link to, FR-010). Throws with a message naming the problem; main.ts catches
 // and falls back to the flat nav with a warning (constitution II).
-function validateNavTree(tree: NavItem[], count: number): void {
+export function validateNavTree(tree: NavItem[], count: number): void {
   const seen = new Set<number>();
   const take = (i: number) => {
     if (!Number.isInteger(i) || i < 0 || i >= count) {
