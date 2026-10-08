@@ -9,6 +9,14 @@ export type BacklinkPosition = "start" | "end" | "both" | "none";
 // 008-mobile-support FR-003: where mobile writes finished books, vault-relative.
 export const DEFAULT_MOBILE_OUTPUT_FOLDER = "Exports";
 
+// 013-eink-image-optimization: the widest an image may be in a book, in pixels.
+// The range is a floor (so a typo cannot shrink every picture to a thumbnail)
+// and a ceiling (nothing wider than this helps an e-ink screen); the step is
+// what the settings slider moves by.
+export const MIN_IMAGE_MAX_WIDTH = 600;
+export const MAX_IMAGE_MAX_WIDTH = 3000;
+export const IMAGE_WIDTH_STEP = 100;
+
 export interface EpubExportSettings {
   // Desktop only — an absolute (or ~-prefixed) filesystem path. Mobile never
   // reads it, and never writes it (008-mobile-support FR-004).
@@ -31,6 +39,17 @@ export interface EpubExportSettings {
   // 006-thai-font FR-009: when ON (default), books whose chapters contain
   // Thai text get Noto Sans Thai embedded; OFF never embeds.
   embedThaiFont: boolean;
+  // 013-eink-image-optimization FR-012: when ON (default, for everyone), PNG and
+  // JPEG images wider than imageMaxWidth are shrunk to it as they enter the
+  // book. OFF embeds every image exactly as it is in the vault.
+  optimizeImages: boolean;
+  // Pixels, MIN_IMAGE_MAX_WIDTH..MAX_IMAGE_MAX_WIDTH. Shared by desktop and
+  // mobile: it changes what is in a book, not where the book is saved.
+  imageMaxWidth: number;
+  // When ON (and optimization is ON), images that are shrunk also lose their
+  // color. Never applies to an image that is not shrunk. OFF by default: a color
+  // e-ink device would lose its color for nothing.
+  grayscaleImages: boolean;
 }
 
 export const DEFAULT_SETTINGS: EpubExportSettings = {
@@ -44,6 +63,9 @@ export const DEFAULT_SETTINGS: EpubExportSettings = {
   backlinkPosition: "start",
   tocHeadingDepth: 3,
   embedThaiFont: true,
+  optimizeImages: true,
+  imageMaxWidth: 1200,
+  grayscaleImages: false,
 };
 
 // Persisted data.json can hold anything (hand-edits, downgrades) — an
@@ -66,6 +88,29 @@ export function coerceTocHeadingDepth(value: unknown): number {
 // older plugin versions) degrades to the default ON.
 export function coerceEmbedThaiFont(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_SETTINGS.embedThaiFont;
+}
+
+// 013-eink-image-optimization: the export pipeline coerces both image settings
+// at the point of use, not when settings load. That is deliberate: loadSettings
+// is a plain defaults merge, and on Obsidian 1.13+ the declarative settings
+// path writes a control's raw value straight into the settings object, past
+// anything display() coerces. A value that is wrong here must degrade to the
+// default instead of reaching the optimizer.
+export function coerceOptimizeImages(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.optimizeImages;
+}
+
+export function coerceImageMaxWidth(value: unknown): number {
+  const isUsableWidth =
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= MIN_IMAGE_MAX_WIDTH &&
+    value <= MAX_IMAGE_MAX_WIDTH;
+  return isUsableWidth ? value : DEFAULT_SETTINGS.imageMaxWidth;
+}
+
+export function coerceGrayscaleImages(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_SETTINGS.grayscaleImages;
 }
 
 // 008-mobile-support: same house contract as the coerce* functions above —

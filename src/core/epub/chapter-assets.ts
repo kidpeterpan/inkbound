@@ -4,6 +4,7 @@
 // tested with a fake vault instead of the obsidian stub.
 import { mediaTypeForExt } from "../common/media-types";
 import { attributedTo, errorMessage } from "../common/error-text";
+import type { ImageOptimizer } from "./image-optimizer";
 import type { ChapterImage } from "../types";
 
 // What resolving an image needs from the vault. `F` is whatever the caller
@@ -16,12 +17,39 @@ export interface AssetVault<F> {
   read(file: F): Promise<ArrayBuffer>;
 }
 
+// Runs the optimizer in a try/catch of its OWN, apart from the caller's.
+//
+// The caller's catch means "this image is missing" and drops the asset, so an
+// optimizer that threw inside it would delete a perfectly good image from the
+// book. Whatever goes wrong here, the original bytes are embedded and the
+// reader is told by name (FR-006).
+async function optimizedBytesOrOriginal(
+  original: Uint8Array,
+  mediaType: string,
+  optimize: ImageOptimizer,
+  warnNotOptimized: (reason: string) => void
+): Promise<Uint8Array> {
+  try {
+    const outcome = await optimize(original, mediaType);
+    if (outcome.kind === "optimized") return outcome.bytes;
+    if (outcome.kind === "failed") warnNotOptimized(outcome.reason);
+    return original;
+  } catch (e) {
+    warnNotOptimized(errorMessage(e));
+    return original;
+  }
+}
+
+// `optimize` is absent when image optimization is off: the image is then
+// embedded exactly as it is in the vault, which is how an OFF export stays
+// identical to what the plugin produced before optimization existed (FR-008).
 export async function resolveChapterAssets<F>(
   images: ChapterImage[],
   chapterPath: string,
   vault: AssetVault<F>,
   addAsset: (href: string, bytes: Uint8Array, mediaType: string) => void,
-  warn: (message: string) => void
+  warn: (message: string) => void,
+  optimize?: ImageOptimizer
 ): Promise<void> {
   const attribute = attributedTo(chapterPath);
   for (const img of images) {
@@ -53,7 +81,16 @@ export async function resolveChapterAssets<F>(
         warn(attribute(`unsupported image type: ${img.vaultPath}`));
         continue;
       }
-      addAsset(assetHref, new Uint8Array(await vault.read(file)), mediaType);
+      const original = new Uint8Array(await vault.read(file));
+      // An optimized image keeps its type, and so the `.ext` already stamped
+      // into this chapter's HTML: that href is fixed before any bytes are read,
+      // so changing the type here would leave the reference pointing at nothing.
+      const warnNotOptimized = (reason: string) =>
+        warn(attribute(`image not optimized: ${img.vaultPath} — ${reason}`));
+      const bytes = optimize
+        ? await optimizedBytesOrOriginal(original, mediaType, optimize, warnNotOptimized)
+        : original;
+      addAsset(assetHref, bytes, mediaType);
     } catch (e) {
       // Missing image: export continues (spec's error table) — this one
       // image's href stays dangling in the chapter HTML, but the chapter

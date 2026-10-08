@@ -57,6 +57,20 @@ ships inside the book; Latin text keeps the reader's normal reading font.
 Books without Thai stay fontless and byte-stable, and the **Embed Thai font**
 setting turns the whole behavior off if you ever want it.
 
+**Images are shrunk to fit the screen.** Screenshots and phone photos are far
+larger than any e-ink screen can show, and every extra pixel makes the book
+bigger, slower to send to your device and slower to turn pages. So a PNG or JPEG
+from your vault that is wider than the **Image width** setting (1200 px by
+default) is scaled down to that width as it goes into the book, keeping its
+proportions and its file type. Images already that narrow, SVG, GIF and WebP
+files, animated PNGs, covers, and the diagrams and math Inkbound draws itself are
+left exactly as they are, and an image whose smaller version would come out
+larger keeps its original bytes, so optimization never makes a book bigger. An
+image that cannot be processed goes in as it is and the export report names it.
+Turn **Optimize images for e-ink** off to get your images exactly as they are in
+your vault, and turn **Convert images to grayscale** on for a black-and-white
+screen: it removes the color from the images that are shrunk.
+
 **Footnotes work as footnotes.** Numbered `[^1]`, named `[^note]` and inline
 `^[…]` notes become real EPUB footnotes: tap the small raised number to reach the
 note, and the arrow at the end of the note to come back. Readers that show
@@ -163,18 +177,21 @@ Found under **Settings → Community plugins → Inkbound**:
 
 ![The Inkbound settings tab, including the BooxDrop device URL and push toggle](docs/images/settings.png)
 
-| Setting                   | Default                      | Purpose                                                                                                                                                                                                                       |
-| ------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Output folder             | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                                                        |
-| Output folder (mobile)    | `"Exports"`                  | Vault-relative folder books are saved into on a phone or tablet, since mobile has no filesystem-folder-anywhere (see "On a phone or tablet"). Desktop never reads or writes it.                                               |
-| Default link depth        | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
-| Backlink listing position | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
-| TOC heading depth         | `3` (Level 3)                | Deepest heading level listed under each chapter in the book's table of contents (0–6, via a dropdown). `Off` restores the flat chapter-only TOC.                                                                              |
-| Embed Thai font           | `true`                       | When ON, books whose chapters contain Thai text get Noto Sans Thai embedded (Regular + Bold, with its OFL license file inside the book). OFF keeps every book fontless.                                                       |
-| Language (`dc:language`)  | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                                                                |
-| Fallback author           | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                                                              |
-| Device URL                | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                                                            |
-| Push after export         | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL.                                         |
+| Setting                     | Default                      | Purpose                                                                                                                                                                                                                       |
+| --------------------------- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Output folder               | `""` (empty → `~/Downloads`) | Absolute path or `~/…` folder the EPUB is written to. Existing files of the same name are overwritten.                                                                                                                        |
+| Output folder (mobile)      | `"Exports"`                  | Vault-relative folder books are saved into on a phone or tablet, since mobile has no filesystem-folder-anywhere (see "On a phone or tablet"). Desktop never reads or writes it.                                               |
+| Default link depth          | `1`                          | How many hops of wikilinks **Export note + linked notes** follows outward from the active note (1–3, via a slider).                                                                                                           |
+| Backlink listing position   | `start` (Start of chapter)   | Where each chapter shows its "Linked from:" list of the chapters in the same book that link to it — at the start of the chapter, the end, both, or none (disables the list entirely). Chapters nothing links to show no list. |
+| TOC heading depth           | `3` (Level 3)                | Deepest heading level listed under each chapter in the book's table of contents (0–6, via a dropdown). `Off` restores the flat chapter-only TOC.                                                                              |
+| Embed Thai font             | `true`                       | When ON, books whose chapters contain Thai text get Noto Sans Thai embedded (Regular + Bold, with its OFL license file inside the book). OFF keeps every book fontless.                                                       |
+| Optimize images for e-ink   | `true`                       | When ON, PNG and JPEG images wider than **Image width** are shrunk to it as they enter the book. SVG, GIF and WebP are never changed. OFF embeds every image exactly as it is in your vault.                                  |
+| Image width (px)            | `1200`                       | The widest an image may be in the book (600–3000, in steps of 100). Images already this narrow are left alone.                                                                                                                |
+| Convert images to grayscale | `false`                      | For black-and-white e-ink screens: the images that are shrunk also lose their color. Leave off for a color e-ink device. Only applies while image optimization is on.                                                         |
+| Language (`dc:language`)    | `"th"`                       | Fallback language used when a note has no usable `language` frontmatter field.                                                                                                                                                |
+| Fallback author             | `""` (empty → `"Unknown"`)   | Used as `dc:creator` when a note/index has no usable `author` frontmatter field.                                                                                                                                              |
+| Device URL                  | `""`                         | The BooxDrop device's address as shown in the BooxDrop app, e.g. `http://192.168.1.42:8085`. Required for pushing.                                                                                                            |
+| Push after export           | `false`                      | When enabled (and a Device URL is set), every export is uploaded to the device after being saved locally. Below this toggle is a **Test connection** button to verify the Device URL.                                         |
 
 ## A worked example
 
@@ -396,6 +413,15 @@ from note to e-reader without a computer anywhere in the loop.
   address: a `^id` typed inside a cell is just cell text, so an embed
   pointing at it degrades to a placeholder plus an export warning, same as
   any block ID that doesn't exist.
+- **Image optimization only changes PNG and JPEG files from your vault.** SVG,
+  GIF, WebP, animated PNGs, the book cover, and the diagrams and math Inkbound
+  draws itself are never touched. Grayscale applies only to images that are being
+  shrunk, so a book can hold a few untouched color icons beside gray pictures. The
+  smaller image is made by the app's own image encoder, so two exports on the same
+  device give identical images, but the bytes can differ between devices. On a
+  phone, an image over about 100 megapixels, or one that would still be over about
+  16 million pixels after shrinking, is kept as it is with a warning in the
+  export report.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.

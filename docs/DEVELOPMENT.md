@@ -304,10 +304,80 @@ _presents_ it is the device's call:
   chapter (the sub-index note when there is one), so it should open that
   chapter rather than do nothing.
 
+**Image optimization (013-eink-image-optimization) — NOT yet verified by
+hand.** What to keep, what to shrink, what to give up on, and never making a
+book bigger are pure decisions, tested with a scripted codec. Only
+`src/core/epub/image-codec.ts` touches a browser (it decodes into a canvas,
+scales once and encodes), and jsdom cannot run it: the tests stub the canvas
+surface, as they do for the SVG rasterizer.
+
+One real-engine check has been done, in desktop Chrome (Chromium) on 2026-10-08:
+the real `createImageOptimizer`, codec and header reader, bundled and run on
+pictures drawn on a canvas. A 3200×1800 PNG (4.6 MB) became a 1200×675 PNG
+(435 KB) in about 1.3 s; a 4000×3000 JPEG (927 KB) became a 1200×900 JPEG
+(157 KB); with grayscale on, all 405,000 opaque pixels had R = G = B and the
+transparent half stayed transparent; an 800×600 PNG was kept; a JPEG stored
+3000×2000 with EXIF orientation 6 (shown 2000×3000) became 1200×1800, sized
+from the decoded picture. A PNG cut off after 300 bytes is decoded by Chrome as
+far as it goes, so it is not reported as damaged: the result is kept only
+because it is not smaller than the 300-byte original. That check says nothing
+about Obsidian itself, the Electron version it ships, iOS or Android WebViews,
+or an e-ink screen. These still need a person, on a real device:
+
+- **SC-001, the saving.** Export a book of oversize screenshots and photos with
+  the switch on and off and compare the two `.epub` files: it should be at least
+  50% smaller when every image is at least twice the target width.
+- **SC-006, how it looks.** On a Boox every image fits the page width, nothing
+  scrolls sideways, and the text in a screenshot is still readable at the default
+  1200 px.
+- **Phone and tablet.** A large (12 megapixels or more) phone photo is either
+  shrunk or kept with a "too large to process" warning, and the export finishes
+  either way; note how long it takes.
+- **The pixel ceilings** (`MAX_SOURCE_PIXELS` 100 million and
+  `MAX_OUTPUT_PIXELS` 16,777,216, in `image-optimizer.ts`) are conservative
+  guesses from memory of WebKit's canvas limit, not measurements. A canvas over
+  the platform's limit can come back blank instead of throwing, and a blank
+  picture is smaller than the original, which is the whole reason the limits
+  exist.
+- **The output-size estimate assumes a JPEG is not rotated.** A rotated JPEG whose
+  stored width is more than about 11 times its height, and which is under the
+  source ceiling, can slip past the output ceiling.
+- **EXIF orientation.** A portrait phone photo appears upright and not squashed.
+  Chromium applies the rotation when an image is drawn to a canvas; WebKit was
+  not checked.
+- **Canvas PNG color type.** The encoder writes full-color RGBA files (checked in
+  Chromium on 2026-10-08, not in WebKit). That is why grayscale never touches an
+  image that is not being shrunk: converting a small PNG would usually make it
+  larger.
+- **Timing.** 20 seconds per image and three timeouts in a row before a book gives
+  up (`IMAGE_TIMEOUT_MS`, `MAX_CONSECUTIVE_TIMEOUTS`) are guesses: check that a slow
+  device is neither stopped too early nor kept waiting.
+- **Grayscale** on a black-and-white device: the image is gray and not larger than
+  the original.
+- **The settings tab in real Obsidian.** Both rendering paths (the classic one and
+  the 1.13+ declarative one) show the switch, the width slider and the grayscale
+  toggle, and the values persist across a restart.
+- **The width slider on Obsidian before 1.13.** Obsidian 1.13 shows a slider's value
+  beside it; older versions show no number, and `setDynamicTooltip`, which would,
+  is deprecated and cannot be used here (the lint forbids disabling that rule). The
+  description therefore states the range and the default, and the link-depth slider
+  has always behaved this way. Check how it reads on Obsidian 1.5–1.12 if those
+  versions matter.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
 README's "Known limitations" section.)
+
+**The image codec seam (013).** `src/core/epub/image-codec.ts` is the only file in
+the image-optimization path that touches the browser, and it is installed with
+`setImageCodec` like the other injection points. Tests give the pure optimizer a
+scripted fake (`tests/fixtures/fake-image-codec.ts`) and give the default codec a
+stubbed `Image`, `URL.createObjectURL` and canvas (`tests/image-codec.test.ts`).
+That proves the decisions, the wiring and the cleanup; it does not prove a real
+canvas draws a sharp picture (see the unverified list). Under jsdom and under the
+Node gates `available()` is false, because they lack `URL.createObjectURL` or
+`Image`, so neither ever tries to resize.
 
 ## Bundled fonts (.ttf loader trio)
 
@@ -467,6 +537,14 @@ What it cannot see: Node resolves a native `import("os")` fine, so the exact
 `check-mobile-safe` check 1b covers that by scanning the bundle. Rendering still goes through the marked-based
 stub. This gate proves the artifact can run its own export pipeline; it does
 not replace the manual check in real Obsidian.
+
+Image optimization defaults to ON and this gate runs on the default settings, yet
+it shows no change: the fixture's only image is small, so the optimizer keeps it
+without consulting the codec, and the harness has no `Image` or canvas anyway
+(the default codec's `available()` is false). So the gate proves the bundle loads
+and exports with the optimizer built in; it does not prove an image gets shrunk.
+That is what the unit tests (a scripted codec) and the unverified list above are
+for.
 
 The fixture vault is deliberately tiny and every note in it exists to trip a
 specific assertion (the index note's `tags: [book, main]` and `aliases` drive

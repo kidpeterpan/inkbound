@@ -8,7 +8,13 @@ import {
   coerceBacklinkPosition,
   coerceTocHeadingDepth,
   coerceEmbedThaiFont,
+  coerceGrayscaleImages,
+  coerceImageMaxWidth,
   coerceMobileOutputFolder,
+  coerceOptimizeImages,
+  IMAGE_WIDTH_STEP,
+  MAX_IMAGE_MAX_WIDTH,
+  MIN_IMAGE_MAX_WIDTH,
 } from "../core/delivery/settings-core";
 
 export type { BacklinkPosition, EpubExportSettings } from "../core/delivery/settings-core";
@@ -74,6 +80,18 @@ const SETTING_TEXT = {
   embedThaiFont: {
     name: "Embed Thai font",
     desc: "Books whose chapters contain Thai text get Noto Sans Thai embedded (with its OFL license). Off keeps books fontless even when Thai is present.",
+  },
+  optimizeImages: {
+    name: "Optimize images for e-ink",
+    desc: "Shrinks PNG and JPEG images wider than the width below so books are smaller and faster to send and open. SVG, GIF and WebP are never changed. Off keeps every image exactly as it is in your vault.",
+  },
+  imageMaxWidth: {
+    name: "Image width (px)",
+    desc: "The widest an image may be in the book, from 600 to 3000 pixels (1200 by default). Images already this narrow are left alone.",
+  },
+  grayscaleImages: {
+    name: "Convert images to grayscale",
+    desc: "For black-and-white e-ink screens: smaller files, no color. Leave off for a color e-ink device. Only changes images that are shrunk, and only while image optimization is on.",
   },
   language: {
     name: "Language (dc:language)",
@@ -154,6 +172,27 @@ export class EpubExportSettingTab extends PluginSettingTab {
       {
         ...SETTING_TEXT.embedThaiFont,
         control: { type: "toggle", key: "embedThaiFont" },
+      },
+      {
+        ...SETTING_TEXT.optimizeImages,
+        control: { type: "toggle", key: "optimizeImages" },
+      },
+      {
+        // A slider, not a text field: the declarative path stores a control's
+        // raw value, and only a slider stores a number. The export pipeline
+        // coerces it again at use (coerceImageMaxWidth).
+        ...SETTING_TEXT.imageMaxWidth,
+        control: {
+          type: "slider",
+          key: "imageMaxWidth",
+          min: MIN_IMAGE_MAX_WIDTH,
+          max: MAX_IMAGE_MAX_WIDTH,
+          step: IMAGE_WIDTH_STEP,
+        },
+      },
+      {
+        ...SETTING_TEXT.grayscaleImages,
+        control: { type: "toggle", key: "grayscaleImages" },
       },
       {
         ...SETTING_TEXT.language,
@@ -315,6 +354,36 @@ export class EpubExportSettingTab extends PluginSettingTab {
     this.addToggleField(containerEl, SETTING_TEXT.embedThaiFont, s.embedThaiFont, (v) => {
       s.embedThaiFont = coerceEmbedThaiFont(v);
     });
+
+    // 013-eink-image-optimization: shown through the coercers so a hand-edited
+    // data.json cannot break the tab; the export pipeline coerces again at use.
+    this.addToggleField(
+      containerEl,
+      SETTING_TEXT.optimizeImages,
+      coerceOptimizeImages(s.optimizeImages),
+      (v) => {
+        s.optimizeImages = coerceOptimizeImages(v);
+      }
+    );
+
+    this.addSliderField(
+      containerEl,
+      SETTING_TEXT.imageMaxWidth,
+      coerceImageMaxWidth(s.imageMaxWidth),
+      { min: MIN_IMAGE_MAX_WIDTH, max: MAX_IMAGE_MAX_WIDTH, step: IMAGE_WIDTH_STEP },
+      (v) => {
+        s.imageMaxWidth = coerceImageMaxWidth(v);
+      }
+    );
+
+    this.addToggleField(
+      containerEl,
+      SETTING_TEXT.grayscaleImages,
+      coerceGrayscaleImages(s.grayscaleImages),
+      (v) => {
+        s.grayscaleImages = coerceGrayscaleImages(v);
+      }
+    );
 
     this.addTextField(containerEl, SETTING_TEXT.language, s.language, (v) => {
       s.language = v || "th";

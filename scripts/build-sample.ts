@@ -8,6 +8,9 @@ import { renderMathToSvg } from "../src/core/content/math";
 import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
 import { rewriteLinks, serializeBody } from "../src/core/render";
 import { buildBasesEmbed, hostWith } from "../tests/fixtures/bases-dom";
+import { createImageOptimizer } from "../src/core/epub/image-optimizer";
+import { fakeImageCodec } from "../tests/fixtures/fake-image-codec";
+import { pngBytes } from "../tests/fixtures/image-bytes";
 
 // A real 1×1 transparent PNG (base64) so the sample's cover page and
 // manifest cover get validated against the EPUB 3.3 spec by epubcheck.
@@ -97,25 +100,49 @@ b.setThaiFont({
 // must follow spine order (epubcheck NAV-011 warns otherwise) — the planner
 // guarantees that for real books (FR-015); a hand-built sample has to too.
 const ch = (chapter: number): NavItem => ({ kind: "chapter", chapter });
-b.setNavTree([
-  ch(0),
-  ch(1),
-  {
-    kind: "part",
-    title: "Part A (ignored: index chapter titles it)",
-    indexChapter: 2,
-    children: [
+// Image optimization (013-eink-image-optimization, SC-003): a 3200×1800 PNG
+// goes through the REAL optimizer with a scripted codec that answers with the
+// tiny valid PNG above, and the optimizer's result is what the book embeds — so
+// epubcheck judges the shape of a book whose asset was REPLACED (same href, same
+// image/png media type), which no export in the Node gates can produce: they have
+// no canvas.
+async function addImagesChapter(): Promise<void> {
+  const original = pngBytes({ width: 3200, height: 1800, padBytes: 2000 });
+  const codec = fakeImageCodec({ script: [new Uint8Array(TINY_PNG)] });
+  const optimize = createImageOptimizer({ maxWidth: 1200, grayscale: false }, codec, console.warn);
+
+  const outcome = await optimize(original, "image/png");
+  if (outcome.kind !== "optimized") throw new Error(`the sample image was not optimized: ${outcome.kind}`);
+
+  b.addAsset("images/img_001.png", outcome.bytes, "image/png");
+  b.addChapter("Images", '<p><img src="../images/img_001.png" alt="An optimized screenshot"/></p>');
+}
+
+addImagesChapter()
+  .then(() => {
+    // The tree is set after every chapter exists, as the pipeline does.
+    b.setNavTree([
+      ch(0),
+      ch(1),
       {
         kind: "part",
-        title: "Deep",
-        indexChapter: null,
-        children: [{ kind: "part", title: "Deeper & <nested>", indexChapter: null, children: [ch(3)] }],
+        title: "Part A (ignored: index chapter titles it)",
+        indexChapter: 2,
+        children: [
+          {
+            kind: "part",
+            title: "Deep",
+            indexChapter: null,
+            children: [{ kind: "part", title: "Deeper & <nested>", indexChapter: null, children: [ch(3)] }],
+          },
+        ],
       },
-    ],
-  },
-  ch(4),
-]);
-b.build().then((bytes) => {
-  writeFileSync("sample.epub", bytes);
-  console.log("wrote sample.epub", bytes.length, "bytes");
-});
+      ch(4),
+      ch(5),
+    ]);
+    return b.build();
+  })
+  .then((bytes) => {
+    writeFileSync("sample.epub", bytes);
+    console.log("wrote sample.epub", bytes.length, "bytes");
+  });

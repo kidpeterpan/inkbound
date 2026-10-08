@@ -5,6 +5,9 @@ import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/adapters/render-adapter";
+import { setImageCodec } from "../src/core/epub/image-codec";
+import { fakeImageCodec, SHRUNK_BYTES } from "./fixtures/fake-image-codec";
+import { pngBytes } from "./fixtures/image-bytes";
 import { setThaiFontLoader } from "../src/core/epub/font-assets";
 import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
 import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
@@ -89,6 +92,7 @@ afterEach(async () => {
   console.error = originalError;
   resetRequestUrlImpl();
   setSvgRasterizer(null); // module state discipline, same reason as resetRequestUrlImpl above
+  setImageCodec(null); // same discipline (013-eink-image-optimization codec seam)
   setThaiFontLoader(null); // same discipline (006-thai-font FR-008 seam)
   await fs.rm(outDir, { recursive: true, force: true });
   await Promise.all(vaultDirs.map((d) => fs.rm(d, { recursive: true, force: true })));
@@ -146,6 +150,12 @@ function makePlugin(app: unknown, settings: Partial<EpubExportSettings> = {}): E
     backlinkPosition: "start",
     tocHeadingDepth: 3,
     embedThaiFont: true,
+    // 013-eink-image-optimization: the shipped default is ON, but nearly every
+    // test here asserts on image bytes. They stay isolated from optimization
+    // unless a case opts in (`{ optimizeImages: true }`).
+    optimizeImages: false,
+    imageMaxWidth: 1200,
+    grayscaleImages: false,
     ...settings,
   };
   return plugin;
@@ -218,6 +228,9 @@ async function makeOnloadedPlugin(
     booxUrl: "",
     pushAfterExport: false,
     backlinkPosition: "start",
+    // loadSettings merges over DEFAULT_SETTINGS, where optimization is ON;
+    // keep these tests isolated from it, as makePlugin does.
+    optimizeImages: false,
     ...settings,
   });
   await plugin.onload();
@@ -1584,6 +1597,9 @@ describe("settings persistence", () => {
       backlinkPosition: "start",
       tocHeadingDepth: 3,
       embedThaiFont: true,
+      optimizeImages: true,
+      imageMaxWidth: 1200,
+      grayscaleImages: false,
     });
 
     plugin.settings.outputFolder = outDir;
@@ -1601,6 +1617,9 @@ describe("settings persistence", () => {
       backlinkPosition: "start",
       tocHeadingDepth: 3,
       embedThaiFont: true,
+      optimizeImages: true,
+      imageMaxWidth: 1200,
+      grayscaleImages: false,
     });
   });
 
@@ -1626,6 +1645,9 @@ describe("settings persistence", () => {
       backlinkPosition: "start",
       tocHeadingDepth: 3,
       embedThaiFont: true,
+      optimizeImages: true,
+      imageMaxWidth: 1200,
+      grayscaleImages: false,
     });
   });
 });
@@ -2933,5 +2955,265 @@ describe("one bad embed costs one placeholder, not the chapter", () => {
       "[inkbound] image could not be added: ../images/img_001.png — zip full (referenced by with_diagram.md)",
     ]);
     addSpy.mockRestore();
+  });
+});
+
+// ── 013-eink-image-optimization ────────────────────────────────────────────
+//
+// A real runExport with a scripted codec standing in for the browser's canvas
+// (which jsdom does not have). These prove the decisions and the wiring: that
+// an optimized image lands in the book under the same href and type. They do
+// NOT prove a real canvas draws a sharp picture — that is a device check.
+
+describe("image optimization", () => {
+  const bigPng = () => pngBytes({ width: 3200, height: 1800, padBytes: 2000 });
+
+  async function buildNoteWithImage(original: Uint8Array) {
+    return buildVault({
+      "with_image.md": "![cap](fig.png)\n",
+      "fig.png": original,
+    });
+  }
+
+  it("embeds the codec's smaller image under the same href and media type, and never touches the vault file (US1-1, US1-7, FR-004, FR-014)", async () => {
+    const original = bigPng();
+    const { app, root } = await buildNoteWithImage(original);
+    const codec = fakeImageCodec();
+    setImageCodec(codec);
+
+    await makePlugin(app, { optimizeImages: true }).exportSingle(tfile(root, "with_image.md"));
+
+    const epub = await readEpub("with_image.epub");
+    const embedded = await epub.zip.file("OEBPS/images/img_001.png")!.async("uint8array");
+    expect(Array.from(embedded)).toEqual(Array.from(SHRUNK_BYTES));
+    expect(await epub.chapter(1)).toContain("../images/img_001.png");
+    expect(epub.opf).toContain('href="images/img_001.png" media-type="image/png"');
+    expect(codec.requests).toHaveLength(1);
+    expect(codec.requests[0]).toMatchObject({ mediaType: "image/png", maxWidth: 1200, grayscale: false });
+    expect(warnings).toEqual([]);
+
+    const vaultFile = await fs.readFile(join(root, "fig.png"));
+    expect(Array.from(vaultFile)).toEqual(Array.from(original));
+  });
+
+  it("embeds identical image bytes when the same notes are exported twice with the same settings (FR-009)", async () => {
+    const { app, root } = await buildNoteWithImage(bigPng());
+    setImageCodec(fakeImageCodec());
+    const plugin = makePlugin(app, { optimizeImages: true });
+
+    await plugin.exportSingle(tfile(root, "with_image.md"));
+    const first = await (
+      await readEpub("with_image.epub")
+    ).zip
+      .file("OEBPS/images/img_001.png")!
+      .async("uint8array");
+    await plugin.exportSingle(tfile(root, "with_image.md"));
+    const second = await (
+      await readEpub("with_image.epub")
+    ).zip
+      .file("OEBPS/images/img_001.png")!
+      .async("uint8array");
+
+    expect(Array.from(second)).toEqual(Array.from(first));
+  });
+
+  // ── User Story 2: control from the settings ──────────────────────────────
+
+  describe("settings", () => {
+    afterEach(() => resetPlatform());
+
+    async function exportWithSettings(settings: Partial<EpubExportSettings>) {
+      const original = bigPng();
+      const { app, root } = await buildNoteWithImage(original);
+      const codec = fakeImageCodec();
+      setImageCodec(codec);
+      await makePlugin(app, settings).exportSingle(tfile(root, "with_image.md"));
+      const epub = await readEpub("with_image.epub");
+      const embedded = await epub.zip.file("OEBPS/images/img_001.png")!.async("uint8array");
+      return { original, codec, embedded };
+    }
+
+    it("with optimization off the image is the vault file, byte for byte, and the codec is never asked (US2-2, FR-008)", async () => {
+      const { original, codec, embedded } = await exportWithSettings({ optimizeImages: false });
+      expect(Array.from(embedded)).toEqual(Array.from(original));
+      expect(codec.requests).toEqual([]);
+      expect(warnings).toEqual([]);
+    });
+
+    it("asks the codec for the width the setting names (US2-3)", async () => {
+      const { codec } = await exportWithSettings({ optimizeImages: true, imageMaxWidth: 800 });
+      expect(codec.requests.map((request) => request.maxWidth)).toEqual([800]);
+    });
+
+    it("treats a saved width that is not usable as the default, and the export still succeeds (US2-4, FR-011)", async () => {
+      const unusableWidths: unknown[] = ["abc", 50, 1e9, null, 1200.5];
+      for (const width of unusableWidths) {
+        const { codec, embedded } = await exportWithSettings({
+          optimizeImages: true,
+          imageMaxWidth: width as number,
+        });
+        expect(codec.requests.map((request) => request.maxWidth)).toEqual([1200]);
+        expect(Array.from(embedded)).toEqual(Array.from(SHRUNK_BYTES));
+      }
+    });
+
+    it("uses the same width on a phone as on a desktop for the same settings (US2-5, FR-013)", async () => {
+      const desktop = await exportWithSettings({ optimizeImages: true, imageMaxWidth: 900 });
+
+      const { app, root } = await buildVault({ "with_image.md": "![[fig.png]]\n", "fig.png": bigPng() });
+      const mobileCodec = fakeImageCodec();
+      setImageCodec(mobileCodec);
+      setPlatform("mobile");
+      await makePlugin(app, { optimizeImages: true, imageMaxWidth: 900 }).exportSingle(
+        tfile(root, "with_image.md")
+      );
+
+      expect(mobileCodec.requests.map((request) => request.maxWidth)).toEqual(
+        desktop.codec.requests.map((request) => request.maxWidth)
+      );
+      expect(mobileCodec.requests).toHaveLength(1);
+    });
+  });
+
+  // ── User Story 3: one bad image never breaks the book ───────────────────
+
+  describe("images that cannot be processed", () => {
+    const UNAVAILABLE_WARNING =
+      "[inkbound] image optimization unavailable here — images kept at original size";
+    const STOPPED_WARNING =
+      "[inkbound] image optimization stopped — several images timed out; the rest were kept at original size";
+
+    afterEach(() => vi.useRealTimers());
+
+    async function embeddedImage(epubName: string, href: string) {
+      const epub = await readEpub(epubName);
+      return Array.from(await epub.zip.file(href)!.async("uint8array"));
+    }
+
+    it("embeds a damaged PNG as it is, names it in the warnings, and finishes (US3-1, FR-006)", async () => {
+      const damaged = Uint8Array.of(1, 2, 3, 4, 5, 6, 7, 8);
+      const { app, root } = await buildNoteWithImage(damaged);
+      setImageCodec(fakeImageCodec());
+
+      await makePlugin(app, { optimizeImages: true }).exportSingle(tfile(root, "with_image.md"));
+
+      expect(await embeddedImage("with_image.epub", "OEBPS/images/img_001.png")).toEqual(Array.from(damaged));
+      expect(warnings).toEqual([
+        "[inkbound] image not optimized: fig.png — not a readable PNG or JPEG image (referenced by with_image.md)",
+      ]);
+      expect(NOTICES.some((notice) => notice.startsWith("EPUB saved"))).toBe(true);
+    });
+
+    it("gives the same book as optimization off when every image fails, plus one warning each (US3-3, SC-002)", async () => {
+      const files = { "with_images.md": "![[a.png]]\n\n![[b.png]]\n", "a.png": bigPng(), "b.png": bigPng() };
+      const offVault = await buildVault(files);
+      await makePlugin(offVault.app, { optimizeImages: false }).exportSingle(
+        tfile(offVault.root, "with_images.md")
+      );
+      const offBook = await epubEntryFingerprints(await fs.readFile(join(outDir, "with_images.epub")));
+
+      const failingCodec = fakeImageCodec({
+        script: [new Error("could not be decoded"), new Error("could not be encoded")],
+      });
+      setImageCodec(failingCodec);
+      warnings.length = 0;
+      const onVault = await buildVault(files);
+      await makePlugin(onVault.app, { optimizeImages: true }).exportSingle(
+        tfile(onVault.root, "with_images.md")
+      );
+      const onBook = await epubEntryFingerprints(await fs.readFile(join(outDir, "with_images.epub")));
+
+      expect(onBook).toEqual(offBook);
+      expect(warnings).toEqual([
+        "[inkbound] image not optimized: a.png — could not be decoded (referenced by with_images.md)",
+        "[inkbound] image not optimized: b.png — could not be encoded (referenced by with_images.md)",
+      ]);
+    });
+
+    it("keeps every image and warns once for the whole book when the device cannot process images at all (US3-4)", async () => {
+      const files = { "with_images.md": "![[a.png]]\n\n![[b.png]]\n", "a.png": bigPng(), "b.png": bigPng() };
+      const { app, root } = await buildVault(files);
+      setImageCodec(null); // the real codec, which jsdom cannot run
+
+      await makePlugin(app, { optimizeImages: true }).exportSingle(tfile(root, "with_images.md"));
+
+      expect(await embeddedImage("with_images.epub", "OEBPS/images/img_001.png")).toEqual(
+        Array.from(bigPng())
+      );
+      expect(await embeddedImage("with_images.epub", "OEBPS/images/img_002.png")).toEqual(
+        Array.from(bigPng())
+      );
+      expect(warnings).toEqual([UNAVAILABLE_WARNING]);
+    });
+
+    it("says nothing about the device when no image needs processing", async () => {
+      const { app, root } = await buildVault({
+        "with_image.md": "![[small.png]]\n",
+        "small.png": pngBytes({ width: 100, height: 100 }),
+      });
+      setImageCodec(null);
+
+      await makePlugin(app, { optimizeImages: true }).exportSingle(tfile(root, "with_image.md"));
+
+      expect(warnings).toEqual([]);
+    });
+
+    it("stops trying after three images in a row never finish, and the export still completes (US3-5, FR-015)", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      const names = ["a", "b", "c", "d"];
+      const files: Record<string, string | Uint8Array> = {
+        "with_images.md": names.map((name) => `![[${name}.png]]`).join("\n\n") + "\n",
+      };
+      for (const name of names) files[`${name}.png`] = bigPng();
+      const { app, root } = await buildVault(files);
+      const codec = fakeImageCodec({ script: ["never-settles", "never-settles", "never-settles"] });
+      setImageCodec(codec);
+
+      const exporting = makePlugin(app, { optimizeImages: true }).exportSingle(tfile(root, "with_images.md"));
+      let finished = false;
+      void exporting.finally(() => (finished = true));
+      while (!finished) await vi.advanceTimersByTimeAsync(20_000);
+      await exporting;
+
+      expect(codec.requests).toHaveLength(3);
+      expect(warnings.filter((line) => line.includes("timed out after 20 seconds"))).toHaveLength(3);
+      expect(warnings.filter((line) => line === STOPPED_WARNING)).toHaveLength(1);
+      expect(warnings).toHaveLength(4);
+      const epub = await readEpub("with_images.epub");
+      expect(epub.names.filter((name) => name.startsWith("OEBPS/images/img_"))).toHaveLength(4);
+    });
+  });
+
+  // ── User Story 4: grayscale ─────────────────────────────────────────────
+
+  describe("grayscale", () => {
+    async function requestsFor(settings: Partial<EpubExportSettings>, image: Uint8Array = bigPng()) {
+      const { app, root } = await buildNoteWithImage(image);
+      const codec = fakeImageCodec();
+      setImageCodec(codec);
+      await makePlugin(app, settings).exportSingle(tfile(root, "with_image.md"));
+      return codec.requests;
+    }
+
+    it("asks the codec to convert a shrunk image when grayscale is on (US4-1)", async () => {
+      const requests = await requestsFor({ optimizeImages: true, grayscaleImages: true });
+      expect(requests.map((request) => request.grayscale)).toEqual([true]);
+    });
+
+    it("asks for the image to keep its color when grayscale is off (US4-2)", async () => {
+      const requests = await requestsFor({ optimizeImages: true, grayscaleImages: false });
+      expect(requests.map((request) => request.grayscale)).toEqual([false]);
+    });
+
+    it("never hands an image that already fits to the codec, grayscale or not (US4-3)", async () => {
+      const small = pngBytes({ width: 800, height: 600, padBytes: 2000 });
+      const requests = await requestsFor({ optimizeImages: true, grayscaleImages: true }, small);
+      expect(requests).toEqual([]);
+    });
+
+    it("does nothing at all when optimization is off, whatever grayscale says (US4-5)", async () => {
+      const requests = await requestsFor({ optimizeImages: false, grayscaleImages: true });
+      expect(requests).toEqual([]);
+    });
   });
 });

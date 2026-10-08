@@ -119,7 +119,8 @@ src/
   - `book/` — what goes in the book and in what order: `book-plan`,
     `book-tree`, `collect`, `naming`, `metadata`, `backlinks`.
   - `epub/` — building the file: `epub`, `epub-css`, `cover`, `book-identity`,
-    `chapter-assets`, `fonts`, `font-assets` (plus the `fonts/` directory of
+    `chapter-assets`, `image-fit`, `image-header`, `image-optimizer`,
+    `image-codec`, `fonts`, `font-assets` (plus the `fonts/` directory of
     `.ttf` files, licence text and declaration).
   - `delivery/` — getting it to the reader: `output`, `share`, `booxdrop`,
     `report`, and `settings-core`. That last one holds the whole settings model
@@ -190,7 +191,15 @@ from coverage for that reason.
    markdown, not by looking at the rendered page.
 3. `main.ts` resolves each image's bytes from the vault (or takes rasterized
    Mermaid bytes directly) and feeds chapter HTML + assets to `epub.ts`'s
-   `EpubBuilder`.
+   `EpubBuilder`. A vault PNG/JPEG first passes through the optimizer that
+   `export-pipeline.ts` builds from the settings (`core/epub/image-optimizer.ts`;
+   absent when optimization is off, which leaves the byte-for-byte path). It
+   decides from the file's header (`image-header`), keeps the original unless the
+   result is smaller, and gives up per image or per book with a warning; the only
+   browser-facing piece is `image-codec.ts` (canvas), injected via
+   `setImageCodec`. It runs in its own try/catch inside `resolveChapterAssets` so a
+   failure never becomes a "missing image". An optimized image keeps its type,
+   because its `.ext` is already stamped into the chapter HTML.
 4. `metadata.ts`'s `resolveMeta` derives book metadata (title/author/
    language/cover) from the exporting note's own frontmatter.
 5. Optionally, `booxdrop.ts`'s `BooxDropClient` (via `http.ts`'s
