@@ -100,3 +100,36 @@ export function findImageEmbeds(markdown: string): string[] {
 export function isSupportedCoverExt(ext: string): boolean {
   return COVER_EXTS.includes(ext.toLowerCase());
 }
+
+// 014-preview-before-export: WHICH cover a book will get, decided apart from
+// fetching it. A preview shows the decision and must not carry it out (no
+// download, no image read), and the export carries out the very decision the
+// preview showed, so the two cannot disagree about where a cover comes from.
+//
+// `embeds` is the first-image fallback: nothing is declared, so the metadata
+// note's own image embeds are tried in order when the book is built. "Usable"
+// (found, supported type, readable) is decided then, not here.
+export type CoverPlan =
+  | { kind: "url"; url: string }
+  | { kind: "path"; path: string }
+  | { kind: "embeds"; notePath: string; targets: string[] }
+  | { kind: "none" };
+
+/**
+ * The cover the note DECLARES, or null when it declares none. Precedence is
+ * the export's: a `cover:` value (URL or path) beats the legacy `coverUrl:`.
+ */
+export function declaredCover(
+  coverValue: CoverValue | null,
+  legacyCoverUrl: string | null
+): CoverPlan | null {
+  if (coverValue) return coverValue;
+  if (legacyCoverUrl) return { kind: "url", url: legacyCoverUrl };
+  return null;
+}
+
+/** The fallback when nothing is declared: the note's image embeds, if it has any. */
+export function planCoverFromEmbeds(notePath: string, targets: readonly string[]): CoverPlan {
+  if (targets.length === 0) return { kind: "none" };
+  return { kind: "embeds", notePath, targets: [...targets] };
+}

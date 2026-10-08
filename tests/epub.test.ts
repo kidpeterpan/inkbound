@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder, type NavItem, chapterHref } from "../src/core/epub/epub";
+import { EpubBuilder, type NavItem, chapterHref, validateNavTree } from "../src/core/epub/epub";
 import { EPUB_CSS, FOOTNOTE_CSS } from "../src/core/epub/epub-css";
 import { escapeXml } from "../src/core/common/xml";
 
@@ -599,5 +599,30 @@ describe("FOOTNOTE_CSS (011 US5)", () => {
     const zip = await JSZip.loadAsync(await b.build());
     const shipped = await zip.file("OEBPS/style/epub.css")!.async("string");
     expect(shipped.split(FOOTNOTE_CSS).length - 1).toBe(1);
+  });
+});
+
+// 014-preview-before-export: the preview applies the export's own nav check
+// rather than a copy of it, so the check has to be reachable directly.
+describe("validateNavTree (shared with the preview)", () => {
+  const chapter = (n: number): NavItem => ({ kind: "chapter", chapter: n });
+
+  it("accepts a tree that lists every chapter once, nested or not", () => {
+    expect(() => validateNavTree([chapter(0), chapter(1), chapter(2)], 3)).not.toThrow();
+    expect(() =>
+      validateNavTree([chapter(0), { kind: "part", title: "P", indexChapter: 1, children: [chapter(2)] }], 3)
+    ).not.toThrow();
+  });
+
+  it("rejects a chapter outside the book, listed twice, or missing", () => {
+    expect(() => validateNavTree([chapter(0), chapter(5)], 2)).toThrow(/range|5/);
+    expect(() => validateNavTree([chapter(0), chapter(0)], 1)).toThrow(/twice/);
+    expect(() => validateNavTree([chapter(0)], 2)).toThrow(/chapter 2|missing/i);
+  });
+
+  it("rejects a Part that has nothing to open", () => {
+    expect(() =>
+      validateNavTree([chapter(0), { kind: "part", title: "Empty", indexChapter: null, children: [] }], 1)
+    ).toThrow(/Empty/);
   });
 });

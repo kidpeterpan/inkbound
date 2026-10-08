@@ -9,9 +9,26 @@
 // reading as a sequence of steps.
 import { App, requestUrl, TAbstractFile, TFile } from "obsidian";
 import { resolveMeta, type MetaDefaults } from "../core/book/metadata";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt, type CoverValue } from "../core/epub/cover";
+import {
+  parseCoverValue,
+  findImageEmbeds,
+  isSupportedCoverExt,
+  declaredCover,
+  planCoverFromEmbeds,
+  type CoverPlan,
+  type CoverValue,
+} from "../core/epub/cover";
 import { errorMessage } from "../core/common/error-text";
 import type { ExportMeta } from "../core/types";
+
+/**
+ * What a note's frontmatter decides about its book, before any cover is
+ * fetched: the text fields (no cover bytes yet) and which cover source applies.
+ */
+export interface MetaPlan {
+  meta: ExportMeta;
+  cover: CoverPlan;
+}
 
 /**
  * Resolves a book's metadata from one note's frontmatter and attaches a cover.
@@ -19,6 +36,11 @@ import type { ExportMeta } from "../core/types";
  * Constructed per export rather than held on the plugin: the defaults it reads
  * (`fallbackAuthor`, `language`) come from settings, which the user can change
  * between exports.
+ *
+ * 014-preview-before-export: the work is two steps so a preview can do the
+ * first without the second. `plan` decides (and never touches the network or
+ * an image); `attachCover` carries the decision out; `resolve` is the two in
+ * order, which is all an export ever did.
  */
 export class NoteMetaSource {
   constructor(
@@ -27,15 +49,11 @@ export class NoteMetaSource {
   ) {}
 
   /**
-   * Reads `file`'s frontmatter for title/author/language/cover. A null file
-   * (a folder export with no index note) falls back to `fallbackBasename` for
-   * the title and gets no cover.
+   * Reads `file`'s frontmatter for title/author/language and decides which
+   * cover source applies. A null file (a folder export with no index note)
+   * falls back to `fallbackBasename` for the title and gets no cover.
    */
-  async resolve(
-    file: TFile | null,
-    fallbackBasename: string,
-    warn: (message: string) => void
-  ): Promise<ExportMeta> {
+  async plan(file: TFile | null, fallbackBasename: string): Promise<MetaPlan> {
     const fm = file ? this.app.metadataCache.getFileCache(file)?.frontmatter : undefined;
     const resolved = resolveMeta(fm, file ? file.basename : fallbackBasename, this.defaults);
     const meta: ExportMeta = {
@@ -43,47 +61,78 @@ export class NoteMetaSource {
       author: resolved.author,
       language: resolved.language,
     };
-    await this.attachCover(meta, parseCoverValue(fm?.cover), resolved.coverUrl, file, warn);
+    const cover = await this.planCover(file, parseCoverValue(fm?.cover), resolved.coverUrl);
+    return { meta, cover };
+  }
+
+  /** `plan`, then `attachCover`: the whole of what an export has always done. */
+  async resolve(
+    file: TFile | null,
+    fallbackBasename: string,
+    warn: (message: string) => void
+  ): Promise<ExportMeta> {
+    const { meta, cover } = await this.plan(file, fallbackBasename);
+    await this.attachCover(meta, cover, file, warn);
     return meta;
   }
 
-  // Cover resolution order (FR-007, research R5): explicit `cover:` field →
-  // legacy `coverUrl:` field → first image embed in the metadata note's
-  // source (fallback, FR-003). Every failure mode degrades to a coverless
-  // export with a warning — never fails an export over artwork (spec +
-  // constitution II).
-  private async attachCover(
+  /**
+   * Carries a cover plan out, adding the cover to `meta`. Every failure mode
+   * degrades to a coverless export with a warning — never fails an export over
+   * artwork (spec + constitution II).
+   */
+  async attachCover(
     meta: ExportMeta,
-    coverValue: CoverValue | null,
-    legacyCoverUrl: string | null,
+    cover: CoverPlan,
     file: TFile | null,
     warn: (message: string) => void
   ): Promise<void> {
-    if (coverValue?.kind === "url") {
-      await this.downloadCover(meta, coverValue.url, warn);
-      return;
+    switch (cover.kind) {
+      case "url":
+        await this.downloadCover(meta, cover.url, warn);
+        return;
+      case "path":
+        await this.embedLocalCover(meta, cover.path, file, `cover: ${cover.path}`, warn);
+        return;
+      case "embeds":
+        await this.embedFirstUsableImage(meta, cover, file);
+        return;
+      case "none":
+        return;
     }
-    if (coverValue?.kind === "path") {
-      await this.embedLocalCover(meta, coverValue.path, file, `cover: ${coverValue.path}`, warn);
-      return;
-    }
-    if (legacyCoverUrl) {
-      await this.downloadCover(meta, legacyCoverUrl, warn);
-      return;
-    }
-    if (!file) return;
+  }
+
+  // Cover source order (FR-007, research R5): explicit `cover:` field →
+  // legacy `coverUrl:` field → first image embed in the metadata note's
+  // source (fallback, FR-003). The first two are decided by the pure
+  // declaredCover; the note's own text is read only when neither is declared.
+  private async planCover(
+    file: TFile | null,
+    coverValue: CoverValue | null,
+    legacyCoverUrl: string | null
+  ): Promise<CoverPlan> {
+    const declared = declaredCover(coverValue, legacyCoverUrl);
+    if (declared) return declared;
+    if (!file) return { kind: "none" };
     // No cover frontmatter at all — fall back to the first image embed of
-    // the metadata note itself (code-fence-aware scan in cover.ts). Keep
-    // scanning: an embed that is missing or unsupported is skipped in
-    // favor of the next one (spec edge case).
+    // the metadata note itself (code-fence-aware scan in cover.ts).
     const md = await this.app.vault.cachedRead(file).catch(() => null);
-    if (md === null) return;
-    for (const target of findImageEmbeds(md)) {
-      // Fallback candidates are skipped SILENTLY: a note whose first
-      // embed is a gif or a stale link but whose second is a fine png
-      // gets a cover with no noise. Warnings are reserved for the
-      // explicitly declared `cover:` (US4).
-      if (await this.embedLocalCover(meta, target, file, `first image in ${file.path}`, null)) return;
+    if (md === null) return { kind: "none" };
+    return planCoverFromEmbeds(file.path, findImageEmbeds(md));
+  }
+
+  // Keep trying: an embed that is missing or unsupported is skipped in favor
+  // of the next one (spec edge case). Fallback candidates are skipped
+  // SILENTLY: a note whose first embed is a gif or a stale link but whose
+  // second is a fine png gets a cover with no noise. Warnings are reserved for
+  // the explicitly declared `cover:` (US4).
+  private async embedFirstUsableImage(
+    meta: ExportMeta,
+    cover: Extract<CoverPlan, { kind: "embeds" }>,
+    file: TFile | null
+  ): Promise<void> {
+    for (const target of cover.targets) {
+      if (await this.embedLocalCover(meta, target, file, `first image in ${cover.notePath}`, null)) return;
     }
   }
 

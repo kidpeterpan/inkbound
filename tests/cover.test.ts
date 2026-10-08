@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "../src/core/epub/cover";
+import {
+  parseCoverValue,
+  findImageEmbeds,
+  isSupportedCoverExt,
+  declaredCover,
+  planCoverFromEmbeds,
+} from "../src/core/epub/cover";
 
 describe("parseCoverValue", () => {
   it("accepts a vault-relative path", () => {
@@ -97,5 +103,55 @@ describe("isSupportedCoverExt", () => {
     expect(isSupportedCoverExt("bmp")).toBe(false);
     expect(isSupportedCoverExt("tiff")).toBe(false);
     expect(isSupportedCoverExt("")).toBe(false);
+  });
+});
+
+// 014-preview-before-export: the cover DECISION, separated from carrying it
+// out, so a preview can name where a cover will come from without fetching it.
+describe("declaredCover (which declared source applies)", () => {
+  it("a cover: URL is a url plan", () => {
+    expect(declaredCover({ kind: "url", url: "https://x.example/c.png" }, null)).toEqual({
+      kind: "url",
+      url: "https://x.example/c.png",
+    });
+  });
+
+  it("a cover: path or wikilink is a path plan", () => {
+    expect(declaredCover({ kind: "path", path: "assets/cover.png" }, null)).toEqual({
+      kind: "path",
+      path: "assets/cover.png",
+    });
+  });
+
+  it("the legacy coverUrl: applies only when cover: is absent", () => {
+    expect(declaredCover(null, "https://x.example/legacy.jpg")).toEqual({
+      kind: "url",
+      url: "https://x.example/legacy.jpg",
+    });
+  });
+
+  it("cover: wins over the legacy coverUrl:", () => {
+    expect(declaredCover({ kind: "path", path: "cover.png" }, "https://x.example/legacy.jpg")).toEqual({
+      kind: "path",
+      path: "cover.png",
+    });
+  });
+
+  it("is null when nothing is declared, so the caller can look at the note's own images", () => {
+    expect(declaredCover(null, null)).toBeNull();
+  });
+});
+
+describe("planCoverFromEmbeds (the first-image fallback)", () => {
+  it("names the note and every candidate, in order, when the note embeds images", () => {
+    expect(planCoverFromEmbeds("Book/Index.md", ["a.png", "b.jpg"])).toEqual({
+      kind: "embeds",
+      notePath: "Book/Index.md",
+      targets: ["a.png", "b.jpg"],
+    });
+  });
+
+  it("is none when the note embeds no image", () => {
+    expect(planCoverFromEmbeds("Book/Index.md", [])).toEqual({ kind: "none" });
   });
 });

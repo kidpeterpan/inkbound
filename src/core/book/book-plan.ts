@@ -13,6 +13,7 @@
 //   - toNavItems:           position-keyed nav, parts only (009 FR-013/R2)
 //   - planFolderOrder:      plan, or degrade to flat order with a warning
 //                           (Constitution II / FR-016)
+//   - tocFallbackWarning:   the flat-TOC warning text, shared with the preview
 //
 // PURE MODULE — no `obsidian` import (constitution IV), so vitest loads it
 // directly. Path-keyed throughout, never basename, because two subfolders may
@@ -138,6 +139,14 @@ export interface FolderPlan {
  *  warning console lines). */
 export function chapterOrderFallbackWarning(error: unknown): string {
   return `chapter ordering fell back to filename order: ${errorMessage(error)}`;
+}
+
+/** The one warning text for a table-of-contents tree the book builder rejects.
+ *  Shared by the export (which falls back to a flat list) and the preview
+ *  (which shows the same flat list), so the two cannot word it differently;
+ *  scripts/local-export.ts parses the export's console line, so keep it. */
+export function tocFallbackWarning(error: unknown): string {
+  return `table of contents fell back to a flat list: ${errorMessage(error)}`;
 }
 
 /**
