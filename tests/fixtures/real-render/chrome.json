@@ -1,9 +1,9 @@
 {
   "name": "chrome",
-  "covers": "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/core/render.ts) and task-list checkboxes",
+  "covers": "UI chrome Obsidian adds to reading-view markup (CHROME_SELECTORS in src/core/render/dom.ts) and task-list checkboxes",
   "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
-  "obsidianVersion": "1.13.7",
-  "capturedAt": "2026-09-29",
+  "obsidianVersion": "1.14.4",
+  "capturedAt": "2026-10-08",
   "basePath": "/VAULT",
   "sourceMarkdown": "---\ntitle: Frontmatter block\ntags: [alpha]\n---\n\n# Heading one\n\nIntro paragraph.\n\n## Heading two\n\n- item one\n  - nested item\n- item two\n\n- [ ] open task\n- [x] done task\n\n```ts\nconst x = 1;\n```\n\n> [!note] A callout\n> Callout body.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n",
   "renderedMarkdown": "\n# Heading one\n\nIntro paragraph.\n\n## Heading two\n\n- item one\n  - nested item\n- item two\n\n- [ ] open task\n- [x] done task\n\n```ts\nconst x = 1;\n```\n\n> [!note] A callout\n> Callout body.\n\n| a | b |\n| - | - |\n| 1 | 2 |\n",
