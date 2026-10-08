@@ -5,7 +5,7 @@ import {
   resolveTitle,
   resolveCoverUrl,
   resolveMeta,
-} from "../src/core/metadata";
+} from "../src/core/book/metadata";
 
 describe("normalizeLanguage", () => {
   it("passes through BCP-47-shaped codes, lowercased", () => {

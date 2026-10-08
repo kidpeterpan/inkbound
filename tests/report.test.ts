@@ -4,7 +4,7 @@ import {
   buildReport,
   renderReportText,
   type ScopedWarning,
-} from "../src/core/report";
+} from "../src/core/delivery/report";
 
 // ── The collector (T002) ──────────────────────────────────────────────────
 //

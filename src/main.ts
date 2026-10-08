@@ -1,21 +1,21 @@
 import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } from "obsidian";
-import type { NavItem } from "./core/epub";
-import type { FolderInput, NoteInput } from "./core/book-tree";
-import { bfsLinked } from "./core/collect";
+import type { NavItem } from "./core/epub/epub";
+import type { FolderInput, NoteInput } from "./core/book/book-tree";
+import { bfsLinked } from "./core/book/collect";
 import {
   chapterOrderFallbackWarning,
   legacyChapterOrder,
   normalizeTags,
   orderedLinkTargets,
   planFolderOrder,
-} from "./core/book-plan";
-import { deriveChapterTitle } from "./core/naming";
-import { canShareEpub, shareEpub, type ShareTarget } from "./core/share";
+} from "./core/book/book-plan";
+import { deriveChapterTitle } from "./core/book/naming";
+import { canShareEpub, shareEpub, type ShareTarget } from "./core/delivery/share";
 import { DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab } from "./adapters/settings";
 import type { ExportMeta } from "./core/types";
-import type { MetaDefaults } from "./core/metadata";
+import type { MetaDefaults } from "./core/book/metadata";
 import { NoteMetaSource } from "./adapters/meta-adapter";
-import type { ExportReport } from "./core/report";
+import type { ExportReport } from "./core/delivery/report";
 import { openExportReport } from "./adapters/report-view";
 import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
 
@@ -189,13 +189,13 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   // The frontmatter read; the shape rule (why a scalar `tags` string is NOT
-  // tags) lives in core/book-plan.ts normalizeTags.
+  // tags) lives in core/book/book-plan.ts normalizeTags.
   private tagsOf(f: TFile): string[] {
     return normalizeTags(this.app.metadataCache.getFileCache(f)?.frontmatter?.tags);
   }
 
   // Reads one note's regular links off the metadata cache and hands them to
-  // the pure rule in core/book-plan.ts (document order, no self-links, notes
+  // the pure rule in core/book/book-plan.ts (document order, no self-links, notes
   // only). Obsidian keeps embeds in `embeds` and frontmatter links in
   // `frontmatterLinks`, so reading `links` alone is what makes FR-005
   // ("embeds never order") hold — do not widen this to resolvedLinks, whose
@@ -239,7 +239,7 @@ export default class EpubExportPlugin extends Plugin {
   // Pre-009 folder collection: direct children only, index first, NN_ then
   // alphabetical — the shape the planner degrades to (research R5) and the
   // reference for FR-013 ("flat folders export identically"). The ordering
-  // rules live in core/book-plan.ts; this maps the basenames back to TFiles
+  // rules live in core/book/book-plan.ts; this maps the basenames back to TFiles
   // (unique within one folder — these are direct children of a single TFolder).
   private legacyFolderOrder(mdFiles: TFile[], folder: TFolder): { index: TFile | null; files: TFile[] } {
     const { indexBasename, order } = legacyChapterOrder(
@@ -257,7 +257,7 @@ export default class EpubExportPlugin extends Plugin {
   // notifying when the folder has no Markdown notes; a planner failure
   // degrades to the legacy flat order with a warning, never aborts
   // (Constitution II / FR-016 — the degradation itself lives in
-  // core/book-plan.ts, where it is unit-tested).
+  // core/book/book-plan.ts, where it is unit-tested).
   private planFolderExport(
     folder: TFolder,
     legacy: { index: TFile | null; files: TFile[] }

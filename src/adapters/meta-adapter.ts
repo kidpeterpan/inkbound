@@ -8,9 +8,9 @@
 // what makes the policy testable on its own and keeps main.ts's export methods
 // reading as a sequence of steps.
 import { App, requestUrl, TAbstractFile, TFile } from "obsidian";
-import { resolveMeta, type MetaDefaults } from "../core/metadata";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt, type CoverValue } from "../core/cover";
-import { errorMessage } from "../core/error-text";
+import { resolveMeta, type MetaDefaults } from "../core/book/metadata";
+import { parseCoverValue, findImageEmbeds, isSupportedCoverExt, type CoverValue } from "../core/epub/cover";
+import { errorMessage } from "../core/common/error-text";
 import type { ExportMeta } from "../core/types";
 
 /**

@@ -1,6 +1,6 @@
 // ── Mermaid rasterization (Round 3) ───────────────────────────────────────
 //
-// The prior rounds (normalizeMermaidSvg in render-svg.ts) made mermaid SVGs
+// The prior rounds (normalizeMermaidSvg in render/svg.ts) made mermaid SVGs
 // spec-valid (epubcheck: 0 errors). That's not enough for every device: at
 // least one e-ink reader (Onyx Boox / Neo Reader 3) doesn't render inline SVG
 // inside EPUB XHTML at all, while plain raster <img> assets are proven to work
@@ -22,9 +22,9 @@
 // render-adapter.ts re-exports `setSvgRasterizer`/`SvgRasterizer` and wires
 // `rasterizeMermaidDiagrams` into `renderUnitToChapter`.
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint).
-import { numberedImageHref } from "./render-links";
+import { numberedImageHref } from "./links";
 
 export type SvgRasterizer = (
   svg: SVGSVGElement

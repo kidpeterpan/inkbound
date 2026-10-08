@@ -8,7 +8,7 @@
 // `obsidian`) reads `Platform` and passes a plain PlatformKind in. Detecting
 // here would drag an `obsidian` import into the pure core and break the
 // module-split invariant the constitution calls load-bearing (principle IV) —
-// same discipline as setSvgRasterizer injecting the rasterizer in render.ts.
+// same discipline as setSvgRasterizer injecting the rasterizer in render/index.ts.
 
 import { coerceMobileOutputFolder, resolveOutputPath, DEFAULT_MOBILE_OUTPUT_FOLDER } from "./settings-core";
 

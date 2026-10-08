@@ -1,7 +1,7 @@
 // Backlink trail ("Linked from:") for exported chapters — pure module, zero
 // "obsidian" imports, so vitest loads it directly (same rule as collect.ts).
 // Contract: specs/001-breadcrumb-trail/contracts/backlinks-fragment.md.
-import { escapeXml } from "./xml";
+import { escapeXml } from "../common/xml";
 
 // Inverts Obsidian's resolvedLinks graph (source path → {target path → count})
 // into target → ordered linking sources, restricted to the chapters actually

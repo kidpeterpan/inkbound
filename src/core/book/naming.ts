@@ -8,7 +8,7 @@ export function slugify(title: string): string {
 }
 
 import { firstNonEmptyString } from "./metadata";
-import { stripFootnoteRefs } from "./footnote-refs";
+import { stripFootnoteRefs } from "../content/footnote-refs";
 
 // Chapter-title precedence (007-chapter-titles, resolved from the original
 // plan's Task 11): first usable H1 → first usable frontmatter alias → basename.

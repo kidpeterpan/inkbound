@@ -19,7 +19,7 @@
 //   - the DOM half (`processFootnotes`) rewrites what survived, and degrades defensively
 //     if a renderer ever does hand it an orphan.
 
-import { attributedTo } from "./error-text";
+import { attributedTo } from "../common/error-text";
 
 export interface FootnoteSourceScan {
   orphanRefs: string[];

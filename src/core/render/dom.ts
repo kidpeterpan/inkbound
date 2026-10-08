@@ -3,10 +3,10 @@
 // fragment links (tags), embed flattening, and the outerHTML-to-inner-XML
 // serialization itself.
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint).
-import { normalizeMermaidSvg } from "./render-svg";
-import { flattenEmbeds, omitBasesBlocks } from "./render-embeds";
+import { normalizeMermaidSvg } from "./svg";
+import { flattenEmbeds, omitBasesBlocks } from "./embeds";
 
 export const CHROME_SELECTORS = [
   ".edit-block-button",

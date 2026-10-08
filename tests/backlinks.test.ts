@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBacklinks, renderBacklinksFragment, type BacklinkEntry } from "../src/core/backlinks";
+import { computeBacklinks, renderBacklinksFragment, type BacklinkEntry } from "../src/core/book/backlinks";
 
 // ── computeBacklinks (contract: specs/001-breadcrumb-trail/contracts/backlinks-fragment.md) ──
 

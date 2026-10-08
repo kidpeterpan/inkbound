@@ -1,6 +1,6 @@
 // Heading-level TOC collection (004-heading-toc).
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint).
 //
 // The EPUB nav (OEBPS/nav.xhtml) lists chapters; this feature adds each

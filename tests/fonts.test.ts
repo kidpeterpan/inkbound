@@ -5,14 +5,14 @@ import {
   THAI_FONT_FAMILY,
   OFL_LICENSE_TEXT,
   THAI_FONT_META,
-} from "../src/core/fonts";
+} from "../src/core/epub/fonts";
 import {
   buildAsset,
   decodeBase64,
   loadThaiFontAsset,
   setThaiFontLoader,
   getThaiFontLoader,
-} from "../src/core/font-assets";
+} from "../src/core/epub/font-assets";
 
 describe("containsThai", () => {
   it("detects Thai consonants and vowels", () => {

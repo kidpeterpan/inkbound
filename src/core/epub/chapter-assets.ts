@@ -2,9 +2,9 @@
 // assets on the book. main.ts's runExport used to do this inline; it lives
 // here so the "one bad image costs one warning, never the chapter" rule can be
 // tested with a fake vault instead of the obsidian stub.
-import { mediaTypeForExt } from "./media-types";
-import { attributedTo, errorMessage } from "./error-text";
-import type { ChapterImage } from "./types";
+import { mediaTypeForExt } from "../common/media-types";
+import { attributedTo, errorMessage } from "../common/error-text";
+import type { ChapterImage } from "../types";
 
 // What resolving an image needs from the vault. `F` is whatever the caller
 // uses to name a found file (a TFile in main.ts); this module only passes it

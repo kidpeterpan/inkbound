@@ -5,11 +5,11 @@ import { join, dirname } from "node:path";
 import JSZip from "jszip";
 import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/adapters/render-adapter";
-import { setThaiFontLoader } from "../src/core/font-assets";
+import { setThaiFontLoader } from "../src/core/epub/font-assets";
 import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
-import { buildStaticTable, extractBaseTable } from "../src/core/bases";
+import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
 import { buildBasesEmbed, hostWith } from "./fixtures/bases-dom";
-import { EpubBuilder } from "../src/core/epub";
+import { EpubBuilder } from "../src/core/epub/epub";
 import {
   TFile,
   TFolder,
@@ -31,8 +31,8 @@ import {
 } from "./fixtures/obsidian-stub";
 import type { StubCommand } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
-import { setShareHost } from "../src/core/share";
-import { BOOK_GROUP_LABEL } from "../src/core/report";
+import { setShareHost } from "../src/core/delivery/share";
+import { BOOK_GROUP_LABEL } from "../src/core/delivery/report";
 import type { EpubExportSettings } from "../src/adapters/settings";
 import { epubEntryFingerprints } from "./fixtures/epub-fingerprint";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
@@ -891,7 +891,7 @@ describe("exportFolder", () => {
     // Regression test: exportFolder used to pass `(fm?.tags ?? []) as string[]`
     // straight through with no runtime check. A scalar `tags: "notebook
     // mainframe"` string would reach pickIndexNote, whose `.includes("book")`
-    // / `.includes("main")` checks (src/core/collect.ts) are Array.prototype.includes
+    // / `.includes("main")` checks (src/core/book/collect.ts) are Array.prototype.includes
     // for genuine arrays but silently fall through to
     // String.prototype.includes — SUBSTRING matching — for a scalar string.
     // "notebook mainframe" contains both "book" and "main", so without the
@@ -2228,7 +2228,7 @@ describe("mobile export path (008-mobile-support)", () => {
 });
 
 // 008-mobile-support: documents the code path that makes the empty-basePath
-// case in render-links.ts's rewriteImages the NORMAL one rather than an exotic one.
+// case in render/links.ts's rewriteImages the NORMAL one rather than an exotic one.
 // Mobile's vault adapter is not a FileSystemAdapter, so main.ts has no base
 // path to hand the renderer.
 describe("basePath on a non-FileSystemAdapter vault (008-mobile-support)", () => {

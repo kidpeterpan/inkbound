@@ -98,8 +98,8 @@ if (typeof HTMLElement !== "undefined" && !("setCssStyles" in HTMLElement.protot
 
 // createDiv()/createSpan() shortcuts on Node.prototype — same append-to-this
 // semantics as createEl (Obsidian's plugin-review lint prefers these over
-// createEl("div")/createEl("span"), so render.ts/render-adapter.ts call
-// them directly).
+// createEl("div")/createEl("span"), so the render library (src/core/render/)
+// and render-adapter.ts call them directly).
 if (typeof Node !== "undefined" && !("createDiv" in Node.prototype)) {
   Object.defineProperty(Node.prototype, "createDiv", {
     value: function (this: Node, o?: DomElementInfoLike | string): HTMLElement {
@@ -126,7 +126,7 @@ if (typeof Node !== "undefined" && !("createSpan" in Node.prototype)) {
 // `createFragment` as bare AMBIENT GLOBAL FUNCTIONS (inside a
 // `declare global { ... }` block, not the `interface Node` augmentation) —
 // the real Obsidian app installs both forms before plugin code runs.
-// The src/core/render-*.ts modules (a pure library with ZERO "obsidian"
+// The src/core/render/*.ts modules (a pure library with ZERO "obsidian"
 // imports, so they can't reference the Node.prototype method's `this` and
 // can't import a value from "obsidian" either) call the bare global form
 // directly for their plain-HTML-element sites. jsdom has neither form, so
@@ -841,7 +841,7 @@ function transformLine(line: string, app: RenderApp, sourcePath: string, basePat
         }
       } else {
         // Note-to-note embed: real Obsidian synchronously renders a wrapper
-        // carrying the authoritative linktext on `src` (see render-embeds.ts's
+        // carrying the authoritative linktext on `src` (see render/embeds.ts's
         // "Note-embed hardening" comment — confirmed via live console
         // diagnostics inside a real export run, 2026-07-31):
         //   <span alt src class="internal-embed markdown-embed inline-embed">

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder, type NavItem, chapterHref } from "../src/core/epub";
-import { EPUB_CSS, FOOTNOTE_CSS } from "../src/core/epub-css";
-import { escapeXml } from "../src/core/xml";
+import { EpubBuilder, type NavItem, chapterHref } from "../src/core/epub/epub";
+import { EPUB_CSS, FOOTNOTE_CSS } from "../src/core/epub/epub-css";
+import { escapeXml } from "../src/core/common/xml";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 
@@ -150,7 +150,7 @@ describe("EpubBuilder container", () => {
   });
 
   it("ships .cover-page CSS rules in the embedded stylesheet", async () => {
-    const { EPUB_CSS } = await import("../src/core/epub-css");
+    const { EPUB_CSS } = await import("../src/core/epub/epub-css");
     expect(EPUB_CSS).toContain(".cover-page");
     expect(EPUB_CSS).toMatch(/\.cover-page\s*\{[^}]*text-align:\s*center/);
   });

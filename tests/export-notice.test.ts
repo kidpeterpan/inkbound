@@ -7,8 +7,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MODALS, NOTICES, NOTICE_ELS } from "./fixtures/obsidian-stub";
 import { showExportNotice } from "../src/adapters/export-notice";
-import * as reportModule from "../src/core/report";
-import type { ScopedWarning } from "../src/core/report";
+import * as reportModule from "../src/core/delivery/report";
+import type { ScopedWarning } from "../src/core/delivery/report";
 
 const SAVED_TEXT = "EPUB saved to /books/my-book.epub";
 const BOOK = { bookTitle: "My Book", chapterPaths: ["a.md", "b.md"] };

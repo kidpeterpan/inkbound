@@ -21,9 +21,9 @@ import {
   serializeBody,
   setSvgRasterizer,
 } from "../src/core/render";
-import { renderMath, protectMath } from "../src/core/math";
+import { renderMath, protectMath } from "../src/core/content/math";
 import { stripDynamicBlocks, stripFrontmatter } from "../src/core/render";
-import { processFootnotes } from "../src/core/footnotes";
+import { processFootnotes } from "../src/core/content/footnotes";
 
 interface RealRenderFixture {
   name: string;

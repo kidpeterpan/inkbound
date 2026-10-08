@@ -131,7 +131,7 @@ const buildOptions = {
   // `__toBinaryNode` helper built on `Buffer.from(base64, "base64")` that runs
   // at module top level. `Buffer` is a Node global absent from Obsidian
   // mobile's WebView, so "binary" makes the plugin fail to LOAD on mobile —
-  // with no require() involved for a static scan to catch. src/core/font-assets.ts
+  // with no require() involved for a static scan to catch. src/core/epub/font-assets.ts
   // decodes the string with atob, which exists on both platforms.
   loader: { ".ttf": "base64" },
   sourcemap: prod ? false : "inline",

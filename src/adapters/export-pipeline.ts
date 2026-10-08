@@ -8,29 +8,33 @@
 // scattered across `this.`.
 //
 // ADAPTER by this repo's rule (it imports `obsidian` for TFile/Notice and the
-// vault): the PURE stages it drives live in core/render.ts,
-// core/chapter-assets.ts, core/book-tree.ts, core/report.ts and core/epub.ts,
+// vault): the PURE stages it drives live in core/render/index.ts,
+// core/epub/chapter-assets.ts, core/book/book-tree.ts, core/delivery/report.ts and core/epub/epub.ts,
 // and the writing half lives in adapters/output-adapter.ts. See
 // tests/module-boundaries.test.ts.
 import { App, Component, FileSystemAdapter, Notice, TFile } from "obsidian";
-import { EpubBuilder, chapterHref, type NavItem } from "../core/epub";
-import { escapeXml } from "../core/xml";
-import { systemBookIdentity } from "../core/book-identity";
+import { EpubBuilder, chapterHref, type NavItem } from "../core/epub/epub";
+import { escapeXml } from "../core/common/xml";
+import { systemBookIdentity } from "../core/epub/book-identity";
 import { renderUnitToChapter } from "./render-adapter";
-import { resolveChapterAssets, type AssetVault } from "../core/chapter-assets";
-import { computeBacklinks, renderBacklinksFragment } from "../core/backlinks";
-import { BooxDropClient } from "../core/booxdrop";
+import { resolveChapterAssets, type AssetVault } from "../core/epub/chapter-assets";
+import { computeBacklinks, renderBacklinksFragment } from "../core/book/backlinks";
+import { BooxDropClient } from "../core/delivery/booxdrop";
 import { obsidianHttp } from "./http";
-import { resolveDestination, type ExportDestination } from "../core/output";
+import { resolveDestination, type ExportDestination } from "../core/delivery/output";
 import { desktopHomedir, platformKind, writeBook } from "./output-adapter";
 import { showExportNotice } from "./export-notice";
-import { createWarningCollector, type ExportReport, type WarningCollector } from "../core/report";
-import { coerceBacklinkPosition, summarizeWarnings, type EpubExportSettings } from "../core/settings-core";
-import { slugify } from "../core/naming";
-import { getThaiFontLoader } from "../core/font-assets";
-import { containsThai } from "../core/fonts";
-import { errorMessage } from "../core/error-text";
-import type { ShareTarget } from "../core/share";
+import { createWarningCollector, type ExportReport, type WarningCollector } from "../core/delivery/report";
+import {
+  coerceBacklinkPosition,
+  summarizeWarnings,
+  type EpubExportSettings,
+} from "../core/delivery/settings-core";
+import { slugify } from "../core/book/naming";
+import { getThaiFontLoader } from "../core/epub/font-assets";
+import { containsThai } from "../core/epub/fonts";
+import { errorMessage } from "../core/common/error-text";
+import type { ShareTarget } from "../core/delivery/share";
 import type { ExportMeta } from "../core/types";
 
 export interface Job {
@@ -118,7 +122,7 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
     notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
     const adapter = deps.app.vault.adapter;
     // "" on mobile: the mobile vault adapter is not a FileSystemAdapter and
-    // has no filesystem base path to give. rewriteImages in render-links.ts has an
+    // has no filesystem base path to give. rewriteImages in render/links.ts has an
     // explicit empty-basePath guard because of this — see the invariant
     // comment there before assuming "" is an impossible or harmless value.
     const basePath = adapter instanceof FileSystemAdapter ? adapter.getBasePath() : "";
@@ -265,7 +269,7 @@ function backlinkDecorator(
       const source = fileByPath.get(path);
       const href = hrefByPath.get(path);
       // Chapters live side by side in text/, so link by filename only
-      // (same convention as rewriteLinks in render-links.ts).
+      // (same convention as rewriteLinks in render/links.ts).
       return source && href ? [{ title: deps.titleFor(source), href: href.replace(/^text\//, "") }] : [];
     });
     const fragment = renderBacklinksFragment(entries);

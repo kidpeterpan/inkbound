@@ -1,4 +1,4 @@
-// Unit tests for src/core/footnotes.ts (011-footnote-semantics).
+// Unit tests for src/core/content/footnotes.ts (011-footnote-semantics).
 //
 // Input is REAL Obsidian 1.13.7 markup wherever it exists (tests/fixtures/footnotes-real.html
 // and footnotes-real-contexts.html — FR-030). Synthetic markup, built with the fixture
@@ -11,7 +11,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { processFootnotes } from "../src/core/footnotes";
+import { processFootnotes } from "../src/core/content/footnotes";
 import { serializeBody } from "../src/core/render";
 import {
   assertChapterFootnoteInvariants,

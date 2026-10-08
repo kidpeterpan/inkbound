@@ -1,19 +1,19 @@
 // ── Obsidian adapter (exercised via manual smoke tests, not unit tests) ──
 //
-// Deliberately its own module, NOT appended to src/core/render.ts, even though the
+// Deliberately its own module, NOT appended to src/core/render/index.ts, even though the
 // brief's Step 5 shows it inline there. Reason: "obsidian" ships type
 // declarations only, no runtime JS (node_modules/obsidian/package.json has
 // "main": ""). MarkdownRenderer.render(...) and `instanceof TFile` are real
 // VALUE usages, not just type positions, so that import can't be elided —
-// bundling it into render.ts would make Vite try to eagerly resolve the
-// "obsidian" package the moment anything in render.ts is loaded, which
+// bundling it into render/index.ts would make Vite try to eagerly resolve the
+// "obsidian" package the moment anything in render/index.ts is loaded, which
 // breaks every pure-function test in tests/render.test.ts (verified: it
 // fails with "Failed to resolve entry for package obsidian"). Splitting this
 // adapter out mirrors the same fix already applied to settings.ts/
 // settings-core.ts (Adjustment B) for the identical reason.
 import { App, Component, MarkdownRenderer, TFile, type CachedMetadata } from "obsidian";
-import { attributedTo, errorMessage } from "../core/error-text";
-import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "../core/footnotes";
+import { attributedTo, errorMessage } from "../core/common/error-text";
+import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "../core/content/footnotes";
 import type { ChapterImage } from "../core/types";
 import {
   stripFrontmatter,
@@ -38,11 +38,11 @@ import {
   type SectionInfo,
   type ListItemInfo,
 } from "../core/render";
-import { protectMath, renderMath, type MathSpan } from "../core/math";
+import { protectMath, renderMath, type MathSpan } from "../core/content/math";
 import { getBaseRenderer } from "./bases-adapter";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
-// into the plain arrays render.ts's pure heading/block functions expect —
+// into the plain arrays render/index.ts's pure heading/block functions expect —
 // see research.md's Unknown 1/4 for why the pure module doesn't take these
 // real Obsidian cache types directly.
 function toHeadingInfo(headings: CachedMetadata["headings"]): HeadingInfo[] {
@@ -72,7 +72,7 @@ function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] 
 // `.internal-embed` wrapper for each `![[note]]` embed, carrying the exact
 // linktext on its `src` attribute, and MAY populate the wrapper's
 // `.markdown-embed-content` div asynchronously on its own schedule — a race
-// this pipeline must not depend on either way (see render.ts's "Note-embed
+// this pipeline must not depend on either way (see render/index.ts's "Note-embed
 // hardening" comment for how this was confirmed live). So this function
 // renders its OWN copy of each embedded note into a private child div
 // stamped with EMBED_RENDERED_ATTR; flattenEmbeds later replaces the whole
@@ -85,7 +85,7 @@ function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] 
 // Heading/block-scoped embeds (`![[Note#Heading]]`, `![[Note^block]]`) render
 // just that section/block (specs/002-scoped-note-embeds), by slicing the
 // target note's raw markdown using line positions from
-// `app.metadataCache.getFileCache()`, adapted to render.ts's pure
+// `app.metadataCache.getFileCache()`, adapted to render/index.ts's pure
 // `findHeadingSection`/`findSupportedBlock` — see that feature's data-model.md
 // for the full extraction contract. A heading/block that doesn't resolve in
 // an otherwise-valid note degrades to the existing placeholder with a
@@ -106,7 +106,7 @@ function toListItemInfo(listItems: CachedMetadata["listItems"]): ListItemInfo[] 
 // div's own rewriteLinks/rewriteImages pass must run AFTER its children's,
 // because those functions permanently finalize whatever they touch (removing
 // the internal-link marker / renumbering an image src), and idempotence
-// guards (see render.ts) mean an already-finalized nested region is safely
+// guards (see render/index.ts) mean an already-finalized nested region is safely
 // skipped when a shallower pass later scans over it.
 
 // The chapter-wide math accumulator (005-latex-math): placeholder indices stay
@@ -420,7 +420,7 @@ async function expandMarkdownEmbed(
 
 // Re-exported so callers/tests can inject a deterministic rasterizer via the
 // same module path they already import renderUnitToChapter from. The real
-// implementation lives in render.ts — see the "Mermaid rasterization" block
+// implementation lives in render/index.ts — see the "Mermaid rasterization" block
 // there for why (importing THIS module pulls in "obsidian", which has no
 // runtime JS outside Obsidian/vitest).
 export { setSvgRasterizer } from "../core/render";

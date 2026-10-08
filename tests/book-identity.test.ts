@@ -1,4 +1,4 @@
-// The reproducibility contract for a built book (src/core/book-identity.ts).
+// The reproducibility contract for a built book (src/core/epub/book-identity.ts).
 //
 // Why this exists: an export used to embed a fresh `urn:uuid`, a fresh
 // `dcterms:modified` AND a fresh ZIP-entry timestamp per entry, so the best
@@ -8,8 +8,8 @@
 // these tests compare the actual bytes instead of fingerprinting around them.
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
-import { EpubBuilder } from "../src/core/epub";
-import { systemBookIdentity, type BookIdentity } from "../src/core/book-identity";
+import { EpubBuilder } from "../src/core/epub/epub";
+import { systemBookIdentity, type BookIdentity } from "../src/core/epub/book-identity";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

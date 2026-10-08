@@ -19,8 +19,8 @@
 // hold same-named notes (FR-018).
 import { orderChapters, pickIndexNote } from "./collect";
 import { planBook, type FolderInput, type NavPlanNode } from "./book-tree";
-import { errorMessage } from "./error-text";
-import type { NavItem } from "./epub";
+import { errorMessage } from "../common/error-text";
+import type { NavItem } from "../epub/epub";
 
 /** A note as the index-detection rules see it: its name, and its tags. */
 export interface IndexCandidate {

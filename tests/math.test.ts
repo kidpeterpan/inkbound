@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from "vitest";
-import { findMathSpans, protectMath, renderMathToSvg, renderMath } from "../src/core/math";
+import { findMathSpans, protectMath, renderMathToSvg, renderMath } from "../src/core/content/math";
 import { setSvgRasterizer } from "../src/core/render";
 
 function div(html: string): HTMLElement {

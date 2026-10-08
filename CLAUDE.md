@@ -107,11 +107,24 @@ src/
               bundles (esbuild.config.mjs's entryPoints).
 ```
 
-- **`src/core/`** — `error-text`, `xml`, `metadata`, `cover`, `collect`,
-  `book-tree`, `naming`, `footnote-refs`, `footnotes`, `render`, `math`, `bases`,
-  `epub`, `epub-css`, `fonts`, `font-assets` (plus the `fonts/*.ttf` binaries),
-  `media-types`, `chapter-assets`, `settings-core`, `output`, `book-identity`,
-  `booxdrop`, `share`, `report`, `backlinks`, `types`.
+- **`src/core/`** — six concern folders, plus `types` (shared interfaces only,
+  no runtime code) in the root. Every core module appears once below:
+  - `common/` — leaf utilities that import nothing else from `src/`:
+    `error-text`, `xml`, `regex`, `media-types`.
+  - `render/` — the DOM passes over a rendered chapter. `index` is the public
+    facade (import it as `core/render`); behind it are `md`, `svg`, `embeds`,
+    `dom`, `links`, `raster`, `toc`.
+  - `content/` — embedded-content handling: `math`, `footnotes`,
+    `footnote-refs`, `bases`.
+  - `book/` — what goes in the book and in what order: `book-plan`,
+    `book-tree`, `collect`, `naming`, `metadata`, `backlinks`.
+  - `epub/` — building the file: `epub`, `epub-css`, `cover`, `book-identity`,
+    `chapter-assets`, `fonts`, `font-assets` (plus the `fonts/` directory of
+    `.ttf` files, licence text and declaration).
+  - `delivery/` — getting it to the reader: `output`, `share`, `booxdrop`,
+    `report`, and `settings-core`. That last one holds the whole settings model
+    (schema, defaults and coercion), not only output settings; it sits here
+    beside the output module, its main consumer in the core.
 - **`src/adapters/`** — `settings` (the settings tab), `render-adapter`
   (`MarkdownRenderer`), `bases-adapter`, `meta-adapter` (metadata cache, vault
   reads, cover downloads), `output-adapter` (`Platform`, the vault adapter, the
@@ -123,16 +136,19 @@ src/
 described here.** It fails if anything under `core/` imports `obsidian` or an
 adapter (naming the file), and if anything outside `adapters/` + `main.ts`
 imports `obsidian`. Moving a module between the two directories is therefore
-the way to change its status — there is no list to update.
+the way to change its status — there is no list to update. Inside `core/` the
+same test enforces three layout rules: nothing but `types.ts` sits directly in
+`core/` (every other module lives in a concern folder), `core/common/` imports
+nothing else from `src/`, and no core module imports its way back to itself.
 
-`core/book-identity.ts` is an adapter in the architectural sense even though it
+`core/epub/book-identity.ts` is an adapter in the architectural sense even though it
 imports no `obsidian`: it is the one module in the export path that reads
 ambient globals (the clock, the RNG). Passing a fixed `BookIdentity` to
 `EpubBuilder` makes a built book byte-identical — see "Export pipeline" below.
 
 `adapters/output-adapter.ts` is the ONLY module that knows what platform it is
 running on: it reads `Platform`, exposes it as a plain `"desktop" | "mobile"`
-value via `platformKind()`, and passes that into `core/output.ts`, which decides
+value via `platformKind()`, and passes that into `core/delivery/output.ts`, which decides
 where a book goes (absolute path via a LAZY `await import("fs")` on desktop; a
 vault-relative path via `vault.adapter.writeBinary` on mobile). The lazy
 `os`/`fs` imports and the comment explaining why they must stay inside function
@@ -155,7 +171,7 @@ from coverage for that reason.
    `main.ts` builds it and the placeholder invariant below for why.
 2. `render-adapter.ts`'s `renderUnitToChapter` renders each note's markdown
    through Obsidian's real `MarkdownRenderer`, then hands the DOM to the pure
-   modules behind `render.ts` (`stripFrontmatter`/`stripDynamicBlocks`,
+   modules behind `render/index.ts` (`stripFrontmatter`/`stripDynamicBlocks`,
    `cleanupDom`, `rewriteLinks` (retargets wikilinks to sibling chapter
    hrefs), `rewriteImages`, `rasterizeMermaidDiagrams` (Mermaid → PNG, since
    e-ink readers can't render live diagrams), `serializeBody`).
@@ -166,7 +182,7 @@ from coverage for that reason.
    section of EPUB 3 footnotes with ids minted from document order (Obsidian's are
    random per render). Two facts to keep: a REAL export is never byte-identical to
    another (it mints a fresh `urn:uuid` + `dcterms:modified` in `package.opf` and
-   dates every ZIP entry with the clock — `src/core/book-identity.ts` owns all three
+   dates every ZIP entry with the clock — `src/core/epub/book-identity.ts` owns all three
    values, and passing a fixed `BookIdentity` makes the whole file reproducible, as
    `tests/book-identity.test.ts` asserts; for real exports compare entry by entry —
    `tests/fixtures/epub-fingerprint.ts`), and Obsidian discards orphan
@@ -226,7 +242,7 @@ re-installs a throwing `requestUrl` stub before every single test in every
 file, so a test that forgets to call `setRequestUrlImpl` can't silently hit
 real network I/O in CI. It only applies under vitest — `scripts/local-export.ts` runs under `tsx` and is unaffected.
 
-Before touching `src/core/booxdrop.ts`'s `UPLOAD_PATH`, read
+Before touching `src/core/delivery/booxdrop.ts`'s `UPLOAD_PATH`, read
 `docs/booxdrop-probe.md` — BooxDrop's upload API is unofficial and
 firmware-versioned; that doc records what was verified, when, and how to
 re-probe it after a firmware update.
