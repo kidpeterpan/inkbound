@@ -134,7 +134,7 @@ That works on desktop and on mobile alike.
 
 ## How to use it
 
-Three commands, available from the command palette and from a right-click
+Three export commands, available from the command palette and from a right-click
 context menu:
 
 - **Export note to EPUB** — exports the active note (or the note you
@@ -144,6 +144,23 @@ context menu:
   offers the same export for that folder.
 - **Export note + linked notes to EPUB** — exports the active note plus the
   notes it links to as one book.
+
+**Preview before you export.** Two more commands, in the command palette and the
+same right-click menus, show the book first and build it only if you say so:
+
+- **Preview folder export (active note's folder)**, or **Preview folder export** on
+  a folder you right-click.
+- **Preview note + linked notes export**, on the active note or a note you
+  right-click.
+
+A window lists the chapters in the order the book will have, with Parts nested the way
+its table of contents will nest them, each line with the note it comes from, above a
+summary of the book's title, author, language and where its cover will come from. Choose
+**Export** to write exactly that book, or **Cancel** (or press Escape) to write nothing.
+A preview renders no note, fetches no cover and writes no file. It is a plan, not a
+proof: warnings about images, links and math, a chapter that fails to render, whether the
+Thai font is embedded and the backlink trails are only known once the book is built, and
+the window says so. The one-step export commands above are unchanged.
 
 The finished `.epub` is written to the folder set in **Settings → Inkbound →
 Output folder** (`~/Downloads` by default), and a notice in Obsidian confirms
@@ -422,6 +439,10 @@ from note to e-reader without a computer anywhere in the loop.
   phone, an image over about 100 megapixels, or one that would still be over about
   16 million pixels after shrinking, is kept as it is with a warning in the
   export report.
+- **The preview is read-only.** It shows the plan and lets you export or cancel; it
+  cannot reorder chapters or leave one out. To change the book, change the vault (the
+  index note's links, a note's name, a folder) and preview again. It does not estimate
+  the book's size either, since nothing is rendered.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.

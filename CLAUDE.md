@@ -117,7 +117,8 @@ src/
   - `content/` — embedded-content handling: `math`, `footnotes`,
     `footnote-refs`, `bases`.
   - `book/` — what goes in the book and in what order: `book-plan`,
-    `book-tree`, `collect`, `naming`, `metadata`, `backlinks`.
+    `book-tree`, `collect`, `naming`, `metadata`, `backlinks`, and
+    `export-preview` (what a preview of a planned book shows).
   - `epub/` — building the file: `epub`, `epub-css`, `cover`, `book-identity`,
     `chapter-assets`, `image-fit`, `image-header`, `image-optimizer`,
     `image-codec`, `fonts`, `font-assets` (plus the `fonts/` directory of
@@ -130,7 +131,7 @@ src/
   (`MarkdownRenderer`), `bases-adapter`, `meta-adapter` (metadata cache, vault
   reads, cover downloads), `output-adapter` (`Platform`, the vault adapter, the
   lazy `os`/`fs` imports), `export-pipeline` (the orchestrator), `export-notice`,
-  `report-view`, `http`. Only importable under vitest via the `obsidian` alias
+  `report-view`, `preview-view` (the preview window), `http`. Only importable under vitest via the `obsidian` alias
   described below.
 
 **This boundary is enforced by `tests/module-boundaries.test.ts`, not just
@@ -170,6 +171,15 @@ from coverage for that reason.
    a `NavItem[]` tree that `EpubBuilder.setNavTree` renders as nested `<ol>`s;
    it references chapters by POSITION in the file list — see the comment where
    `main.ts` builds it and the placeholder invariant below for why.
+   This plan step is shared with the preview: `main.ts`'s `planFolder` /
+   `planLinked` return a `PlannedExport` (files, nav, planning warnings, the
+   book's title/author/language and a `CoverPlan`, with nothing rendered or
+   fetched), and `exportPlanned` builds the book one describes. An export is
+   "plan, then `exportPlanned`"; a preview shows the plan and runs
+   `exportPlanned` only if the reader chooses Export, so the book a preview
+   describes is the book the export writes. `NoteMetaSource.resolve` is
+   `plan()` then `attachCover()` for the same reason: `plan()` never touches the
+   network or an image.
 2. `render-adapter.ts`'s `renderUnitToChapter` renders each note's markdown
    through Obsidian's real `MarkdownRenderer`, then hands the DOM to the pure
    modules behind `render/index.ts` (`stripFrontmatter`/`stripDynamicBlocks`,

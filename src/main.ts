@@ -16,6 +16,9 @@ import { DEFAULT_SETTINGS, EpubExportSettings, EpubExportSettingTab } from "./ad
 import type { ExportMeta } from "./core/types";
 import type { MetaDefaults } from "./core/book/metadata";
 import { NoteMetaSource } from "./adapters/meta-adapter";
+import { buildBookPreview, type PreviewInput } from "./core/book/export-preview";
+import { openBookPreview } from "./adapters/preview-view";
+import { errorMessage } from "./core/common/error-text";
 import type { ExportReport } from "./core/delivery/report";
 import { openExportReport } from "./adapters/report-view";
 import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
@@ -64,7 +67,7 @@ export default class EpubExportPlugin extends Plugin {
     this.registerFileMenu();
   }
 
-  // Every command the plugin contributes to the palette (5) — kept together
+  // Every command the plugin contributes to the palette (7) — kept together
   // so adding one is a single place to look.
   private registerCommands(): void {
     this.addCommand({
@@ -81,6 +84,18 @@ export default class EpubExportPlugin extends Plugin {
       id: "export-linked",
       name: "Export note + linked notes to EPUB",
       callback: () => this.withActiveFile((f) => void this.exportLinked(f)),
+    });
+    // 014-preview-before-export: a SEPARATE command rather than a step in the
+    // export commands above, so nobody who exports today gets an extra click.
+    this.addCommand({
+      id: "preview-folder",
+      name: "Preview folder export (active note's folder)",
+      callback: () => this.withActiveFolder((folder) => void this.previewFolder(folder)),
+    });
+    this.addCommand({
+      id: "preview-linked",
+      name: "Preview note + linked notes export",
+      callback: () => this.withActiveFile((f) => void this.previewLinked(f)),
     });
     // 008-mobile-support FR-016/FR-017: hand the finished book to the device's
     // own share sheet. A COMMAND rather than something fired on export
@@ -135,6 +150,12 @@ export default class EpubExportPlugin extends Plugin {
               .setIcon("book")
               .onClick(() => this.exportLinked(file))
           );
+          menu.addItem((i) =>
+            i
+              .setTitle("Preview note + linked notes export")
+              .setIcon("eye")
+              .onClick(() => this.previewLinked(file))
+          );
         }
         if (file instanceof TFolder) {
           menu.addItem((i) =>
@@ -142,6 +163,12 @@ export default class EpubExportPlugin extends Plugin {
               .setTitle("Export folder as EPUB")
               .setIcon("book")
               .onClick(() => this.exportFolder(file))
+          );
+          menu.addItem((i) =>
+            i
+              .setTitle("Preview folder export")
+              .setIcon("eye")
+              .onClick(() => this.previewFolder(file))
           );
         }
       })
@@ -365,6 +392,52 @@ export default class EpubExportPlugin extends Plugin {
     const warnings = [...planned.warnings];
     await this.metaSource().attachCover(meta, planned.cover, planned.metaFile, (m) => warnings.push(m));
     await this.runExport({ meta, files: planned.files, nav: planned.nav, warnings });
+  }
+
+  // ── preview (014-preview-before-export) ─────────────────────────
+
+  // Shows the book a folder export WOULD write — its plan, with nothing
+  // rendered, fetched or written — and runs it only if the reader chooses
+  // Export in the window.
+  async previewFolder(folder: TFolder): Promise<void> {
+    await this.planAndShowPreview(() => this.planFolder(folder));
+  }
+
+  // The linked-notes counterpart: the notes the link walk reaches at the
+  // reader's link depth, in the order the export will use.
+  async previewLinked(file: TFile): Promise<void> {
+    await this.planAndShowPreview(() => this.planLinked(file));
+  }
+
+  // A preview exists to look before exporting, so when looking itself goes
+  // wrong the reader gets a notice and nothing else: the one-step export
+  // commands never run any of this, and they stay available (Constitution II).
+  // A null plan already showed its own notice.
+  private async planAndShowPreview(makePlan: () => Promise<PlannedExport | null>): Promise<void> {
+    try {
+      const planned = await makePlan();
+      if (planned) this.showPreview(planned);
+    } catch (e) {
+      console.error("[inkbound] preview failed", e);
+      new Notice(`Could not build the preview: ${errorMessage(e)}. You can still export the book as usual.`);
+    }
+  }
+
+  private showPreview(planned: PlannedExport): void {
+    const preview = buildBookPreview(this.previewInputFor(planned));
+    openBookPreview(this.app, preview, () => void this.exportPlanned(planned));
+  }
+
+  private previewInputFor(planned: PlannedExport): PreviewInput {
+    return {
+      title: planned.meta.title,
+      author: planned.meta.author,
+      language: planned.meta.language,
+      cover: planned.cover,
+      chapters: planned.files.map((file) => ({ title: this.titleFor(file), path: file.path })),
+      nav: planned.nav,
+      warnings: planned.warnings,
+    };
   }
 
   // ── orchestrator ────────────────────────────────────────────────

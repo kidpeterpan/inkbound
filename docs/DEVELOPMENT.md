@@ -364,6 +364,26 @@ or an e-ink screen. These still need a person, on a real device:
   has always behaved this way. Check how it reads on Obsidian 1.5–1.12 if those
   versions matter.
 
+**Preview before export (014-preview-before-export) — NOT yet verified by
+hand.** What a preview contains is pure (`src/core/book/export-preview.ts`) and
+the window is a thin adapter (`src/adapters/preview-view.ts`); the tests read the
+window's DOM through the stub `Modal`, and the shipped-bundle gate opens one in
+`main.js`. None of that shows how it reads on a real screen. These still need a
+person, on a real device:
+
+- **A phone, a long book.** A three-level, several-hundred-note folder reads
+  without sideways scrolling, the nested list is indented enough to follow, and
+  Export and Cancel are reachable without scrolling (they sit above the list on
+  purpose, because with no CSS there is no sticky footer).
+- **Nested lists with no stylesheet of ours.** Whether Obsidian 1.5–1.12 indents a
+  nested `<ol>` inside a modal usably. The export report window is the only other
+  stylesheet-free modal, and it has no nesting.
+- **Timing.** A 300-note folder: under 2 seconds to open on desktop (SC-005, with
+  no note rendered to get there); record the phone's time separately, there is no
+  target for it.
+- **No request.** With the developer tools' Network tab open, a preview of a book
+  whose index note has a remote `cover:` makes no request until Export is pressed.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
@@ -378,6 +398,20 @@ That proves the decisions, the wiring and the cleanup; it does not prove a real
 canvas draws a sharp picture (see the unverified list). Under jsdom and under the
 Node gates `available()` is false, because they lack `URL.createObjectURL` or
 `Image`, so neither ever tries to resize.
+
+**The plan seam (014).** `exportFolder` and `exportLinked` are "plan, then run":
+`planFolder` / `planLinked` in `src/main.ts` decide which notes, in what order, under
+which Parts, with which title, author, language and cover source (a `PlannedExport`;
+nothing is rendered, read from an image or fetched), and `exportPlanned` builds the book
+one describes. The preview shows a `PlannedExport` and runs it only if the reader chooses
+Export, so the book a preview describes is the book the export writes: there is no second
+copy of the ordering rules. Two things keep that true. `NoteMetaSource.resolve` is
+`plan()` then `attachCover()`, and `plan()` never touches the network or an image (a
+remote cover used to be downloaded before the pipeline started, which a preview must not
+do); and the preview applies the book builder's own `validateNavTree` and the shared
+`tocFallbackWarning`, rather than copies of them. A preview must never gain a side effect:
+`tests/main.test.ts`'s "preview: a dry run" cases instrument the network, the renderer,
+image reads and the output folder, and `check-export-works` opens one in the shipped bundle.
 
 ## Bundled fonts (.ttf loader trio)
 
@@ -526,6 +560,10 @@ embedded image's bytes, a wikilink rewritten to `chapter_002.xhtml`, typeset
 math with no leaked placeholder, and both Noto Sans Thai TTFs decoded from
 their base64 inlining. Exit 2 means `main.js` is missing — build first. It
 runs in CI and in the release workflow right after `build`.
+
+It also opens a preview of that folder (014) and cancels it, and fails unless exactly one
+window opened with a "Preview: …" heading and a list, and the output folder and the notices
+are exactly as they were.
 
 Verified to fail on two deliberately broken bundles: a MathJax `FunctionList`
 rename left inconsistent (throws at load), and the font `atob` decode broken
