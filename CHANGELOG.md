@@ -3,6 +3,37 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.12.0
+
+Look at a book before you build it: a preview of the chapters and Parts.
+
+- **Preview a book before you export it.** Two new commands, in the command palette
+  and in the right-click menus, show the book first and build it only if you choose
+  to: **Preview folder export (active note's folder)** (also **Preview folder
+  export** on a folder you right-click) and **Preview note + linked notes export**
+  (on the active note or a note you right-click). A window lists the chapters in
+  reading order, with Parts nested the way the book's table of contents will nest
+  them, each line showing the note it comes from, above a summary of the book's
+  title, author, language and where its cover will come from. **Export** writes
+  exactly that book; **Cancel** (or Escape) writes nothing. Use it to catch a note in
+  the wrong place, a subfolder that did or did not become a Part, or a link depth
+  that pulled in notes you did not expect, before the book is built and sent to your
+  reader.
+- **A preview changes nothing.** It renders no note, fetches no cover (even a remote
+  one), writes no file and pushes nothing, and it does not change what **Show last
+  export report** or **Share last exported book** open. If a preview ever cannot be
+  built, you get a notice and can still export the usual way.
+- **It is a plan, not a proof.** Warnings about images, links and math, a chapter that
+  fails to render, whether the Thai font is embedded, and the backlink trails are only
+  known once the book is built, and the window says so. It is also read-only: it
+  cannot reorder chapters or leave one out. To change the book, change your notes and
+  preview again.
+- **Your existing export commands and menu entries are unchanged**, and so are the
+  books they produce.
+- **Not yet tried on a phone or tablet.** The preview is plain text with no styling of
+  our own, and how a very long book reads there, and how fast it opens for a few
+  hundred notes, are listed in `docs/DEVELOPMENT.md` as still to be checked by hand.
+
 ## 1.11.0
 
 Books get smaller: images are shrunk to fit an e-ink screen.
