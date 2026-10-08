@@ -3,6 +3,25 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.10.8
+
+No change to exported books — this release is internal structure work.
+
+- **`src/core/` is grouped into six concern folders instead of one flat list of
+  35 files.** `common/` holds the leaf utilities, `render/` the DOM passes
+  (`core/render` still names its facade, now `render/index.ts`), `content/` math,
+  footnotes and Bases tables, `book/` what goes in the book and in what order,
+  `epub/` building the file (the bundled fonts moved with it), and `delivery/`
+  output, sharing, BooxDrop, the export report and the settings model. `types.ts`
+  stays in the root, and the `render-` file-name prefix is gone now that the
+  folder says the same thing. Exported books are unchanged entry by entry.
+- **The boundary test now enforces that layout instead of leaving it to
+  documentation.** Nothing but `types.ts` may sit directly in `core/`,
+  `core/common/` may import nothing else from `src/`, and no core module may
+  import its way back to itself. Each failure names the offending module.
+- **`CLAUDE.md` lists every core module once, by folder** (the old list named
+  26 of 35), and stale file paths in comments and docs were updated to match.
+
 ## 1.10.7
 
 No change to exported books — this release is internal structure work.
