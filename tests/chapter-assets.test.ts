@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveChapterAssets, type AssetVault } from "../src/core/chapter-assets";
+import { resolveChapterAssets, type AssetVault } from "../src/core/epub/chapter-assets";
 import type { ChapterImage } from "../src/core/types";
 
 // resolveChapterAssets is pure — no "obsidian" import — so these tests use a

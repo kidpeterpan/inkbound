@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, readdirSync } from "fs";
 import * as path from "path";
 import { JSDOM } from "jsdom";
 import { cleanupDom, rasterizeMermaidDiagrams, serializeBody } from "../src/core/render";
-import { EpubBuilder } from "../src/core/epub";
+import { EpubBuilder } from "../src/core/epub/epub";
 
 const extractDir = process.argv[2];
 if (!extractDir) {
@@ -26,7 +26,7 @@ g.document = dom.window.document;
 g.Node = dom.window.Node;
 g.XMLSerializer = dom.window.XMLSerializer;
 g.HTMLElement = dom.window.HTMLElement;
-// Round 3: the default (real) mermaid rasterizer in src/core/render-raster.ts also
+// Round 3: the default (real) mermaid rasterizer in src/core/render/raster.ts also
 // touches Image/canvas. Deliberately NOT assigning a global `Image` here:
 // Node's own global `URL.createObjectURL` (unlike jsdom's, which has none)
 // actually works, and pairing that with jsdom's real `Image` element makes

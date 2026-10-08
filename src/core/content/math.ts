@@ -12,7 +12,7 @@
 //      the marked stub pass through untouched (inline HTML).
 //   2. After cleanupDom/rewrite*/mermaid, renderMath() replaces each
 //      placeholder with a MathJax-rendered SVG rasterized to PNG through the
-//      shared rasterizer (setSvgRasterizer in render.ts — same mechanism the
+//      shared rasterizer (setSvgRasterizer in render/index.ts — same mechanism the
 //      Mermaid feature uses, and the same fallback ladder: rasterization
 //      failure keeps the inline SVG, which epub.ts already makes spec-valid
 //      via properties="svg").
@@ -33,8 +33,8 @@ import { SVG } from "mathjax-full/js/output/svg.js";
 import { liteAdaptor } from "mathjax-full/js/adaptors/liteAdaptor.js";
 import { RegisterHTMLHandler } from "mathjax-full/js/handlers/html.js";
 import { AllPackages } from "mathjax-full/js/input/tex/AllPackages.js";
-import { getSvgRasterizer, rasterizeOrNull } from "./render";
-import { attributedTo, errorMessage } from "./error-text";
+import { getSvgRasterizer, rasterizeOrNull } from "../render";
+import { attributedTo, errorMessage } from "../common/error-text";
 
 // One shared headless document: convert() creates a fresh math tree per
 // call, and output is deterministic (verified: byte-identical repeats).

@@ -6,7 +6,7 @@
 // 008-mobile-support: this was the "binary" loader until mobile support. That
 // loader emits `Buffer.from(...)` under platform: "node", and Buffer does not
 // exist in Obsidian mobile's WebView — see the invariant comment in
-// src/core/font-assets.ts before changing it back.
+// src/core/epub/font-assets.ts before changing it back.
 declare module "*.ttf" {
   const base64: string;
   export default base64;

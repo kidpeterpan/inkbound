@@ -11,7 +11,7 @@
 // completed export into a failed one.
 //
 // The host is INJECTED rather than read from `navigator` inline — same
-// discipline as setSvgRasterizer in render.ts and setThaiFontLoader in
+// discipline as setSvgRasterizer in render/index.ts and setThaiFontLoader in
 // font-assets.ts — so the degradation paths are testable without simulating a
 // browser that lacks an API.
 

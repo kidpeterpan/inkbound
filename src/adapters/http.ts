@@ -1,5 +1,5 @@
 import { requestUrl } from "obsidian";
-import type { HttpFn } from "../core/booxdrop";
+import type { HttpFn } from "../core/delivery/booxdrop";
 
 // Obsidian's fetch-alike (bypasses CORS) satisfying booxdrop.ts's HttpFn.
 // Lives in its own module — not main.ts — so settings.ts can import it

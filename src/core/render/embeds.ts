@@ -4,9 +4,9 @@
 // ship — the rendered children, an unwrapped image, or an omission marker —
 // and produce the warnings those degradations owe the reader.
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint).
-import { isBasesSrc, isImageEmbedSrc } from "./render-md";
+import { isBasesSrc, isImageEmbedSrc } from "./md";
 
 // ── Note-embed hardening ───────────────────────────────────────────────────
 //

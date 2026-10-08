@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { App, MODALS, NOTICES } from "./fixtures/obsidian-stub";
-import { buildReport, renderReportText, BOOK_GROUP_LABEL, type ScopedWarning } from "../src/core/report";
+import {
+  buildReport,
+  renderReportText,
+  BOOK_GROUP_LABEL,
+  type ScopedWarning,
+} from "../src/core/delivery/report";
 import { ExportReportModal, openExportReport } from "../src/adapters/report-view";
 
 const w = (scope: string | null, message: string): ScopedWarning => ({ scope, message });

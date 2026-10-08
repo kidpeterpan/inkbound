@@ -9,7 +9,7 @@
 // obsidian-stub.ts instance this script itself loads via tsx — see
 // installObsidianRequireShim in scripts/lib/harness.ts for why a naive alias/inline approach
 // doesn't work. The bundle then runs under Node with a jsdom global DOM
-// (src/core/render.ts / src/adapters/render-adapter.ts need a working document).
+// (src/core/render/index.ts / src/adapters/render-adapter.ts need a working document).
 // tests/fixtures/vault-stub.ts supplies the `app` object, backed by real
 // files under the vault root.
 //
@@ -20,7 +20,7 @@ import * as path from "path";
 import * as os from "os";
 import * as esbuild from "esbuild";
 import JSZip from "jszip";
-import { DEFAULT_SETTINGS } from "../src/core/settings-core";
+import { DEFAULT_SETTINGS } from "../src/core/delivery/settings-core";
 import {
   REPO_ROOT,
   inspectEpub,

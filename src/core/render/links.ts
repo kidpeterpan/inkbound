@@ -4,9 +4,9 @@
 // vault is the caller's job (render-adapter.ts), which keeps this module pure
 // and independently testable.
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint).
-import { replaceWithPlainTextSpan } from "./render-dom";
+import { replaceWithPlainTextSpan } from "./dom";
 
 export function rewriteLinks(
   root: HTMLElement,

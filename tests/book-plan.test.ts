@@ -1,4 +1,4 @@
-// The scope-planning rules, tested directly (src/core/book-plan.ts).
+// The scope-planning rules, tested directly (src/core/book/book-plan.ts).
 //
 // Every rule here used to be reachable only by running a whole export through
 // the stubbed plugin (tests/main.test.ts), which is why those tests are the
@@ -15,8 +15,8 @@ import {
   toNavItems,
   type IndexCandidate,
   type OrderedLink,
-} from "../src/core/book-plan";
-import type { FolderInput, NavPlanNode } from "../src/core/book-tree";
+} from "../src/core/book/book-plan";
+import type { FolderInput, NavPlanNode } from "../src/core/book/book-tree";
 
 const note = (basename: string, tags: string[] = []): IndexCandidate => ({ basename, tags });
 

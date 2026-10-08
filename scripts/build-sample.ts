@@ -3,9 +3,9 @@
 import "./lib/install-dom";
 import "../tests/fixtures/obsidian-stub";
 import { writeFileSync } from "fs";
-import { EpubBuilder, type NavItem } from "../src/core/epub";
-import { renderMathToSvg } from "../src/core/math";
-import { buildStaticTable, extractBaseTable } from "../src/core/bases";
+import { EpubBuilder, type NavItem } from "../src/core/epub/epub";
+import { renderMathToSvg } from "../src/core/content/math";
+import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
 import { rewriteLinks, serializeBody } from "../src/core/render";
 import { buildBasesEmbed, hostWith } from "../tests/fixtures/bases-dom";
 

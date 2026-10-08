@@ -54,7 +54,7 @@ export function loadThaiFontAsset(): ThaiFontAsset | null {
 }
 
 // Injectable seam for the FR-008 degradation path (same discipline as
-// setSvgRasterizer in render.ts): tests install a failing loader; `null`
+// setSvgRasterizer in render/index.ts): tests install a failing loader; `null`
 // restores the real one.
 type ThaiFontLoader = () => ThaiFontAsset | null;
 let thaiFontLoader: ThaiFontLoader = loadThaiFontAsset;

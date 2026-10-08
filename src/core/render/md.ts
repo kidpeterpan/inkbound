@@ -3,10 +3,10 @@
 // note path + scope suffix, and locating the heading/block line range a
 // scoped embed selects.
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint): this module has no imports beyond
 // the shared regex helper.
-import { escapeRegExp } from "./regex";
+import { escapeRegExp } from "../common/regex";
 
 export function stripFrontmatter(md: string): string {
   const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(md);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "../src/core/cover";
+import { parseCoverValue, findImageEmbeds, isSupportedCoverExt } from "../src/core/epub/cover";
 
 describe("parseCoverValue", () => {
   it("accepts a vault-relative path", () => {

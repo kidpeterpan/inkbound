@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
 import { renderUnitToChapter, setSvgRasterizer } from "../src/adapters/render-adapter";
 import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
-import { buildStaticTable, extractBaseTable } from "../src/core/bases";
+import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
 import { buildBasesEmbed, hostWith, type BasesDomOptions } from "./fixtures/bases-dom";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 
@@ -376,7 +376,7 @@ describe("renderUnitToChapter", () => {
   it("renders a note embed's real content by reading and rendering the target note itself, not a placeholder", async () => {
     // Proves the P1 bug fix end-to-end against the CONFIRMED real DOM shape
     // (a `.internal-embed` wrapper whose `src` names the target, which
-    // Obsidian's own loader may or may not populate in time — see render.ts's
+    // Obsidian's own loader may or may not populate in time — see render/index.ts's
     // "Note-embed hardening" comment): registers the embedded note's RAW
     // MARKDOWN (not pre-rendered HTML) and lets the real populateEmbeds ->
     // MarkdownRenderer.render recursion do the work.

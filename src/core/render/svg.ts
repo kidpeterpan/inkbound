@@ -3,12 +3,12 @@
 // ids unique per chapter so multiple diagrams in one XHTML document don't
 // collide (epubcheck RSC-005).
 //
-// Part of the pure rendering library (see render.ts for the module map and
+// Part of the pure rendering library (see render/index.ts for the module map and
 // the zero-"obsidian"-import constraint). The SVG-namespaced element creation
 // below deliberately uses document.createElementNS, not the ambient createEl:
 // createEl cannot set the SVG namespace, and SVG text created in the wrong
 // namespace serializes (and renders) incorrectly.
-import { escapeRegExp } from "./regex";
+import { escapeRegExp } from "../common/regex";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 

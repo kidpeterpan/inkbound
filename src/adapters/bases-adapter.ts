@@ -1,6 +1,6 @@
 // Obsidian adapter for exporting a Bases TABLE view as a static table.
 //
-// Deliberately apart from render-adapter.ts and from the pure src/core/bases.ts: it
+// Deliberately apart from render-adapter.ts and from the pure src/core/content/bases.ts: it
 // is the only place that needs Obsidian's runtime (MarkdownRenderer, Component,
 // the live document), and the only part that cannot run under vitest for real —
 // so it stays small, and everything it decides lives in bases.ts.
@@ -28,8 +28,8 @@ import {
   settleBaseView,
   type SettleOps,
   type SettleOptions,
-} from "../core/bases";
-import { errorMessage } from "../core/error-text";
+} from "../core/content/bases";
+import { errorMessage } from "../core/common/error-text";
 
 export type BaseRenderOutcome =
   // `warning`: something is known to be missing from the table (rows or columns
@@ -106,7 +106,7 @@ export async function renderBaseTable(
 }
 
 // The renderer populateEmbeds calls, replaceable so tests never need a live
-// Obsidian — same pattern as setSvgRasterizer in render.ts. tests/setup installs
+// Obsidian — same pattern as setSvgRasterizer in render/index.ts. tests/setup installs
 // a stand-in before every test, so a test that forgets cannot wait on a real
 // timeout.
 const realRenderer: BaseRenderer = (app, src, sourcePath) => renderBaseTable(app, src, sourcePath);

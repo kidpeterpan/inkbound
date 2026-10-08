@@ -10,7 +10,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { Component, TFile } from "./fixtures/obsidian-stub";
 import { renderUnitToChapter, setSvgRasterizer } from "../src/adapters/render-adapter";
-import { EpubBuilder } from "../src/core/epub";
+import { EpubBuilder } from "../src/core/epub/epub";
 import { epubEntryFingerprints, sha256 } from "./fixtures/epub-fingerprint";
 
 // A real 1x1 transparent PNG, same bytes scripts/build-sample.ts uses.

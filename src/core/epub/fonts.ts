@@ -1,7 +1,7 @@
 // ── Thai font embedding (006-thai-font) ──────────────────────────────────
 //
 // Pure module: zero "obsidian" imports (constitution IV). The font BYTES
-// live in src/core/fonts/*.ttf and are inlined by esbuild's base64 loader
+// live in src/core/epub/fonts/*.ttf and are inlined by esbuild's base64 loader
 // (esbuild.config.mjs + scripts/local-export.ts both set
 // `loader: { ".ttf": "base64" }`); vitest aliases those exact paths to
 // tests/fixtures/font-bytes.ts instead. The OFL license text is inlined as
@@ -13,7 +13,7 @@
 // (google/fonts ofl/notosansthai/NotoSansThai[wdth,wght].ttf) via
 //   fonttools varLib.instancer.instantiateVariableFont(f, {"wght": w, "wdth": 100})
 // 467 glyphs each, ~47.8 KB — see plan.md Research. The font BYTES and the
-// injectable loader seam live in src/core/font-assets.ts (which owns the .ttf
+// injectable loader seam live in src/core/epub/font-assets.ts (which owns the .ttf
 // binary imports), so this module stays loadable by tsx-based scripts that
 // have no .ttf loader.
 

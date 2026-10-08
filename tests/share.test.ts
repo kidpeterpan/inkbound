@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { canShareEpub, shareEpub, setShareHost, type ShareTarget } from "../src/core/share";
+import { canShareEpub, shareEpub, setShareHost, type ShareTarget } from "../src/core/delivery/share";
 
 const target = (): ShareTarget => ({
   fileName: "deep-work.epub",

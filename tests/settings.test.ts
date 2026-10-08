@@ -14,7 +14,7 @@ import {
   coerceEmbedThaiFont,
   coerceMobileOutputFolder,
   DEFAULT_MOBILE_OUTPUT_FOLDER,
-} from "../src/core/settings-core";
+} from "../src/core/delivery/settings-core";
 import { EpubExportSettingTab } from "../src/adapters/settings";
 import EpubExportPlugin from "../src/main";
 import {
