@@ -2,10 +2,10 @@
   "name": "app-image",
   "covers": "the app:// image src branch of rewriteImages, for a wikilink embed and a markdown image",
   "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
-  "obsidianVersion": "1.13.7",
-  "capturedAt": "2026-09-29",
+  "obsidianVersion": "1.14.4",
+  "capturedAt": "2026-10-08",
   "basePath": "/VAULT",
-  "sourceMarkdown": "![[05. assets/week_aug_17-1786959135199.png]]\n\n![caption](05.%20assets/week_aug_17-1786959135199.png)\n",
-  "renderedMarkdown": "![[05. assets/week_aug_17-1786959135199.png]]\n\n![caption](05.%20assets/week_aug_17-1786959135199.png)\n",
-  "html": "<p dir=\"auto\"><span alt=\"05. assets/week_aug_17-1786959135199.png\" src=\"05. assets/week_aug_17-1786959135199.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"05. assets/week_aug_17-1786959135199.png\" src=\"app://433ca917ba6bac8b74f2dd73d31de69b2431/VAULT/05.%20assets/week_aug_17-1786959135199.png?1786959135205\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"05. assets/week_aug_17-1786959135199.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://433ca917ba6bac8b74f2dd73d31de69b2431/VAULT/05.%20assets/week_aug_17-1786959135199.png?1786959135205\"></span></p>"
+  "sourceMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
+  "renderedMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
+  "html": "<p dir=\"auto\"><span alt=\"99. temp/Test Book/assets/pic.png\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"99. temp/Test Book/assets/pic.png\" src=\"app://2791c715cdb5b3c2993fcee9e5ed59bcf423/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://2791c715cdb5b3c2993fcee9e5ed59bcf423/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>"
 }
