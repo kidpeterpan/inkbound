@@ -3,6 +3,36 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.11.0
+
+Books get smaller: images are shrunk to fit an e-ink screen.
+
+- **Images are shrunk to fit the screen.** A PNG or JPEG from your vault that is
+  wider than the new **Image width** setting (1200 px by default) is scaled down to
+  that width as it goes into the book, keeping its proportions and its file type.
+  Screenshots and phone photos are far larger than any e-ink screen can show, so a
+  book of a few dozen of them is much smaller, faster to send to your device and
+  faster to turn pages in. An image that would come out larger when shrunk, or that
+  is already narrow enough, keeps its original bytes.
+- **This is on by default, so your next export will be smaller.** Books you export
+  after updating are no longer byte-for-byte what the previous version made from the
+  same notes. To get your images exactly as they are in your vault, turn off
+  **Settings → Inkbound → Optimize images for e-ink**.
+- **Three new settings:** _Optimize images for e-ink_ (on), _Image width (px)_
+  (600–3000, default 1200) and _Convert images to grayscale_ (off; for
+  black-and-white screens, it removes the color from the images that are shrunk).
+- **A bad image never breaks the book.** A damaged image, an image too large for the
+  device to process, or one that never finishes goes into the book as it is, and the
+  export report names it and the note it came from. If a device cannot process
+  images at all, or three images in a row time out, the rest of the book keeps its
+  original images and the report says so once.
+- **Left alone:** SVG, GIF and WebP files, animated PNGs, covers, and the diagrams
+  and math Inkbound draws itself.
+- **Not yet tried on a phone or tablet or a Boox.** The decisions are covered by
+  tests, but how large images behave on a real device, and how the shrunk images
+  look on an e-ink screen, are listed in `docs/DEVELOPMENT.md` as still to be
+  checked by hand.
+
 ## 1.10.8
 
 No change to exported books — this release is internal structure work.
