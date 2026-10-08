@@ -5,6 +5,7 @@ import {
   isSupportedCoverExt,
   declaredCover,
   planCoverFromEmbeds,
+  describeCover,
 } from "../src/core/epub/cover";
 
 describe("parseCoverValue", () => {
@@ -153,5 +154,38 @@ describe("planCoverFromEmbeds (the first-image fallback)", () => {
 
   it("is none when the note embeds no image", () => {
     expect(planCoverFromEmbeds("Book/Index.md", [])).toEqual({ kind: "none" });
+  });
+});
+
+// The sentence the preview shows for where a cover will come from. It names a
+// source and promises nothing about it: no "exists", no "supported", no "will
+// download" — the export reports those afterwards, as warnings.
+describe("describeCover", () => {
+  it("names the address a remote cover will be downloaded from", () => {
+    expect(describeCover({ kind: "url", url: "https://x.example/c.png" })).toBe(
+      "Downloaded from https://x.example/c.png when the book is built"
+    );
+  });
+
+  it("names the vault path a local cover will be read from", () => {
+    expect(describeCover({ kind: "path", path: "assets/c.png" })).toBe(
+      "assets/c.png, read from your vault when the book is built"
+    );
+  });
+
+  it("names the note whose first usable image becomes the cover", () => {
+    expect(describeCover({ kind: "embeds", notePath: "Book/Index.md", targets: ["a.png"] })).toBe(
+      "The first usable image embedded in Book/Index.md"
+    );
+  });
+
+  it("says plainly when there is no cover", () => {
+    expect(describeCover({ kind: "none" })).toBe("No cover");
+  });
+
+  it("shows what was written, untouched", () => {
+    expect(describeCover({ kind: "path", path: "<b>odd</b> & name.png" })).toBe(
+      "<b>odd</b> & name.png, read from your vault when the book is built"
+    );
   });
 });

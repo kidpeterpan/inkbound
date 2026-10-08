@@ -133,3 +133,23 @@ export function planCoverFromEmbeds(notePath: string, targets: readonly string[]
   if (targets.length === 0) return { kind: "none" };
   return { kind: "embeds", notePath, targets: [...targets] };
 }
+
+/**
+ * The sentence a preview shows for where a cover will come from. It names a
+ * source and promises nothing about it (that the file exists, is supported, or
+ * that the address answers): finding that out means reading the file or the
+ * network, which a preview must not do. The export reports each failure as a
+ * warning afterwards, as it always has.
+ */
+export function describeCover(plan: CoverPlan): string {
+  switch (plan.kind) {
+    case "url":
+      return `Downloaded from ${plan.url} when the book is built`;
+    case "path":
+      return `${plan.path}, read from your vault when the book is built`;
+    case "embeds":
+      return `The first usable image embedded in ${plan.notePath}`;
+    case "none":
+      return "No cover";
+  }
+}

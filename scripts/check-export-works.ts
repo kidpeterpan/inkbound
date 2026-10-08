@@ -40,7 +40,7 @@
 // chapter is judged by the independent invariants oracle the unit tests use, and
 // INKBOUND_KEEP_FOOTNOTE_EPUB=<path> keeps a copy for `npm run epubcheck`.
 
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "fs";
 import * as os from "os";
 import * as path from "path";
 import JSZip from "jszip";
@@ -135,6 +135,7 @@ async function main(): Promise<void> {
     createVaultStub: (vaultRoot: string, scanRoot: string) => { app: unknown };
   };
   const NOTICES = obsidianStubNs.NOTICES as string[];
+  const MODALS = obsidianStubNs.MODALS as PreviewWindow[];
   installObsidianRequireShim(obsidianStubNs);
 
   const PluginClass = loadShippedBundle();
@@ -199,6 +200,10 @@ async function main(): Promise<void> {
 
     const problems = await checkBook(epubPath);
     if (problems.length > 0) fail(`the exported EPUB is not a usable book (${epubPath}).`, problems);
+
+    const previewProblems = await checkPreview({ plugin, folder, notices: NOTICES, modals: MODALS, outDir });
+    if (previewProblems.length > 0)
+      fail("the shipped bundle's folder preview is not right.", previewProblems);
 
     const footnoteProblems = await checkFootnoteBook({
       createVaultStub,
@@ -307,6 +312,55 @@ async function checkBook(epubPath: string): Promise<string[]> {
     }
   }
 
+  return problems;
+}
+
+// The slice of a recorded stub Modal this check reads.
+interface PreviewWindow {
+  contentEl: HTMLElement;
+}
+
+interface PreviewDeps {
+  plugin: InstanceType<ReturnType<typeof loadPluginClass>>;
+  folder: unknown;
+  notices: string[];
+  modals: PreviewWindow[];
+  outDir: string;
+}
+
+// 014-preview-before-export: a preview run through the SHIPPED bundle must open
+// one window that lists the book and, once cancelled, leave nothing behind: no
+// file written, no notice shown. The unit tests cover the logic against src/;
+// this is the one place the built artifact's preview code actually runs, so a
+// bundling mistake that only shows up there is caught here.
+async function checkPreview(deps: PreviewDeps): Promise<string[]> {
+  const problems: string[] = [];
+  const filesBefore = readdirSync(deps.outDir).sort();
+  const noticesBefore = deps.notices.length;
+  deps.modals.length = 0;
+
+  await deps.plugin.previewFolder(deps.folder);
+
+  if (deps.modals.length !== 1) {
+    return [`expected one preview window, found ${deps.modals.length}`];
+  }
+  const window = deps.modals[0].contentEl;
+  const heading = window.querySelector("h2")?.textContent ?? "";
+  if (!heading.startsWith("Preview: ")) problems.push(`the window's heading is "${heading}"`);
+  if (window.querySelectorAll("ol li").length === 0) problems.push("the preview lists no chapters");
+  const cancel = [...window.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
+  if (!cancel) return [...problems, "the preview has no Cancel button"];
+  cancel.click();
+
+  const filesAfter = readdirSync(deps.outDir).sort();
+  if (filesAfter.join("|") !== filesBefore.join("|")) {
+    problems.push(
+      `a preview changed the output folder: ${filesBefore.join(", ")} -> ${filesAfter.join(", ")}`
+    );
+  }
+  if (deps.notices.length !== noticesBefore) {
+    problems.push(`a preview showed notices: ${deps.notices.slice(noticesBefore).join(" | ")}`);
+  }
   return problems;
 }
 

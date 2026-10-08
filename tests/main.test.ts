@@ -17,6 +17,8 @@ import {
   TFile,
   TFolder,
   Menu,
+  Modal,
+  MarkdownRenderer,
   NOTICES,
   // 010-export-report: parallel to NOTICES — the notice ELEMENTS, so a test
   // can perform the reader's gesture (tapping the notice) rather than
@@ -37,6 +39,7 @@ import { createVaultStub } from "./fixtures/vault-stub";
 import { setShareHost } from "../src/core/delivery/share";
 import { BOOK_GROUP_LABEL } from "../src/core/delivery/report";
 import type { EpubExportSettings } from "../src/adapters/settings";
+import { PREVIEW_UNKNOWNS } from "../src/core/book/export-preview";
 import { epubEntryFingerprints } from "./fixtures/epub-fingerprint";
 import { assertChapterFootnoteInvariants } from "./fixtures/footnote-fixtures";
 
@@ -269,7 +272,7 @@ function captureFileMenu(app: unknown): (menu: unknown, file: unknown) => void {
  */
 async function invokeAndWait(
   plugin: EpubExportPlugin,
-  method: "exportSingle" | "exportFolder" | "exportLinked",
+  method: "exportSingle" | "exportFolder" | "exportLinked" | "previewFolder" | "previewLinked",
   trigger: () => void
 ): Promise<void> {
   const target = plugin as unknown as Record<string, (...a: unknown[]) => Promise<void>>;
@@ -1414,13 +1417,17 @@ describe("overwrite", () => {
 // onload() at all.
 
 describe("onload: command and menu registration", () => {
-  it("registers the three export commands, the mobile share command and the report command, under their exact ids", async () => {
+  it("registers every command under its exact id", async () => {
     const { app } = await buildVault({ "note.md": "Body.\n" });
     const plugin = await makeOnloadedPlugin(app);
     expect(Object.keys(commandsOf(plugin)).sort()).toEqual([
       "export-folder",
       "export-linked",
       "export-note",
+      // 014-preview-before-export: a separate command, so today's one-step
+      // exports are untouched and nobody gets an extra click.
+      "preview-folder",
+      "preview-linked",
       // 008-mobile-support: registered on every platform, but its checkCallback
       // hides it from the palette unless a book has been exported on mobile AND
       // the device can share (FR-017 — absent, not failing).
@@ -1472,11 +1479,18 @@ describe("onload: command and menu registration", () => {
     expect(menu.items.map((i) => i.title)).toEqual([
       "Export note to EPUB",
       "Export note + linked notes to EPUB",
+      "Preview note + linked notes export",
     ]);
 
     const noteItem = menu.items[0];
     await invokeAndWait(plugin, "exportSingle", () => noteItem.onClickFn?.(new MouseEvent("click")));
     expect(await outDirEntries()).toContain("note.epub");
+
+    // The preview entry opens the window instead of exporting.
+    await fs.rm(join(outDir, "note.epub"));
+    await invokeAndWait(plugin, "previewLinked", () => menu.items[2].onClickFn?.(new MouseEvent("click")));
+    expect(MODALS).toHaveLength(1);
+    expect(await outDirEntries()).toEqual([]);
   });
 
   it("a folder's context menu offers a working folder-export item", async () => {
@@ -1486,10 +1500,17 @@ describe("onload: command and menu registration", () => {
 
     const menu = new Menu();
     fireFileMenu(menu as never, tfolder(root, "sub"));
-    expect(menu.items.map((i) => i.title)).toEqual(["Export folder as EPUB"]);
+    expect(menu.items.map((i) => i.title)).toEqual(["Export folder as EPUB", "Preview folder export"]);
 
     await invokeAndWait(plugin, "exportFolder", () => menu.items[0].onClickFn?.(new MouseEvent("click")));
     expect(await outDirEntries()).toContain("sub.epub");
+
+    // The preview entry opens the window instead of exporting.
+    NOTICES.length = 0;
+    await fs.rm(join(outDir, "sub.epub"));
+    await invokeAndWait(plugin, "previewFolder", () => menu.items[1].onClickFn?.(new MouseEvent("click")));
+    expect(MODALS).toHaveLength(1);
+    expect(await outDirEntries()).toEqual([]);
   });
 
   it("a non-markdown file's context menu offers no export items (pins the extension guard)", async () => {
@@ -3215,5 +3236,649 @@ describe("image optimization", () => {
       const requests = await requestsFor({ optimizeImages: false, grayscaleImages: true });
       expect(requests).toEqual([]);
     });
+  });
+});
+
+// ── 014-preview-before-export: helpers for the preview windows ──────────
+const previewWindow = () => {
+  expect(MODALS).toHaveLength(1);
+  return MODALS[0].contentEl;
+};
+const buttonNamed = (root: HTMLElement, name: string) =>
+  [...root.querySelectorAll("button")].find((b) => b.textContent === name)!;
+
+/** Presses Export and waits for the export it starts to finish. */
+async function pressExport(plugin: EpubExportPlugin, root: HTMLElement): Promise<void> {
+  const target = plugin as unknown as Record<string, (...a: unknown[]) => Promise<void>>;
+  const original = target.exportPlanned.bind(plugin);
+  let started: Promise<void> | undefined;
+  target.exportPlanned = (...args) => {
+    started = original(...args);
+    return started;
+  };
+  buttonNamed(root, "Export").click();
+  await started;
+  target.exportPlanned = original;
+}
+
+// ── 014-preview-before-export US1: review a folder book, then export or cancel ──
+//
+// The preview must describe the book the export then writes. So the main
+// assertion is a COMPARISON: the titles the window lists, read top to bottom,
+// against the entries of the finished book's nav.xhtml, and the number of
+// chapters against its spine. Nothing here knows the ordering rules; it only
+// checks that the two agree.
+describe("preview: a folder book (US1)", () => {
+  /** An index note with ordered links, a Part opened by its own index note, a
+   *  nested Part named only by its folder, an unlinked note and an asset folder. */
+  const BOOK = {
+    "book/book.md":
+      "---\ntags: [book, main]\naliases: [The Book]\n---\n\n# The Book\n\nRead [[b_second]] then [[a_first]].\n",
+    "book/a_first.md": "# A First\n\nfirst\n",
+    "book/b_second.md": "# B Second\n\nsecond\n",
+    "book/zz_unlinked.md": "# Unlinked\n\nlast\n",
+    "book/Part I/Part I.md": "# Part One\n\n[[ch2]] then [[ch1]]\n",
+    "book/Part I/ch1.md": "# Ch1\n\nx\n",
+    "book/Part I/ch2.md": "# Ch2\n\ny\n",
+    "book/Part I/Deep/deep.md": "# Deep Note\n\nz\n",
+    "book/assets/pic.png": new Uint8Array([137, 80, 78, 71]),
+  };
+
+  interface Entry {
+    label: string;
+    children: Entry[];
+  }
+  const entriesOf = (list: Element | null): Entry[] =>
+    list
+      ? [...list.children].map((li) => ({
+          label: li.querySelector(":scope > span")?.textContent ?? "",
+          children: entriesOf(li.querySelector(":scope > ol")),
+        }))
+      : [];
+  const leaf = (label: string): Entry => ({ label, children: [] });
+
+  /** Every title the window lists, top to bottom, Parts before their children. */
+  const windowTitles = (root: HTMLElement) =>
+    [...root.querySelectorAll("ol li > span")].map((s) => (s.textContent ?? "").split(" — ")[0]);
+  /** Every chapter-level entry of a finished book's nav, in order (not the heading sub-entries). */
+  const navTitles = (nav: string) =>
+    [...nav.matchAll(/<a href="text\/chapter_\d{3}\.xhtml">([^<]*)<\/a>/g)].map((m) => m[1]);
+
+  it("lists the chapters in the order the export will use, with Parts nested and asset folders left out", async () => {
+    const { app, root } = await buildVault(BOOK);
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    const shown = previewWindow();
+    expect(shown.querySelector("h2")?.textContent).toBe("Preview: The Book");
+    expect(entriesOf(shown.querySelector("ol"))).toEqual([
+      leaf("The Book — book/book.md"),
+      leaf("B Second — book/b_second.md"),
+      leaf("A First — book/a_first.md"),
+      {
+        label: "Part One — book/Part I/Part I.md",
+        children: [
+          leaf("Ch2 — book/Part I/ch2.md"),
+          leaf("Ch1 — book/Part I/ch1.md"),
+          { label: "Deep", children: [leaf("Deep Note — book/Part I/Deep/deep.md")] },
+        ],
+      },
+      leaf("Unlinked — book/zz_unlinked.md"),
+    ]);
+    expect([...shown.querySelectorAll("h3")].map((h) => h.textContent)).toContain("8 chapters");
+    expect(shown.textContent).not.toContain("assets");
+  });
+
+  it("Export writes the book that was listed: same titles in the same order, same number of chapters", async () => {
+    const { app, root } = await buildVault(BOOK);
+    const plugin = makePlugin(app);
+    await plugin.previewFolder(tfolder(root, "book"));
+    const shown = previewWindow();
+    const listed = windowTitles(shown);
+
+    await pressExport(plugin, shown);
+
+    const epub = await readEpub("the_book.epub");
+    expect(navTitles(epub.nav)).toEqual(listed);
+    expect(epub.spineCount(epub.opf)).toBe(8);
+    expect(MODALS[0].closed).toBe(true);
+
+    // And it is the very book a direct export of the folder writes, entry by entry.
+    const fromPreview = await epubEntryFingerprints(await fs.readFile(join(outDir, "the_book.epub")));
+    await fs.rm(join(outDir, "the_book.epub"));
+    await plugin.exportFolder(tfolder(root, "book"));
+    const direct = await epubEntryFingerprints(await fs.readFile(join(outDir, "the_book.epub")));
+    expect(fromPreview).toEqual(direct);
+  });
+
+  it("Cancel writes nothing", async () => {
+    const { app, root } = await buildVault(BOOK);
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    buttonNamed(previewWindow(), "Cancel").click();
+
+    expect(MODALS[0].closed).toBe(true);
+    expect(await outDirEntries()).toEqual([]);
+    expect(successNotices()).toEqual([]);
+  });
+
+  it("Export runs the plan that was shown, even if the vault changed while the window was open (FR-003)", async () => {
+    const { app, root } = await buildVault(BOOK);
+    const plugin = makePlugin(app);
+    await plugin.previewFolder(tfolder(root, "book"));
+    const shown = previewWindow();
+    const listed = windowTitles(shown);
+
+    // A re-planning export would now put A First before B Second and add a note.
+    await fs.writeFile(
+      join(root, "book/book.md"),
+      "---\ntags: [book, main]\naliases: [The Book]\n---\n\n# The Book\n\nRead [[a_first]] then [[b_second]].\n"
+    );
+    await fs.writeFile(join(root, "book/new_note.md"), "# New Note\n\nadded later\n");
+    await pressExport(plugin, shown);
+
+    const epub = await readEpub("the_book.epub");
+    expect(navTitles(epub.nav)).toEqual(listed);
+    expect(epub.nav).not.toContain("New Note");
+    expect(epub.spineCount(epub.opf)).toBe(8);
+  });
+
+  it("a note that can no longer be read when Export runs becomes the usual failed-chapter placeholder, not a failed export", async () => {
+    const { app, root } = await buildVault(BOOK);
+    const plugin = makePlugin(app);
+    await plugin.previewFolder(tfolder(root, "book"));
+    const shown = previewWindow();
+
+    // What the pipeline sees of a note deleted or locked in the meantime: its
+    // read fails. (The vault stub cannot model a real deletion, since its link
+    // graph re-reads every indexed file.)
+    failFor(app.vault, "cachedRead", "book/zz_unlinked.md", new Error("gone"));
+    await pressExport(plugin, shown);
+
+    const epub = await readEpub("the_book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(8);
+    expect(await epub.chapter(8)).toContain("chapter failed to render: book/zz_unlinked.md");
+    expect(warnings.some((w) => w.includes("chapter skipped: book/zz_unlinked.md"))).toBe(true);
+  });
+
+  it("tells two notes with the same title apart by their paths", async () => {
+    const { app, root } = await buildVault({
+      "book/A/overview.md": "# Overview\n\none\n",
+      "book/B/overview.md": "# Overview\n\ntwo\n",
+    });
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    const labels = [...previewWindow().querySelectorAll("ol li > span")].map((s) => s.textContent);
+    expect(labels).toContain("Overview — book/A/overview.md");
+    expect(labels).toContain("Overview — book/B/overview.md");
+  });
+
+  it("shows the export's own notice, and no window, for a folder with no Markdown notes", async () => {
+    const { app, root } = await buildVault({ "empty/pic.png": new Uint8Array([1, 2, 3]) });
+
+    await makePlugin(app).previewFolder(tfolder(root, "empty"));
+
+    expect(NOTICES).toContain("Folder has no Markdown notes.");
+    expect(MODALS).toEqual([]);
+  });
+
+  it("lists the filename order, with the export's own warning, when the planner falls back", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\nRead [[2_b]] before [[1_a]].\n",
+      "book/1_a.md": "# A\n\nbody-a\n",
+      "book/2_b.md": "# B\n\nbody-b\n",
+    });
+    // Same isolation as "folder export: planner fallback": only the planner reads `.links`.
+    const mc = (app as unknown as { metadataCache: { getFileCache(f: { path: string }): object | null } })
+      .metadataCache;
+    const original = mc.getFileCache.bind(mc);
+    mc.getFileCache = (f: { path: string }) => {
+      const cache = original(f);
+      if (cache && f.path === "book/book.md") {
+        Object.defineProperty(cache, "links", {
+          get() {
+            throw new Error("cache exploded");
+          },
+        });
+      }
+      return cache;
+    };
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    const shown = previewWindow();
+    expect(windowTitles(shown)).toEqual(["Book", "A", "B"]);
+    expect([...shown.querySelectorAll("h3")].map((h) => h.textContent)).toContain("Known before building");
+    expect(shown.textContent).toContain("chapter ordering fell back to filename order: cache exploded");
+  });
+
+  describe("entry points", () => {
+    it("the preview-folder command previews the active note's folder", async () => {
+      const { app, root } = await buildVault(BOOK);
+      const plugin = await makeOnloadedPlugin(app);
+      const activeFile = tfile(root, "book/a_first.md");
+      (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+
+      await invokeAndWait(plugin, "previewFolder", () => commandsOf(plugin)["preview-folder"].callback?.());
+
+      expect(previewWindow().querySelector("h2")?.textContent).toBe("Preview: The Book");
+      expect(await outDirEntries()).toEqual([]);
+    });
+
+    it("says so, and opens nothing, for a file whose parent is not a folder", async () => {
+      const { app, root } = await buildVault({ "sub/note.md": "Body.\n" });
+      const plugin = await makeOnloadedPlugin(app);
+      const activeFile = tfile(root, "sub/note.md");
+      Object.defineProperty(activeFile as object, "parent", { value: null, configurable: true });
+      (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+
+      commandsOf(plugin)["preview-folder"].callback?.();
+
+      expect(NOTICES).toContain("Active note has no parent folder.");
+      expect(MODALS).toEqual([]);
+    });
+
+    it("is named plainly in the palette, beside the export commands", async () => {
+      const { app } = await buildVault({ "note.md": "Body.\n" });
+      const plugin = await makeOnloadedPlugin(app);
+
+      expect(commandsOf(plugin)["preview-folder"].name).toBe("Preview folder export (active note's folder)");
+    });
+  });
+});
+
+// ── 014-preview-before-export US2: a dry run that can never get in the way ──
+//
+// A preview is only worth trusting if looking is free. These instrument
+// everything an export touches (the network and so the Boox push, the note
+// renderer, image reads, the output folder) and check a preview-and-cancel
+// leaves them all untouched, then check the two pieces of session state the
+// next commands read (the last export's report and its share target).
+describe("preview: a dry run (US2)", () => {
+  const COVERS = {
+    // A remote cover: the ONE thing a normal export fetches before it starts.
+    "remote/remote.md": '---\ncover: "https://example.com/c.png"\n---\n\n# Remote\n\nbody\n',
+    "remote/one.md": "# One\n\nbody\n",
+    "local/local.md": "---\ncover: assets/c.png\n---\n\n# Local\n\nbody\n",
+    "local/assets/c.png": new Uint8Array([137, 80, 78, 71]),
+    "local/one.md": "# One\n\nbody\n",
+    "embedded/embedded.md": "# Embedded\n\n![[pic.png]]\n",
+    "embedded/pic.png": new Uint8Array([137, 80, 78, 71]),
+    "plain/plain.md": "# Plain\n\nbody\n",
+    "plain/one.md": "# One\n\nbody\n",
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetPlatform();
+    setShareHost(null);
+  });
+
+  it("makes no request, renders no note, reads no image and writes nothing, whatever the cover", async () => {
+    const { app, root } = await buildVault(COVERS);
+    const requests: string[] = [];
+    setRequestUrlImpl(async (request) => {
+      requests.push(typeof request === "string" ? request : request.url);
+      throw new Error("unexpected network access in test");
+    });
+    const rendered = vi.spyOn(MarkdownRenderer, "render");
+    const imageReads: string[] = [];
+    const vault = app.vault as unknown as Record<string, (f: { path: string }) => Promise<unknown>>;
+    const readBinary = vault.readBinary.bind(vault);
+    vault.readBinary = (f) => (imageReads.push(f.path), readBinary(f));
+    // Push is ON: a push would be a request, so the request list above catches it too.
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox.local:8085" });
+
+    for (const folder of ["remote", "local", "embedded", "plain"]) {
+      MODALS.length = 0;
+      await plugin.previewFolder(tfolder(root, folder));
+      buttonNamed(previewWindow(), "Cancel").click();
+    }
+
+    expect(requests).toEqual([]);
+    expect(rendered).not.toHaveBeenCalled();
+    expect(imageReads).toEqual([]);
+    expect(await outDirEntries()).toEqual([]);
+    expect(NOTICES).toEqual([]);
+  });
+
+  it("leaves the last export's report where it was", async () => {
+    const { app, root } = await buildVault({
+      "first.md": "# First\n\n![[missing.png]]\n",
+      "book/a.md": "# A\n\nbody\n",
+    });
+    const plugin = await makeOnloadedPlugin(app);
+    await plugin.exportSingle(tfile(root, "first.md"));
+
+    MODALS.length = 0;
+    await plugin.previewFolder(tfolder(root, "book"));
+    buttonNamed(previewWindow(), "Cancel").click();
+    MODALS.length = 0;
+    commandsOf(plugin)["show-export-report"].callback!();
+
+    const report = MODALS[0].contentEl;
+    expect(report.querySelector("h2")?.textContent).toBe("first");
+    expect(report.textContent).toContain("missing embed: missing.png");
+  });
+
+  it("leaves the last exported book where it was for the share command, and opens on mobile too", async () => {
+    const { app, root } = await buildVault({
+      "first.md": "# First\n\nbody\n",
+      "book/a.md": "# A\n\nbody\n",
+    });
+    const shared: { files: { name: string }[] }[] = [];
+    setShareHost({
+      canShare: () => true,
+      share: async (data) => void shared.push(data as (typeof shared)[number]),
+    });
+    setPlatform("mobile");
+    const plugin = await makeOnloadedPlugin(app);
+    plugin.settings = { ...plugin.settings, mobileOutputFolder: "Exports" };
+    await plugin.exportSingle(tfile(root, "first.md"));
+
+    MODALS.length = 0;
+    await plugin.previewFolder(tfolder(root, "book"));
+    expect(previewWindow().querySelector("h2")).not.toBeNull();
+    buttonNamed(previewWindow(), "Cancel").click();
+    (commandsOf(plugin)["share-last-export"].checkCallback as (c: boolean) => boolean)(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(shared).toHaveLength(1);
+    expect(shared[0].files[0].name).toBe("first.epub");
+    expect(await fs.readdir(join(root, "Exports"))).toEqual(["first.epub"]);
+  });
+
+  describe("a preview that fails", () => {
+    const FAILED = (message: string) =>
+      `Could not build the preview: ${message}. You can still export the book as usual.`;
+
+    it("says so and rejects nothing when the window cannot be opened, and the usual export still works", async () => {
+      const { app, root } = await buildVault(COVERS);
+      const plugin = makePlugin(app);
+      vi.spyOn(Modal.prototype, "open").mockImplementation(() => {
+        throw new Error("window refused");
+      });
+
+      await expect(plugin.previewFolder(tfolder(root, "plain"))).resolves.toBeUndefined();
+
+      expect(NOTICES).toContain(FAILED("window refused"));
+      expect(errors.some((e) => e.includes("[inkbound] preview failed"))).toBe(true);
+      vi.restoreAllMocks();
+      await plugin.exportFolder(tfolder(root, "plain"));
+      expect(await outDirEntries()).toContain("plain.epub");
+    });
+
+    it("says so, too, when building the preview throws before any window exists", async () => {
+      const { app, root } = await buildVault({
+        "plain/plain.md": "# Plain\n\nbody\n",
+        "plain/one.md": "# One\n",
+      });
+      // Only a chapter's TITLE reads `headings`; planning does not, so this fails
+      // after the plan is made and before the window can open.
+      const mc = (app as unknown as { metadataCache: { getFileCache(f: { path: string }): object | null } })
+        .metadataCache;
+      const original = mc.getFileCache.bind(mc);
+      mc.getFileCache = (f: { path: string }) => {
+        const cache = original(f);
+        if (cache && f.path === "plain/one.md") {
+          Object.defineProperty(cache, "headings", {
+            get() {
+              throw new Error("cache lost");
+            },
+          });
+        }
+        return cache;
+      };
+
+      await expect(makePlugin(app).previewFolder(tfolder(root, "plain"))).resolves.toBeUndefined();
+
+      expect(NOTICES).toContain(FAILED("cache lost"));
+      expect(MODALS).toEqual([]);
+    });
+  });
+});
+
+// ── 014-preview-before-export US3: preview a linked-notes book ──────────────
+describe("preview: linked notes (US3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // start links to two notes; one of them links on to a third, so the link
+  // depth decides whether that third note is in the book.
+  const WEB = {
+    "start.md": "# Start\n\nSee [[mid_one]] and [[mid_two]].\n",
+    "mid_one.md": "# Mid One\n\nOn to [[far]].\n",
+    "mid_two.md": "# Mid Two\n\nA dead end.\n",
+    "far.md": "# Far\n\nFar away.\n",
+    "unrelated.md": "# Unrelated\n\nNot linked from anywhere.\n",
+  };
+  const titlesShown = () =>
+    [...previewWindow().querySelectorAll("ol li > span")].map((s) => (s.textContent ?? "").split(" — ")[0]);
+
+  it("at link depth 1 lists the note and the notes it links to, and not the ones beyond", async () => {
+    const { app, root } = await buildVault(WEB);
+
+    await makePlugin(app, { linkDepth: 1 }).previewLinked(tfile(root, "start.md"));
+
+    expect(titlesShown()).toEqual(["Start", "Mid One", "Mid Two"]);
+    expect(previewWindow().querySelector("h2")?.textContent).toBe("Preview: start");
+  });
+
+  it("at link depth 2 lists the note beyond too", async () => {
+    const { app, root } = await buildVault(WEB);
+
+    await makePlugin(app, { linkDepth: 2 }).previewLinked(tfile(root, "start.md"));
+
+    expect(titlesShown()).toEqual(["Start", "Mid One", "Mid Two", "Far"]);
+  });
+
+  it("is a flat list: a linked book has no Parts", async () => {
+    const { app, root } = await buildVault(WEB);
+
+    await makePlugin(app, { linkDepth: 2 }).previewLinked(tfile(root, "start.md"));
+
+    expect(previewWindow().querySelectorAll("ol ol")).toHaveLength(0);
+  });
+
+  it.each([1, 2])("Export at depth %i writes the book a direct linked export writes", async (linkDepth) => {
+    const { app, root } = await buildVault(WEB);
+    const plugin = makePlugin(app, { linkDepth });
+    await plugin.previewLinked(tfile(root, "start.md"));
+    const shown = previewWindow();
+    const listed = titlesShown();
+
+    await pressExport(plugin, shown);
+
+    const fromPreview = await epubEntryFingerprints(await fs.readFile(join(outDir, "start.epub")));
+    const epub = await readEpub("start.epub");
+    expect(
+      [...epub.nav.matchAll(/<a href="text\/chapter_\d{3}\.xhtml">([^<]*)<\/a>/g)].map((m) => m[1])
+    ).toEqual(listed);
+    await fs.rm(join(outDir, "start.epub"));
+    await plugin.exportLinked(tfile(root, "start.md"));
+    expect(await epubEntryFingerprints(await fs.readFile(join(outDir, "start.epub")))).toEqual(fromPreview);
+  });
+
+  it("Cancel writes nothing", async () => {
+    const { app, root } = await buildVault(WEB);
+    await makePlugin(app).previewLinked(tfile(root, "start.md"));
+
+    buttonNamed(previewWindow(), "Cancel").click();
+
+    expect(await outDirEntries()).toEqual([]);
+  });
+
+  it("the preview-linked command previews the active note", async () => {
+    const { app, root } = await buildVault(WEB);
+    const plugin = await makeOnloadedPlugin(app);
+    const activeFile = tfile(root, "start.md");
+    (app as { workspace: { getActiveFile: () => unknown } }).workspace.getActiveFile = () => activeFile;
+
+    await invokeAndWait(plugin, "previewLinked", () => commandsOf(plugin)["preview-linked"].callback?.());
+
+    expect(titlesShown()).toEqual(["Start", "Mid One", "Mid Two"]);
+    expect(commandsOf(plugin)["preview-linked"].name).toBe("Preview note + linked notes export");
+  });
+
+  it("a failed linked preview is only a notice, like a failed folder preview", async () => {
+    const { app, root } = await buildVault(WEB);
+    vi.spyOn(Modal.prototype, "open").mockImplementation(() => {
+      throw new Error("window refused");
+    });
+
+    await expect(makePlugin(app).previewLinked(tfile(root, "start.md"))).resolves.toBeUndefined();
+
+    expect(NOTICES).toContain(
+      "Could not build the preview: window refused. You can still export the book as usual."
+    );
+  });
+});
+
+// ── 014-preview-before-export US4: the preview says what it cannot know ─────
+describe("preview: honest about what it cannot know (US4)", () => {
+  it("does not promise a clean export for a folder whose book will carry a warning", async () => {
+    const { app, root } = await buildVault({
+      "book/a.md": "# A\n\nfine\n",
+      "book/b.md": "# B\n\n![[missing.png]]\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.previewFolder(tfolder(root, "book"));
+    const shown = previewWindow();
+
+    expect(shown.textContent).toContain(PREVIEW_UNKNOWNS);
+    expect(shown.textContent?.toLowerCase()).not.toContain("no warnings");
+    expect([...shown.querySelectorAll("h3")].map((h) => h.textContent)).not.toContain(
+      "Known before building"
+    );
+
+    // The warning the preview could not know does appear once the book is built.
+    await pressExport(plugin, shown);
+    expect(warnings.some((w) => w.includes("missing embed: missing.png"))).toBe(true);
+  });
+
+  it("opens with the intro that says this is the plan", async () => {
+    const { app, root } = await buildVault({ "book/a.md": "# A\n\nfine\n" });
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    expect(previewWindow().querySelector("h2")!.nextElementSibling?.textContent).toContain(
+      "This is the plan for the book, made before anything is rendered."
+    );
+  });
+});
+
+// ── 014-preview-before-export US5: the book's identity, before it is built ──
+describe("preview: the book's identity (US5)", () => {
+  /** The four lines under the intro. */
+  const summaryLines = () =>
+    [
+      ...previewWindow().querySelector("h2")!.nextElementSibling!.nextElementSibling!.querySelectorAll("li"),
+    ].map((li) => li.textContent);
+
+  it("shows the title, author, language and cover source the finished book then carries, with no request made", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "aliases: [My Title]",
+        "author: Pan Writer",
+        "language: english",
+        'cover: "https://example.com/c.png"',
+        "---",
+        "",
+        "# Index",
+        "",
+        "body",
+        "",
+      ].join("\n"),
+      "book/one.md": "# One\n\nbody\n",
+    });
+    const requests: string[] = [];
+    setRequestUrlImpl(async (request) => {
+      requests.push(typeof request === "string" ? request : request.url);
+      return {
+        status: 200,
+        headers: { "content-type": "image/png" },
+        arrayBuffer: new Uint8Array([137, 80, 78, 71]).buffer,
+        text: "",
+        json: null,
+      };
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.previewFolder(tfolder(root, "book"));
+
+    expect(summaryLines()).toEqual([
+      "Title: My Title",
+      "Author: Pan Writer",
+      "Language: en",
+      "Cover: Downloaded from https://example.com/c.png when the book is built",
+    ]);
+    expect(requests).toEqual([]);
+
+    // What the export then writes is what was shown, and only now is the cover fetched.
+    await pressExport(plugin, previewWindow());
+    const epub = await readEpub("my_title.epub");
+    expect(epub.opf).toContain("<dc:title>My Title</dc:title>");
+    expect(epub.opf).toMatch(/<dc:creator[^>]*>Pan Writer<\/dc:creator>/);
+    expect(epub.opf).toContain("<dc:language>en</dc:language>");
+    expect(requests).toEqual(["https://example.com/c.png"]);
+    expect(epub.names).toContain("OEBPS/images/cover.png");
+  });
+
+  it("names a local cover by its path, reading no image", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ncover: assets/c.png\n---\n\n# Index\n",
+      "book/assets/c.png": new Uint8Array([137, 80, 78, 71]),
+      "book/one.md": "# One\n",
+    });
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    expect(summaryLines()[3]).toBe("Cover: assets/c.png, read from your vault when the book is built");
+  });
+
+  it("names the note whose first embedded image becomes the cover", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "# Index\n\n![[pic.png]]\n",
+      "book/pic.png": new Uint8Array([137, 80, 78, 71]),
+      "book/one.md": "# One\n",
+    });
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    expect(summaryLines()[3]).toBe("Cover: The first usable image embedded in book/book.md");
+  });
+
+  it("for a folder with no index note, uses the folder's name, the fallback author and no cover", async () => {
+    const { app, root } = await buildVault({
+      "loose/x.md": "# X\n",
+      "loose/y.md": "# Y\n",
+    });
+
+    await makePlugin(app, { fallbackAuthor: "Fallback Pan", language: "th" }).previewFolder(
+      tfolder(root, "loose")
+    );
+
+    expect(summaryLines()).toEqual([
+      "Title: loose",
+      "Author: Fallback Pan",
+      "Language: th",
+      "Cover: No cover",
+    ]);
+  });
+
+  it("for a linked-notes book, takes the identity from the note it starts at", async () => {
+    const { app, root } = await buildVault({
+      "start.md": "---\nauthor: Linked Author\n---\n\n# Start\n\n[[next]]\n",
+      "next.md": "# Next\n",
+    });
+
+    await makePlugin(app).previewLinked(tfile(root, "start.md"));
+
+    expect(summaryLines().slice(0, 2)).toEqual(["Title: start", "Author: Linked Author"]);
   });
 });
