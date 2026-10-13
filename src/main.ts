@@ -249,8 +249,8 @@ export default class EpubExportPlugin extends Plugin {
     const files = paths
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
-    const { meta, cover } = await this.metaSource().plan(file, file.basename);
-    return { files, warnings: [], meta, cover, metaFile: file };
+    const { meta, cover, warnings } = await this.metaSource().plan(file, file.basename);
+    return { files, warnings, meta, cover, metaFile: file };
   }
 
   // The frontmatter read; the shape rule (why a scalar `tags` string is NOT
@@ -380,8 +380,11 @@ export default class EpubExportPlugin extends Plugin {
     const plan = this.planFolderExport(folder, legacy);
     if (!plan) return null;
 
-    const { meta, cover } = await this.metaSource().plan(legacy.index, folder.name);
-    return { files: plan.files, nav: plan.nav, warnings: plan.warnings, meta, cover, metaFile: legacy.index };
+    const { meta, cover, warnings: metaWarnings } = await this.metaSource().plan(legacy.index, folder.name);
+    // Planning warnings first, then the index note's book-detail warnings: the
+    // order a preview lists them in and the export report repeats.
+    const warnings = [...plan.warnings, ...metaWarnings];
+    return { files: plan.files, nav: plan.nav, warnings, meta, cover, metaFile: legacy.index };
   }
 
   // Builds the book a PlannedExport describes. It works on COPIES of the plan's
@@ -437,6 +440,7 @@ export default class EpubExportPlugin extends Plugin {
       chapters: planned.files.map((file) => ({ title: this.titleFor(file), path: file.path })),
       nav: planned.nav,
       warnings: planned.warnings,
+      details: planned.meta.details,
     };
   }
 

@@ -384,6 +384,22 @@ person, on a real device:
 - **No request.** With the developer tools' Network tab open, a preview of a book
   whose index note has a remote `cover:` makes no request until Export is pressed.
 
+**Book details (015-richer-book-metadata) — NOT yet verified by hand.** Every
+entry is checked by epubcheck in CI (`sample.epub` carries all of them), and the
+rules are unit-tested against the shapes real Obsidian 1.14.4 hands a plugin. None
+of that shows what an e-reader does with them. These still need a person, with a
+book built from a note with all six properties and a second volume
+(`series_index: 3`), on a real device:
+
+- **Description.** Whether the Boox library shows the description in a book's
+  details, and how it shows line breaks and a long one.
+- **Series.** Whether the library groups the two volumes and orders them by
+  position, and which of the two written forms it reads (the EPUB 3
+  `belongs-to-collection` or Calibre's `calibre:series`). A decimal position (`2.5`)
+  is worth one look.
+- **Date and publisher.** Whether either is shown at all.
+- **Subjects.** Whether the library can find the book by a subject.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
@@ -412,6 +428,36 @@ do); and the preview applies the book builder's own `validateNavTree` and the sh
 `tocFallbackWarning`, rather than copies of them. A preview must never gain a side effect:
 `tests/main.test.ts`'s "preview: a dry run" cases instrument the network, the renderer,
 image reads and the output folder, and `check-export-works` opens one in the shipped bundle.
+
+**Book details (015).** `description`, `publisher`, `date`, `series` + `series_index`
+and `subjects` are read from the metadata note by the pure
+`src/core/book/book-details.ts` (`resolveBookDetails`, beside the unchanged
+`resolveMeta`), with the date grammar in `src/core/book/book-date.ts`, and written
+by `src/core/epub/package-details.ts`. Three things are easy to break:
+
+- **Byte identity.** `opf()` appends the details to its `dc:creator` line rather than
+  a template line of their own, so a book without them has the same `package.opf`
+  as before 015. `tests/footnote-free-identity.test.ts` hashes one; run it after any
+  change to `opf()` or `package-details.ts`.
+- **The stub is not Obsidian.** The vault stub's frontmatter parser returns only
+  strings and lists of strings, while real Obsidian gives `date: 2024` as a number,
+  an empty property as `null`, and maps and booleans as such (measured in the
+  running app, specs/015-richer-book-metadata/research.md R1). The shape rules are
+  therefore tested at the pure level with real shapes, and adapter tests that need
+  one wrap `metadataCache.getFileCache`. A main-level test that passes only because
+  the stub turned a number into text proves less than it seems.
+- **`null` is an object.** Every reader checks `null` before any shape test, or an
+  empty property would start producing warnings.
+
+Unusable values become warnings worded by `detailsWarning`. They are known at plan
+time, so the preview and the report show the same text.
+
+**Known gap: control characters in titles.** Obsidian hands control characters to a
+plugin unchanged, and one in `package.opf` is a fatal epubcheck error (research R13).
+The six book-detail fields replace such characters with a space. A title taken from
+`aliases` does not yet, so a title with, say, a form feed pasted into it still produces
+a book that fails validation. The fix belongs in the shared escaping and is a separate
+change.
 
 ## Bundled fonts (.ttf loader trio)
 

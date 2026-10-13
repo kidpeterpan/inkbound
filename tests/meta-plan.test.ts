@@ -52,6 +52,8 @@ interface Probe {
   binaryReads: string[];
   /** vault.cachedRead calls, i.e. the note's own text. */
   textReads: string[];
+  /** To hand plan() frontmatter in the shapes real Obsidian produces (015 research R12). */
+  metadataCache: { getFileCache: (f: { path: string }) => unknown };
 }
 
 async function probe(files: Record<string, string | Uint8Array>): Promise<Probe> {
@@ -76,6 +78,7 @@ async function probe(files: Record<string, string | Uint8Array>): Promise<Probe>
     file: (path) => new TFile(root, path) as never,
     binaryReads,
     textReads,
+    metadataCache: app.metadataCache as unknown as Probe["metadataCache"],
   };
 }
 
@@ -327,4 +330,61 @@ describe("NoteMetaSource.resolve: still plan() then attachCover()", () => {
       expect(wholeWarnings).toEqual(splitWarnings);
     }
   );
+});
+
+// 015-richer-book-metadata: the plan also carries the book details and the
+// warnings about values it could not use (research R7).
+describe("NoteMetaSource.plan: book details", () => {
+  it("attaches no details and no warnings for a note without the book-detail properties", async () => {
+    const { source, file } = await probe({ "n.md": note(["author: Pan", "tags: [book, main]"]) });
+
+    const plan = await source.plan(file("n.md"), "n");
+
+    expect(plan.warnings).toEqual([]);
+    expect("details" in plan.meta).toBe(false);
+  });
+
+  it("attaches no details and no warnings when there is no note to read", async () => {
+    const { source } = await probe({});
+
+    const plan = await source.plan(null, "Folder Name");
+
+    expect(plan.warnings).toEqual([]);
+    expect("details" in plan.meta).toBe(false);
+  });
+});
+
+describe("NoteMetaSource: book-detail warnings (015 US2)", () => {
+  const DATE_WARNING =
+    'date left out: "next spring" is not a real date written as YYYY, YYYY-MM or YYYY-MM-DD (n.md)';
+
+  it("plan() names an unusable date, its value and the note", async () => {
+    const { source, file } = await probe({ "n.md": note(["date: next spring"]) });
+
+    const plan = await source.plan(file("n.md"), "n");
+
+    expect(plan.warnings).toEqual([DATE_WARNING]);
+    expect(plan.meta.details).toBeUndefined();
+  });
+
+  it("resolve() reports the book-detail warning before the cover's own", async () => {
+    const { source, file } = await probe({ "n.md": note(["date: next spring", "cover: missing.png"]) });
+    const warnings: string[] = [];
+
+    await source.resolve(file("n.md"), "n", (message) => warnings.push(message));
+
+    expect(warnings).toEqual([DATE_WARNING, "cover not found: missing.png (cover: missing.png)"]);
+  });
+
+  it("reads the shapes real Obsidian hands over, not only the stub's text (research R12)", async () => {
+    const { source, file, metadataCache } = await probe({ "n.md": note([]) });
+    metadataCache.getFileCache = () => ({
+      frontmatter: { description: { a: 1 }, publisher: null, date: 2024 },
+    });
+
+    const plan = await source.plan(file("n.md"), "n");
+
+    expect(plan.meta.details).toEqual({ date: "2024" });
+    expect(plan.warnings).toEqual(['description left out: {"a":1} is not text (n.md)']);
+  });
 });

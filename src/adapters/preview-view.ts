@@ -63,6 +63,7 @@ export class BookPreviewModal extends Modal {
     list.createEl("li", { text: `Author: ${summary.author}` });
     list.createEl("li", { text: `Language: ${summary.language}` });
     list.createEl("li", { text: `Cover: ${summary.cover}` });
+    for (const line of summary.details ?? []) list.createEl("li", { text: `${line.label}: ${line.value}` });
   }
 
   // Only what the plan already knows: an export's other warnings (images, links,
