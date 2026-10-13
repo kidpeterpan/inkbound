@@ -205,6 +205,10 @@ async function main(): Promise<void> {
     if (previewProblems.length > 0)
       fail("the shipped bundle's folder preview is not right.", previewProblems);
 
+    const libraryProblems = await checkLibraryList({ plugin, modals: MODALS, outDir });
+    if (libraryProblems.length > 0)
+      fail("the shipped bundle's Export all books finds the wrong books.", libraryProblems);
+
     const footnoteProblems = await checkFootnoteBook({
       createVaultStub,
       PluginClass,
@@ -218,7 +222,8 @@ async function main(): Promise<void> {
     console.log(
       "check-export-works: PASS — the shipped main.js exported the fixture book end to end " +
         "(3 chapters incl. a nested Part, image, Thai fonts, typeset math, rewritten wikilink), " +
-        "and a second, footnote-heavy book with valid, reproducible footnotes."
+        "and a second, footnote-heavy book with valid, reproducible footnotes; " +
+        "Export all books finds exactly the one book of the smoke vault."
     );
   } finally {
     captured.restore();
@@ -361,6 +366,30 @@ async function checkPreview(deps: PreviewDeps): Promise<string[]> {
   if (deps.notices.length !== noticesBefore) {
     problems.push(`a preview showed notices: ${deps.notices.slice(noticesBefore).join(" | ")}`);
   }
+  return problems;
+}
+
+// 016-export-all-books: in the SHIPPED bundle, "Export all books" over the smoke
+// vault must find exactly one book, `Book`: its index note is tagged book and
+// main, while `Footnotes` has no tagged index note and `Book/Part Two` is a Part
+// of `Book`. The window is cancelled, not confirmed, so nothing is written.
+async function checkLibraryList(deps: Omit<PreviewDeps, "folder" | "notices">): Promise<string[]> {
+  const filesBefore = readdirSync(deps.outDir).sort();
+  deps.modals.length = 0;
+
+  await deps.plugin.exportAllBooks();
+
+  if (deps.modals.length !== 1) return [`expected one list window, found ${deps.modals.length}`];
+  const window = deps.modals[0].contentEl;
+  const rows = [...window.querySelectorAll("ol li")].map((li) => li.textContent ?? "");
+  const problems: string[] = [];
+  if (rows.length !== 1 || !rows[0].endsWith(" — Book")) {
+    problems.push(`expected one book, in folder Book; the list shows: ${rows.join(" | ")}`);
+  }
+  [...window.querySelectorAll("button")].find((b) => b.textContent === "Cancel")?.click();
+  const filesAfter = readdirSync(deps.outDir).sort();
+  if (filesAfter.join("|") !== filesBefore.join("|"))
+    problems.push("opening the list changed the output folder");
   return problems;
 }
 

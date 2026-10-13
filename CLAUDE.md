@@ -119,22 +119,27 @@ src/
   - `book/` — what goes in the book and in what order: `book-plan`,
     `book-tree`, `collect`, `naming`, `metadata`, `backlinks`,
     `book-details` (description, publisher, date, series, subjects and the
-    warnings for values it cannot use), `book-date` (the date grammar), and
-    `export-preview` (what a preview of a planned book shows).
+    warnings for values it cannot use), `book-date` (the date grammar),
+    `library` (which folders are books, and file-name clashes, for "Export all
+    books"), and `export-preview` (what a preview of a planned book shows).
   - `epub/` — building the file: `epub`, `epub-css`, `cover`, `book-identity`,
     `package-details` (the book details as `package.opf` lines),
     `chapter-assets`, `image-fit`, `image-header`, `image-optimizer`,
     `image-codec`, `fonts`, `font-assets` (plus the `fonts/` directory of
     `.ttf` files, licence text and declaration).
   - `delivery/` — getting it to the reader: `output`, `share`, `booxdrop`,
-    `report`, and `settings-core`. That last one holds the whole settings model
+    `report`, `library-report` (the outcome of each book of an "Export all
+    books" run, and its summary and report texts), and `settings-core`. That last one holds the whole settings model
     (schema, defaults and coercion), not only output settings; it sits here
     beside the output module, its main consumer in the core.
 - **`src/adapters/`** — `settings` (the settings tab), `render-adapter`
   (`MarkdownRenderer`), `bases-adapter`, `meta-adapter` (metadata cache, vault
   reads, cover downloads), `output-adapter` (`Platform`, the vault adapter, the
-  lazy `os`/`fs` imports), `export-pipeline` (the orchestrator), `export-notice`,
-  `report-view`, `preview-view` (the preview window), `http`. Only importable under vitest via the `obsidian` alias
+  lazy `os`/`fs` imports), `export-pipeline` (the orchestrator; its notices come from an
+  `ExportFeedback`, by default `export-notice`'s `noticeFeedback`), `export-notice`,
+  `report-view`, `preview-view` (the preview window), `library-export` (the "Export all
+  books" run loop) and `library-view` (its list and report windows), `http`. Only
+  importable under vitest via the `obsidian` alias
   described below.
 
 **This boundary is enforced by `tests/module-boundaries.test.ts`, not just

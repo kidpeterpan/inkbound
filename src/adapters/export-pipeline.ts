@@ -12,7 +12,7 @@
 // core/epub/chapter-assets.ts, core/book/book-tree.ts, core/delivery/report.ts and core/epub/epub.ts,
 // and the writing half lives in adapters/output-adapter.ts. See
 // tests/module-boundaries.test.ts.
-import { App, Component, FileSystemAdapter, Notice, TFile } from "obsidian";
+import { App, Component, FileSystemAdapter, TFile } from "obsidian";
 import { EpubBuilder, chapterHref, type NavItem } from "../core/epub/epub";
 import { escapeXml } from "../core/common/xml";
 import { systemBookIdentity } from "../core/epub/book-identity";
@@ -25,7 +25,9 @@ import { BooxDropClient } from "../core/delivery/booxdrop";
 import { obsidianHttp } from "./http";
 import { resolveDestination, type ExportDestination } from "../core/delivery/output";
 import { desktopHomedir, platformKind, writeBook } from "./output-adapter";
-import { showExportNotice } from "./export-notice";
+import { noticeFeedback, type ExportFeedback, type ProgressHandle } from "./export-notice";
+
+export type { ExportFeedback, ProgressHandle } from "./export-notice";
 import { createWarningCollector, type ExportReport, type WarningCollector } from "../core/delivery/report";
 import {
   coerceBacklinkPosition,
@@ -63,6 +65,11 @@ export interface ExportPipelineDeps {
   settings: EpubExportSettings;
   /** Chapter title resolution — metadata cache plus naming.ts. */
   titleFor: (file: TFile) => string;
+  /**
+   * 016-export-all-books: how the export tells the reader what it is doing.
+   * Absent means today's notices (`noticeFeedback`).
+   */
+  feedback?: ExportFeedback;
 }
 
 /** What the caller has to remember after a completed export. */
@@ -71,6 +78,8 @@ export interface ExportOutcome {
   report: ExportReport | null;
   /** Set only on mobile: the written book, for the share command. */
   shareTarget: ShareTarget | null;
+  /** Why the book could not be built or written; null when it was written. */
+  failure: string | null;
 }
 
 // State of the chapter loop, assembled once and mutated chapter by chapter by
@@ -126,9 +135,10 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
   // and is seeded here rather than looked for in the chapter loop below.
   (job.warnings ?? []).forEach(collector.forBook());
 
-  let notice: Notice | null = null;
+  const feedback = deps.feedback ?? noticeFeedback(deps.app);
+  let progress: ProgressHandle | null = null;
   try {
-    notice = new Notice(`Exporting "${job.meta.title}"…`, 0);
+    progress = feedback.started(job.meta.title);
     const adapter = deps.app.vault.adapter;
     // "" on mobile: the mobile vault adapter is not a FileSystemAdapter and
     // has no filesystem base path to give. rewriteImages in render/links.ts has an
@@ -158,11 +168,9 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
     for (const [chapterIndex, file] of job.files.entries()) {
       // Everything recorded inside this iteration is about THIS chapter.
       const warnForChapter = collector.forNote(file.path);
-      // 008-mobile-support FR-014/SC-006: a long export on a phone otherwise
-      // looks like a frozen app. Reuses the persistent notice the push step
-      // already updates, so this costs nothing new — and it helps desktop
-      // exports of large books just as much.
-      notice.setMessage(`Exporting "${job.meta.title}" — chapter ${chapterIndex + 1}/${job.files.length}…`);
+      // 008-mobile-support FR-014/SC-006: per-chapter progress, so a long export
+      // on a phone does not look frozen. How it is worded is the feedback's job.
+      progress.chapter(chapterIndex + 1, job.files.length);
       await renderAndAddChapter(chapterPass, file, warnForChapter, deps);
     }
 
@@ -171,19 +179,20 @@ export async function runExport(job: Job, deps: ExportPipelineDeps): Promise<Exp
     applyNavTree(builder, job.nav, collector);
 
     const bytes = await builder.build();
-    return await finishExport(job, bytes, collector, notice, deps);
+    return await finishExport(job, bytes, collector, progress, feedback, deps);
   } catch (e) {
     console.error("[inkbound] export failed", e);
-    new Notice(`EPUB export failed: ${errorMessage(e)}`);
+    const failure = errorMessage(e);
+    feedback.failed(failure);
     // Nothing was written, so there is no book to share and no report to open.
-    return { report: null, shareTarget: null };
+    return { report: null, shareTarget: null, failure };
   } finally {
     // In `finally`, not on the success path: a write that fails must not
     // take the warnings gathered before it down with it — on mobile the
     // console is all a failed export leaves behind for the developer, and
     // scripts/local-export.ts parses these lines (FR-020).
     collector.messages().forEach((w) => console.warn("[inkbound]", w));
-    notice?.hide();
+    progress?.hide();
   }
 }
 
@@ -351,7 +360,8 @@ async function finishExport(
   job: Job,
   bytes: Uint8Array,
   collector: WarningCollector,
-  notice: Notice,
+  progress: ProgressHandle,
+  feedback: ExportFeedback,
   deps: ExportPipelineDeps
 ): Promise<ExportOutcome> {
   const dest = resolveDestination(
@@ -368,17 +378,17 @@ async function finishExport(
   const shareTarget: ShareTarget | null =
     dest.kind === "mobile" ? { fileName: dest.fileName, bytes, mimeType: "application/epub+zip" } : null;
 
-  const pushMsg = await pushToBoox(dest, bytes, notice, collector, deps.settings);
+  const pushMsg = await pushToBoox(dest, bytes, progress, collector, deps.settings);
   const warnMsg = summarizeWarnings(collector.messages());
   const savedText = `EPUB saved to ${dest.displayPath}${pushMsg}${warnMsg ? `\n${warnMsg}` : ""}`;
 
-  const report = showExportNotice(deps.app, savedText, {
+  const report = feedback.finished(savedText, {
     bookTitle: job.meta.title,
     chapterPaths: job.files.map((f) => f.path),
     warnings: collector.scoped(),
   });
 
-  return { report, shareTarget };
+  return { report, shareTarget, failure: null };
 }
 
 // Pushes the finished book when the setting is on, returning the fragment the
@@ -387,13 +397,13 @@ async function finishExport(
 async function pushToBoox(
   dest: ExportDestination,
   bytes: Uint8Array,
-  notice: Notice,
+  progress: ProgressHandle,
   collector: WarningCollector,
   settings: EpubExportSettings
 ): Promise<string> {
   if (!settings.pushAfterExport || !settings.booxUrl) return "";
   try {
-    notice.setMessage("Pushing to Boox…");
+    progress.pushing();
     // dest.fileName, not a path split at the call site: BooxDrop must
     // upload under the same name on both platforms (FR-010).
     await new BooxDropClient(settings.booxUrl, obsidianHttp).push(dest.fileName, bytes);

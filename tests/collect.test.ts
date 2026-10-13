@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { orderChapters, orderByName, pickIndexNote, bfsLinked } from "../src/core/book/collect";
+import {
+  orderChapters,
+  orderByName,
+  pickIndexNote,
+  bfsLinked,
+  hasBookIndexTags,
+} from "../src/core/book/collect";
 
 describe("orderChapters", () => {
   it("sorts NN_ prefixes numerically, then others alphabetically", () => {
@@ -102,5 +108,17 @@ describe("orderByName", () => {
       { n: "1_intro", kind: "note" },
     ];
     expect(orderByName(items, (x) => x.n).map((x) => x.kind)).toEqual(["folder", "note", "note", "folder"]);
+  });
+});
+
+// 016-export-all-books: the tag half of pickIndexNote, shared with the rule
+// that decides which folders are books when the whole library is exported.
+describe("hasBookIndexTags", () => {
+  it.each([[["book", "main"]], [["main", "x", "book"]]])("is true when both tags are present: %j", (tags) => {
+    expect(hasBookIndexTags(tags)).toBe(true);
+  });
+
+  it.each([[["book"]], [["main"]], [[]], [["Book", "main"]]])("is false otherwise: %j", (tags) => {
+    expect(hasBookIndexTags(tags)).toBe(false);
   });
 });

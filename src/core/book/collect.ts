@@ -23,11 +23,20 @@ export function orderByName<T>(items: T[], key: (item: T) => string): T[] {
   return [...numbered, ...rest];
 }
 
+/**
+ * Whether a note's tags mark it as a book's index note. Shared by pickIndexNote
+ * and by the rule that decides which folders are books when the whole library
+ * is exported (016), so "a book" means the same thing in both.
+ */
+export function hasBookIndexTags(tags: readonly string[]): boolean {
+  return tags.includes("book") && tags.includes("main");
+}
+
 export function pickIndexNote(
   candidates: readonly { basename: string; tags: string[] }[],
   folderName: string
 ): string | null {
-  const tagged = candidates.find((c) => c.tags.includes("book") && c.tags.includes("main"));
+  const tagged = candidates.find((c) => hasBookIndexTags(c.tags));
   if (tagged) return tagged.basename;
   const named = candidates.find((c) => c.basename === folderName);
   return named ? named.basename : null;

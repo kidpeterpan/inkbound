@@ -1655,6 +1655,8 @@ describe("onload: command and menu registration", () => {
     const { app } = await buildVault({ "note.md": "Body.\n" });
     const plugin = await makeOnloadedPlugin(app);
     expect(Object.keys(commandsOf(plugin)).sort()).toEqual([
+      // 016-export-all-books: the one command that exports the whole library.
+      "export-all-books",
       "export-folder",
       "export-linked",
       "export-note",
@@ -4264,5 +4266,309 @@ describe("book details: every field in every scope (015 SC-001)", () => {
     await makePlugin(app).exportFolder(tfolder(root, "book"));
 
     expect((await readEpub("book.epub")).opf).toContain(expectedBlock);
+  });
+});
+
+// ── 016-export-all-books ──────────────────────────────────────────────────
+// One command finds every book folder (a folder with a note tagged book and
+// main, outermost only), lists them, and on "Export all" exports each exactly
+// as exporting that folder would.
+
+/** The library window, the only modal these cases open. */
+const libraryWindow = () => {
+  expect(MODALS).toHaveLength(1);
+  return MODALS[0].contentEl;
+};
+
+const libraryRows = () => [...libraryWindow().querySelectorAll("li")].map((li) => li.textContent);
+
+/** Presses Export all and waits for the run it starts to finish. */
+async function pressExportAll(plugin: EpubExportPlugin): Promise<void> {
+  const target = plugin as unknown as Record<string, (...a: unknown[]) => Promise<void>>;
+  const original = target.runLibrary.bind(plugin);
+  let started: Promise<void> | undefined;
+  target.runLibrary = (...args) => {
+    started = original(...args);
+    return started;
+  };
+  buttonNamed(libraryWindow(), "Export all").click();
+  await started;
+  target.runLibrary = original;
+}
+
+const bookIndex = (title: string) => `---\ntags: [book, main]\n---\n\n# ${title}\n`;
+
+/** Three books at different depths, plus two folders that are not books. */
+const LIBRARY: Record<string, string> = {
+  "Library/Fiction/Dune/Dune.md": bookIndex("Dune"),
+  "Library/Fiction/Dune/01 Arrakis.md": "# Arrakis\n\nDesert.\n",
+  "Library/Science/Tide/Tide.md": bookIndex("Tide"),
+  "Library/Science/Tide/01 Pools.md": "# Pools\n\nWater.\n",
+  "Solo/Solo.md": bookIndex("Solo"),
+  "Solo/01 One.md": "# One\n\nAlone.\n",
+  "Notes/Notes.md": "# Notes\n\nNamed after its folder, not tagged.\n",
+  "Notes/other.md": "# Other\n",
+  "Misc/m.md": "# M\n",
+};
+
+describe("export all books (016 US1)", () => {
+  it("lists every book, by title and folder, in path order, before writing anything", async () => {
+    const { app } = await buildVault(LIBRARY);
+
+    await makePlugin(app).exportAllBooks();
+
+    expect(libraryRows()).toEqual([
+      "Dune — Library/Fiction/Dune",
+      "Tide — Library/Science/Tide",
+      "Solo — Solo",
+    ]);
+    expect(await outDirEntries()).toEqual([]);
+  });
+
+  it("exports exactly the listed books, and no folder that is not a book", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const plugin = makePlugin(app);
+
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+
+    expect((await outDirEntries()).sort()).toEqual(["dune.epub", "solo.epub", "tide.epub"]);
+  });
+
+  it("writes each book exactly as exporting its folder alone would (SC-001)", async () => {
+    const { app, root } = await buildVault(LIBRARY);
+    const plugin = makePlugin(app);
+    const folders = ["Library/Fiction/Dune", "Library/Science/Tide", "Solo"];
+    const files = ["dune.epub", "tide.epub", "solo.epub"];
+
+    for (const folderPath of folders) await plugin.exportFolder(tfolder(root, folderPath));
+    const alone = await Promise.all(
+      files.map(async (name) => epubEntryFingerprints(await fs.readFile(join(outDir, name))))
+    );
+    for (const name of files) await fs.rm(join(outDir, name));
+
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+    const inRun = await Promise.all(
+      files.map(async (name) => epubEntryFingerprints(await fs.readFile(join(outDir, name))))
+    );
+
+    expect(inRun).toEqual(alone);
+  });
+
+  it("pushes each book once when pushing is on", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const pushes: string[] = [];
+    setRequestUrlImpl(async (request) => {
+      pushes.push(typeof request === "string" ? request : request.url);
+      return { status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: "", json: null };
+    });
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox.local:8085" });
+
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+
+    expect(pushes).toHaveLength(3);
+  });
+
+  it("says when there are no books, and opens no window", async () => {
+    const { app } = await buildVault({ "Notes/Notes.md": "# Notes\n", "Misc/m.md": "# M\n" });
+
+    await makePlugin(app).exportAllBooks();
+
+    expect(NOTICES).toContain("No books found. A book is a folder with a note tagged book and main.");
+    expect(MODALS).toHaveLength(0);
+  });
+});
+
+describe("export all books: failures and clashes (016 US2)", () => {
+  it("keeps going when one book fails: the books before and after it are written", async () => {
+    const { app } = await buildVault(LIBRARY);
+    // A directory where Tide's file must go: writing that one book fails.
+    await fs.mkdir(join(outDir, "tide.epub"));
+    const plugin = makePlugin(app);
+
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+
+    expect((await fs.stat(join(outDir, "dune.epub"))).isFile()).toBe(true);
+    expect((await fs.stat(join(outDir, "solo.epub"))).isFile()).toBe(true);
+    expect((await fs.stat(join(outDir, "tide.epub"))).isDirectory()).toBe(true);
+  });
+
+  it("writes every book even when every push fails", async () => {
+    const { app } = await buildVault(LIBRARY);
+    setRequestUrlImpl(async () => {
+      throw new Error("device unreachable");
+    });
+    const plugin = makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox.local:8085" });
+
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+
+    expect((await outDirEntries()).sort()).toEqual(["dune.epub", "solo.epub", "tide.epub"]);
+    expect(warnings.filter((w) => w.includes("push to Boox failed"))).toHaveLength(3);
+  });
+
+  it("writes the first of two books with the same file name and lists the second as skipped", async () => {
+    const { app } = await buildVault({
+      "Library/Tidal/Tidal.md": "---\ntags: [book, main]\naliases: [Tidal Notes]\n---\n\n# Tidal\n",
+      "Old/Tidal/Tidal.md": "---\ntags: [book, main]\naliases: [tidal notes]\n---\n\n# Old\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.exportAllBooks();
+    expect(libraryRows()).toEqual([
+      "Tidal Notes — Library/Tidal",
+      "tidal notes — Old/Tidal (skipped: same file name as Library/Tidal)",
+    ]);
+    await pressExportAll(plugin);
+
+    expect(await outDirEntries()).toEqual(["tidal_notes.epub"]);
+    expect((await readEpub("tidal_notes.epub")).opf).toContain("<dc:title>Tidal Notes</dc:title>");
+  });
+
+  it("lists a book that cannot be planned by its folder's name, and still exports the others", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const plugin = makePlugin(app);
+    const target = plugin as unknown as Record<string, (folder: { path: string }) => Promise<unknown>>;
+    const planFolder = target.planFolder.bind(plugin);
+    target.planFolder = (folder) => (folder.path === "Solo" ? Promise.resolve(null) : planFolder(folder));
+
+    await plugin.exportAllBooks();
+    expect(libraryRows()).toContain("Solo — Solo");
+    await pressExportAll(plugin);
+
+    expect((await outDirEntries()).sort()).toEqual(["dune.epub", "tide.epub"]);
+  });
+});
+
+describe("export all books: the list (016 US3)", () => {
+  it("writes and pushes nothing when the reader cancels", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const requests: string[] = [];
+    setRequestUrlImpl(async (request) => {
+      requests.push(typeof request === "string" ? request : request.url);
+      return { status: 200, headers: {}, arrayBuffer: new ArrayBuffer(0), text: "", json: null };
+    });
+
+    await makePlugin(app, { pushAfterExport: true, booxUrl: "http://boox.local:8085" }).exportAllBooks();
+    buttonNamed(libraryWindow(), "Cancel").click();
+
+    expect(await outDirEntries()).toEqual([]);
+    expect(requests).toEqual([]);
+  });
+
+  it("writes nothing when the window is closed another way (Escape, a tap outside)", async () => {
+    const { app } = await buildVault(LIBRARY);
+
+    await makePlugin(app).exportAllBooks();
+    MODALS[0].close();
+
+    expect(await outDirEntries()).toEqual([]);
+  });
+
+  it("counts skipped books in its heading", async () => {
+    const { app } = await buildVault({
+      "A/A.md": "---\ntags: [book, main]\naliases: [Same]\n---\n\n# A\n",
+      "B/B.md": "---\ntags: [book, main]\naliases: [same]\n---\n\n# B\n",
+    });
+
+    await makePlugin(app).exportAllBooks();
+
+    expect(libraryWindow().querySelector("h3")?.textContent).toBe("2 books");
+  });
+});
+
+describe("export all books: the account of the run (016 US4)", () => {
+  const reportCommand = (plugin: EpubExportPlugin) => commandsOf(plugin)["show-export-report"].callback?.();
+
+  it("shows one progress notice and one summary for the whole run, and no notice per book (SC-003)", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const plugin = makePlugin(app);
+    await plugin.exportAllBooks();
+    NOTICES.length = 0;
+    NOTICE_ELS.length = 0;
+
+    await pressExportAll(plugin);
+
+    // NOTICE_ELS gets one entry per notice created; NOTICES also records each
+    // update of the run notice's text, as the reader reads it.
+    expect(NOTICE_ELS).toHaveLength(2);
+    expect(NOTICES[0]).toBe("Exporting book 1 of 3: Dune");
+    expect(NOTICES).toContain("Exporting book 2 of 3: Tide — chapter 1/2…");
+    expect(NOTICES[NOTICES.length - 1]).toBe("3 books exported");
+    expect(NOTICES.some((text) => text.startsWith("EPUB saved to") || text.startsWith('Exporting "'))).toBe(
+      false
+    );
+  });
+
+  it("makes 'Show last export report' open the run's report, until the next export replaces it", async () => {
+    const { app, root } = await buildVault(LIBRARY);
+    const plugin = await makeOnloadedPlugin(app);
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+
+    reportCommand(plugin);
+    const runReport = MODALS[MODALS.length - 1].contentEl;
+    expect(runReport.querySelector("h2")?.textContent).toBe("Export all books");
+    expect([...runReport.querySelectorAll("h3")].map((h) => h.textContent)).toEqual([
+      "Dune — Library/Fiction/Dune",
+      "Tide — Library/Science/Tide",
+      "Solo — Solo",
+    ]);
+
+    await plugin.exportSingle(tfile(root, "Solo/Solo.md"));
+    reportCommand(plugin);
+    expect(MODALS[MODALS.length - 1].contentEl.querySelector("h2")?.textContent).toBe("Solo");
+  });
+
+  it("makes the summary tappable when a book has warnings, opening the run report", async () => {
+    const { app } = await buildVault({
+      ...LIBRARY,
+      "Solo/01 One.md": "# One\n\n![missing](nowhere.png)\n",
+    });
+    const plugin = makePlugin(app);
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+    const windowsBefore = MODALS.length;
+
+    expect(NOTICES[NOTICES.length - 1]).toBe("3 books: 2 exported, 1 with warnings");
+    tapLastNotice();
+    expect(MODALS).toHaveLength(windowsBefore + 1);
+    expect(MODALS[MODALS.length - 1].contentEl.textContent).toContain("Exported with 1 warning");
+  });
+
+  it("leaves a clean run's summary as plain text", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const plugin = makePlugin(app);
+    await plugin.exportAllBooks();
+    await pressExportAll(plugin);
+    const windowsBefore = MODALS.length;
+
+    tapLastNotice();
+    expect(MODALS).toHaveLength(windowsBefore);
+  });
+
+  it("offers the last book the run wrote to 'Share last exported book' on mobile (FR-012)", async () => {
+    const { app } = await buildVault(LIBRARY);
+    const shared: string[] = [];
+    setShareHost({
+      canShare: () => true,
+      share: async (data) => void shared.push((data as { title: string }).title),
+    });
+    setPlatform("mobile");
+    try {
+      const plugin = await makeOnloadedPlugin(app, { mobileOutputFolder: "Exports" });
+      await plugin.exportAllBooks();
+      await pressExportAll(plugin);
+
+      (commandsOf(plugin)["share-last-export"].checkCallback as (c: boolean) => boolean)(false);
+
+      await vi.waitFor(() => expect(shared).toEqual(["solo.epub"]));
+    } finally {
+      resetPlatform();
+      setShareHost(null);
+    }
   });
 });
