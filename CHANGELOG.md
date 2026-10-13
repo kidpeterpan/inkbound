@@ -3,6 +3,32 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.14.0
+
+Refresh your whole library in one go: Export all books.
+
+- **Export all books.** A new command finds every book in your vault and exports each
+  one exactly as exporting its folder would: the same chapters, order, Parts, metadata,
+  file name and output folder, and the same push to your Boox when **Push after export**
+  is on. Use it after updating Inkbound, or after adding properties such as
+  `description` or `series` to many books.
+- **What counts as a book:** a folder with a note tagged `book` and `main`. A folder
+  inside a book is one of its Parts, a note that is only named after its folder does not
+  count, and neither does the top level of the vault.
+- **Nothing happens until you confirm.** A window lists the books it found, by title and
+  folder. **Export all** runs them; **Cancel** writes and pushes nothing.
+- **One book failing never stops the rest.** A book that cannot be built, written or
+  pushed is reported and the run moves on. Two books that would share a file name (titles
+  differing only in case or punctuation) never overwrite each other: the second is
+  listed as skipped before you confirm.
+- **One account of the run.** One notice counts through the books instead of two notices
+  per book. At the end, one summary says how many were exported, with warnings, skipped
+  or failed; tap it, or run **Show last export report**, for the report of the whole run.
+- **Your existing export commands are unchanged**, and so are the books they produce.
+- **Not yet tried at scale on a phone or with a real Boox.** How long a large run takes on
+  a phone, and a long series of pushes, are listed in `docs/DEVELOPMENT.md` as still to
+  be checked by hand.
+
 ## 1.13.0
 
 Books describe themselves: a blurb, a publisher, a date, a series and subjects.
