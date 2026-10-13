@@ -155,7 +155,8 @@ same right-click menus, show the book first and build it only if you say so:
 
 A window lists the chapters in the order the book will have, with Parts nested the way
 its table of contents will nest them, each line with the note it comes from, above a
-summary of the book's title, author, language and where its cover will come from. Choose
+summary of the book's title, author, language, where its cover will come from and any
+[book details](#book-details) it will carry. Choose
 **Export** to write exactly that book, or **Cancel** (or press Escape) to write nothing.
 A preview renders no note, fetches no cover and writes no file. It is a plan, not a
 proof: warnings about images, links and math, a chapter that fails to render, whether the
@@ -349,6 +350,45 @@ note for folder exports). Recognised fields:
 - **`tags: [book, main]`** — for **folder** exports, marks which note in the
   folder is the index/metadata source. If no note is tagged this way,
   Inkbound looks for a note whose filename matches the folder name.
+
+### Book details
+
+Six more fields describe the book in your e-reader's library. They are read from
+the same note as the title, author and language, and each one is optional:
+
+```yaml
+description: A field guide to tidal pools and the life on rock shelves.
+publisher: Tide Press
+date: 2024-01-15
+series: Tidal Notes
+series_index: 2
+subjects: [history, marine biology]
+```
+
+- **`description`** — the book's blurb (`dc:description`), as plain text. Markdown
+  and markup characters are kept as typed, not formatted.
+- **`publisher`** — `dc:publisher`.
+- **`date`** — the date of the content (`dc:date`), not the day the book was built:
+  `2024`, `2024-01` or `2024-01-15`. A date with a time keeps only its date. A year
+  needs four digits (write a year before 1000 as `"0800"`). Anything that is not
+  clearly a date (`01/02/2024`, `next spring`, `2024-02-30`) is left out, never
+  guessed.
+- **`series`** and **`series_index`** — the series the book belongs to and its
+  position in it (a number of 0 or more, such as `2` or `2.5`). Written in the EPUB 3
+  form and in the older Calibre form, so more reader apps can group the volumes.
+  A `series_index` without a `series` is ignored.
+- **`subjects`** — what the book is about (`dc:subject`), one per list item.
+  **Tags never become subjects:** they organise your vault, and a book you share
+  should not list `todo` or `work/…`, so subjects are only what you write here.
+
+A field you leave out or leave empty is simply not in the book. A value that cannot be
+used (a date that is not a date, a `series_index` that is not a number) is left out,
+the export still completes, and the export report names the field, the value and the
+note. The preview shows the same warning before you build. Invisible control
+characters (such as a form feed in text pasted from a PDF) become spaces, because an
+EPUB cannot hold them. If your notes already use `date` or `description` for something
+else, for example a template's "created on" date, that value now appears in the book.
+How a Boox library shows these fields has not been checked on a device yet.
 
 ## Sending to a Boox
 

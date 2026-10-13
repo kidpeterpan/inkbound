@@ -104,3 +104,29 @@ describe("systemBookIdentity", () => {
     expect(uuid).toMatch(UUID_V4);
   });
 });
+
+// 015-richer-book-metadata FR-006: the content's date (dc:date) and the build
+// time (dcterms:modified) are different fields, and a book with details stays
+// reproducible under a fixed identity.
+describe("a book with details is still reproducible", () => {
+  async function buildDetailedBook(): Promise<Uint8Array> {
+    const builder = new EpubBuilder(
+      { ...META, details: { description: "D", date: "2024-01-15" } },
+      FIXED_IDENTITY
+    );
+    builder.addChapter("Intro", "<p>hello</p>");
+    return builder.build();
+  }
+
+  it("builds byte-identical files twice", async () => {
+    expect(await buildDetailedBook()).toEqual(await buildDetailedBook());
+  });
+
+  it("keeps the content's date and the build time as two separate entries", async () => {
+    const zip = await JSZip.loadAsync(await buildDetailedBook());
+    const opf = await zip.file("OEBPS/package.opf")!.async("string");
+
+    expect(opf).toContain("<dc:date>2024-01-15</dc:date>");
+    expect(opf).toContain(`<meta property="dcterms:modified">${FIXED_IDENTITY.modifiedAt}</meta>`);
+  });
+});

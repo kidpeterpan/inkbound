@@ -281,3 +281,51 @@ describe("openBookPreview", () => {
     expect(MODALS[0]).toBeInstanceOf(BookPreviewModal);
   });
 });
+
+// 015-richer-book-metadata US5: the book details, after the cover line
+// (specs/015-richer-book-metadata/contracts/preview-summary.md).
+describe("BookPreviewModal: book details in the summary", () => {
+  const summaryLines = (root: HTMLElement) =>
+    [...root.querySelector("h2")!.nextElementSibling!.nextElementSibling!.querySelectorAll("li")].map(
+      (li) => li.textContent
+    );
+  const summaryWith = (details: { label: string; value: string }[]) => ({
+    author: "Pan Writer",
+    language: "en",
+    cover: "No cover",
+    details,
+  });
+
+  it("adds one line per detail after the cover line", () => {
+    const { root } = open(
+      preview({
+        summary: summaryWith([
+          { label: "Description", value: "A field guide" },
+          { label: "Series", value: "Tidal Notes, number 2" },
+        ]),
+      })
+    );
+
+    expect(summaryLines(root)).toEqual([
+      "Title: The Book",
+      "Author: Pan Writer",
+      "Language: en",
+      "Cover: No cover",
+      "Description: A field guide",
+      "Series: Tidal Notes, number 2",
+    ]);
+  });
+
+  it("shows a detail with markup as typed", () => {
+    const { root } = open(
+      preview({ summary: summaryWith([{ label: "Description", value: "<b>x</b> & y" }]) })
+    );
+
+    expect(root.querySelector("b")).toBeNull();
+    expect(summaryLines(root)[4]).toBe("Description: <b>x</b> & y");
+  });
+
+  it("keeps the four lines it always had when the book carries no details", () => {
+    expect(summaryLines(open().root)).toHaveLength(4);
+  });
+});

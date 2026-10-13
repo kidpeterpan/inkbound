@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBookPreview,
+  detailLines,
   PREVIEW_INTRO,
   PREVIEW_UNKNOWNS,
   type PreviewChapter,
@@ -225,5 +226,58 @@ describe("buildBookPreview: the book's identity (FR-011)", () => {
 
   it("keeps the title where the window heading reads it", () => {
     expect(buildBookPreview(input({ title: "My Book" })).title).toBe("My Book");
+  });
+});
+
+// 015-richer-book-metadata US5: the book details, one summary line each
+// (specs/015-richer-book-metadata/contracts/preview-summary.md).
+describe("detailLines: one line per field the book will carry", () => {
+  it("labels every field, in the order Description, Publisher, Date, Series, Subjects", () => {
+    const lines = detailLines({
+      subjects: ["history", "maritime"],
+      series: { name: "Tidal Notes", position: 2.5 },
+      date: "2024-01-15",
+      publisher: "Tide Press",
+      description: "A field guide",
+    });
+
+    expect(lines).toEqual([
+      { label: "Description", value: "A field guide" },
+      { label: "Publisher", value: "Tide Press" },
+      { label: "Date", value: "2024-01-15" },
+      { label: "Series", value: "Tidal Notes, number 2.5" },
+      { label: "Subjects", value: "history, maritime" },
+    ]);
+  });
+
+  it("names a series without a position by its name alone", () => {
+    expect(detailLines({ series: { name: "Tidal Notes" } })).toEqual([
+      { label: "Series", value: "Tidal Notes" },
+    ]);
+  });
+
+  it("shows position 0 rather than dropping it", () => {
+    expect(detailLines({ series: { name: "S", position: 0 } })).toEqual([
+      { label: "Series", value: "S, number 0" },
+    ]);
+  });
+
+  it("gives no line for a field the book will not carry", () => {
+    expect(detailLines({ date: "2024" })).toEqual([{ label: "Date", value: "2024" }]);
+    expect(detailLines({})).toEqual([]);
+    expect(detailLines(undefined)).toEqual([]);
+  });
+});
+
+describe("buildBookPreview: book details in the summary", () => {
+  it("puts the detail lines in the summary", () => {
+    const preview = buildBookPreview(input({ details: { publisher: "Tide Press" } }));
+
+    expect(preview.summary.details).toEqual([{ label: "Publisher", value: "Tide Press" }]);
+  });
+
+  it("leaves the summary exactly as before when the book carries no details", () => {
+    expect("details" in buildBookPreview(input()).summary).toBe(false);
+    expect("details" in buildBookPreview(input({ details: {} })).summary).toBe(false);
   });
 });

@@ -1368,6 +1368,240 @@ describe("cover across export scopes", () => {
   });
 });
 
+// ── 015-richer-book-metadata ─────────────────────────────────────────────
+// The book details come from the same note as the title, author and language,
+// in every export scope (spec FR-001). The vault stub hands frontmatter over as
+// text (research R12); the number and null shapes real Obsidian produces are
+// covered with a wrapped getFileCache further down and in the pure tests.
+
+/** A note whose properties carry the US1 book details, plus any extra lines. */
+const detailedNote = (extraFrontmatter: string[] = [], body = "# Body\n") =>
+  [
+    "---",
+    "description: A field guide to tidal pools",
+    "publisher: Tide Press",
+    "date: 2024-01-15T09:30",
+    ...extraFrontmatter,
+    "---",
+    "",
+    body,
+  ].join("\n");
+
+function expectUs1Details(opf: string): void {
+  expect(opf).toContain("<dc:description>A field guide to tidal pools</dc:description>");
+  expect(opf).toContain("<dc:publisher>Tide Press</dc:publisher>");
+  expect(opf).toContain("<dc:date>2024-01-15</dc:date>");
+}
+
+function expectNoDetails(opf: string): void {
+  expect(opf).not.toMatch(
+    /<dc:description|<dc:publisher|<dc:date|<dc:subject|belongs-to-collection|calibre:series/
+  );
+}
+
+describe("book details: description, publisher, date (015 US1)", () => {
+  it("a single-note export carries the note's details", async () => {
+    const { app, root } = await buildVault({ "note.md": detailedNote() });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    expectUs1Details((await readEpub("note.epub")).opf);
+  });
+
+  it("a linked export carries the details of the note it started from", async () => {
+    const { app, root } = await buildVault({
+      "root.md": detailedNote([], "See [[leaf]]."),
+      "leaf.md": "---\ndescription: Not this one\n---\n\n# Leaf\n",
+    });
+
+    await makePlugin(app).exportLinked(tfile(root, "root.md"));
+
+    const opf = (await readEpub("root.epub")).opf;
+    expectUs1Details(opf);
+    expect(opf).not.toContain("Not this one");
+  });
+
+  it("a folder export carries the details of its index note", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": detailedNote(["tags: [book, main]"]),
+      "book/01_intro.md": "---\ndescription: Not this one\n---\n\n# Intro\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const opf = (await readEpub("book.epub")).opf;
+    expectUs1Details(opf);
+    expect(opf).not.toContain("Not this one");
+  });
+
+  it("a folder with no index note carries no details", async () => {
+    const { app, root } = await buildVault({
+      "loose/a.md": detailedNote(),
+      "loose/b.md": "# B\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "loose"));
+
+    expectNoDetails((await readEpub("loose.epub")).opf);
+  });
+
+  it("a note without the properties carries no details", async () => {
+    const { app, root } = await buildVault({ "plain.md": "---\nauthor: Pan\n---\n\n# Plain\n" });
+
+    await makePlugin(app).exportSingle(tfile(root, "plain.md"));
+
+    expectNoDetails((await readEpub("plain.epub")).opf);
+  });
+});
+
+describe("book details: unusable values (015 US2)", () => {
+  const dateWarning = (value: string, notePath: string) =>
+    `date left out: "${value}" is not a real date written as YYYY, YYYY-MM or YYYY-MM-DD (${notePath})`;
+
+  /** The export's warnings as the console shows them, without the plugin's prefix. */
+  const consoleWarnings = () => warnings.map((line) => line.replace(/^\[inkbound\] /, ""));
+
+  it("a single-note export leaves an unusable date out and reports it once, under the book", async () => {
+    const { app, root } = await buildVault({ "note.md": "---\ndate: next spring\n---\n\n# Note\n" });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    expect((await readEpub("note.epub")).opf).not.toContain("<dc:date");
+    expect(consoleWarnings().filter((w) => w === dateWarning("next spring", "note.md"))).toHaveLength(1);
+    expect(successNotices()[0]).toContain("1 warning");
+    tapLastNotice();
+    expect(lastReportHeadings()).toEqual([BOOK_GROUP_LABEL]);
+    expect(openedReports()[0].text).toContain(dateWarning("next spring", "note.md"));
+  });
+
+  it("a linked export reports the start note's unusable date", async () => {
+    const { app, root } = await buildVault({
+      "root.md": "---\ndate: next spring\n---\n\nSee [[leaf]].\n",
+      "leaf.md": "# Leaf\n",
+    });
+
+    await makePlugin(app).exportLinked(tfile(root, "root.md"));
+
+    expect((await readEpub("root.epub")).opf).not.toContain("<dc:date");
+    expect(consoleWarnings().filter((w) => w === dateWarning("next spring", "root.md"))).toHaveLength(1);
+  });
+
+  it("a folder export reports the index note's unusable date", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\ndate: next spring\n---\n\n# Book\n",
+      "book/01_intro.md": "# Intro\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    expect((await readEpub("book.epub")).opf).not.toContain("<dc:date");
+    expect(consoleWarnings().filter((w) => w === dateWarning("next spring", "book/book.md"))).toHaveLength(1);
+  });
+
+  it.each(["01/02/2024", "2024-02-30"])("never guesses at %s", async (value) => {
+    const { app, root } = await buildVault({ "note.md": `---\ndate: ${value}\n---\n\n# Note\n` });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    expect((await readEpub("note.epub")).opf).not.toContain("<dc:date");
+    expect(consoleWarnings()).toContain(dateWarning(value, "note.md"));
+  });
+
+  it("reads the shapes real Obsidian hands over: a number year, an empty value, a boolean (research R12)", async () => {
+    const { app, root } = await buildVault({ "note.md": "# Note\n" });
+    const mc = (app as unknown as { metadataCache: { getFileCache(f: { path: string }): object | null } })
+      .metadataCache;
+    const original = mc.getFileCache.bind(mc);
+    mc.getFileCache = (f: { path: string }) =>
+      f.path === "note.md"
+        ? { ...original(f), frontmatter: { date: 2024, description: null, publisher: true } }
+        : original(f);
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    const opf = (await readEpub("note.epub")).opf;
+    expect(opf).toContain("<dc:date>2024</dc:date>");
+    expect(opf).not.toMatch(/<dc:description|<dc:publisher/);
+    expect(consoleWarnings()).toEqual(["publisher left out: true is not text (note.md)"]);
+  });
+});
+
+describe("book details: series (015 US3)", () => {
+  it("a single note with a series and a position carries both series forms", async () => {
+    const { app, root } = await buildVault({
+      "note.md": "---\nseries: Tidal Notes\nseries_index: 2\n---\n\n# Note\n",
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    const opf = (await readEpub("note.epub")).opf;
+    expect(opf).toContain('<meta property="belongs-to-collection" id="book-series">Tidal Notes</meta>');
+    expect(opf).toContain('property="group-position">2</meta>');
+    expect(opf).toContain('<meta name="calibre:series_index" content="2"/>');
+  });
+
+  it("a folder's index note gives a series without a position", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\nseries: Tidal Notes\n---\n\n# Book\n",
+      "book/01_intro.md": "# Intro\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const opf = (await readEpub("book.epub")).opf;
+    expect(opf).toContain("belongs-to-collection");
+    expect(opf).toContain('<meta name="calibre:series" content="Tidal Notes"/>');
+    expect(opf).not.toMatch(/group-position|calibre:series_index/);
+  });
+
+  it("an unusable position keeps the series and is reported", async () => {
+    const { app, root } = await buildVault({
+      "note.md": "---\nseries: Tidal Notes\nseries_index: third\n---\n\n# Note\n",
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    const opf = (await readEpub("note.epub")).opf;
+    expect(opf).toContain("belongs-to-collection");
+    expect(opf).not.toContain("group-position");
+    expect(warnings).toContain(
+      '[inkbound] series_index left out: "third" is not a number of 0 or more (note.md)'
+    );
+  });
+});
+
+describe("book details: subjects (015 US4)", () => {
+  it("a note's subjects become the book's subjects, in order", async () => {
+    const { app, root } = await buildVault({
+      "note.md": "---\nsubjects: [history, maritime]\n---\n\n# Note\n",
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    const opf = (await readEpub("note.epub")).opf;
+    expect(opf).toContain("<dc:subject>history</dc:subject>\n    <dc:subject>maritime</dc:subject>");
+  });
+
+  it("a note's tags never become subjects", async () => {
+    const { app, root } = await buildVault({ "note.md": "---\ntags: [history]\n---\n\n# Note\n" });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    expect((await readEpub("note.epub")).opf).not.toContain("<dc:subject");
+  });
+
+  it("a folder whose index note is tagged book and main gets no subjects from those tags", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n",
+      "book/01_intro.md": "# Intro\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    expect((await readEpub("book.epub")).opf).not.toContain("<dc:subject");
+  });
+});
+
 describe("images", () => {
   it("case 7: embeds an image referenced by a relative markdown path", async () => {
     const { app, root } = await buildVault({
@@ -3880,5 +4114,155 @@ describe("preview: the book's identity (US5)", () => {
     await makePlugin(app).previewLinked(tfile(root, "start.md"));
 
     expect(summaryLines().slice(0, 2)).toEqual(["Title: start", "Author: Linked Author"]);
+  });
+});
+
+// 015-richer-book-metadata US5: the preview shows the book details and their
+// warnings, and the exported book and its report then say the same (SC-006).
+describe("preview: book details (015 US5)", () => {
+  const summaryLines = () =>
+    [
+      ...previewWindow().querySelector("h2")!.nextElementSibling!.nextElementSibling!.querySelectorAll("li"),
+    ].map((li) => li.textContent);
+
+  const knownBeforeBuilding = () => {
+    const heading = [...previewWindow().querySelectorAll("h3")].find(
+      (h) => h.textContent === "Known before building"
+    );
+    return heading ? [...heading.nextElementSibling!.querySelectorAll("li")].map((li) => li.textContent) : [];
+  };
+
+  it("shows every detail the exported book then carries", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "description: A field guide",
+        "publisher: Tide Press",
+        "date: 2024-01-15",
+        "series: Tidal Notes",
+        "series_index: 2",
+        "subjects: [history, maritime]",
+        "---",
+        "",
+        "# Book",
+        "",
+      ].join("\n"),
+      "book/one.md": "# One\n",
+    });
+    const plugin = makePlugin(app);
+
+    await plugin.previewFolder(tfolder(root, "book"));
+
+    expect(summaryLines().slice(4)).toEqual([
+      "Description: A field guide",
+      "Publisher: Tide Press",
+      "Date: 2024-01-15",
+      "Series: Tidal Notes, number 2",
+      "Subjects: history, maritime",
+    ]);
+
+    await pressExport(plugin, previewWindow());
+    const opf = (await readEpub("book.epub")).opf;
+    expect(opf).toContain("<dc:description>A field guide</dc:description>");
+    expect(opf).toContain("<dc:publisher>Tide Press</dc:publisher>");
+    expect(opf).toContain("<dc:date>2024-01-15</dc:date>");
+    expect(opf).toContain('property="group-position">2</meta>');
+    expect(opf).toContain("<dc:subject>history</dc:subject>\n    <dc:subject>maritime</dc:subject>");
+  });
+
+  it("lists an unusable value under Known before building, with the text the report then shows", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\ndate: next spring\n---\n\n# Book\n",
+      "book/one.md": "# One\n",
+    });
+    const plugin = makePlugin(app);
+    const warning =
+      'date left out: "next spring" is not a real date written as YYYY, YYYY-MM or YYYY-MM-DD (book/book.md)';
+
+    await plugin.previewFolder(tfolder(root, "book"));
+    expect(knownBeforeBuilding()).toEqual([warning]);
+
+    await pressExport(plugin, previewWindow());
+    tapLastNotice();
+    expect(openedReports().at(-1)!.text).toContain(warning);
+  });
+
+  it("adds no line for a linked book whose start note has no details", async () => {
+    const { app, root } = await buildVault({ "note.md": "See [[leaf]].\n", "leaf.md": "# Leaf\n" });
+
+    await makePlugin(app).previewLinked(tfile(root, "note.md"));
+
+    expect(summaryLines()).toHaveLength(4);
+  });
+});
+
+// 015-richer-book-metadata SC-001: one note carrying every book detail, in each
+// of the three export scopes, gives exactly the contract's lines in its order.
+describe("book details: every field in every scope (015 SC-001)", () => {
+  const longDescription =
+    `<b>คู่มือ</b> & notes on tidal pools. ${"Rock shelves and the life on them. ".repeat(40)}`.trim();
+
+  const fullNote = (extra: string[] = [], body = "# Body\n") =>
+    [
+      "---",
+      ...extra,
+      `description: ${longDescription}`,
+      "publisher: Pan's Press",
+      "date: 2024-01-15T09:30",
+      "series: Tidal Notes",
+      "series_index: 2.5",
+      'subjects: [history, "#reading/sci-fi", History]',
+      "---",
+      "",
+      body,
+    ].join("\n");
+
+  const expectedBlock =
+    "</dc:creator>" +
+    `\n    <dc:description>${escapeXmlText(longDescription)}</dc:description>` +
+    "\n    <dc:publisher>Pan&apos;s Press</dc:publisher>" +
+    "\n    <dc:date>2024-01-15</dc:date>" +
+    "\n    <dc:subject>history</dc:subject>" +
+    "\n    <dc:subject>reading/sci-fi</dc:subject>" +
+    '\n    <meta property="belongs-to-collection" id="book-series">Tidal Notes</meta>' +
+    '\n    <meta refines="#book-series" property="collection-type">series</meta>' +
+    '\n    <meta refines="#book-series" property="group-position">2.5</meta>' +
+    '\n    <meta name="calibre:series" content="Tidal Notes"/>' +
+    '\n    <meta name="calibre:series_index" content="2.5"/>' +
+    '\n    <meta property="dcterms:modified">';
+
+  function escapeXmlText(text: string): string {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  it("a single-note export", async () => {
+    const { app, root } = await buildVault({ "note.md": fullNote() });
+
+    await makePlugin(app).exportSingle(tfile(root, "note.md"));
+
+    expect((await readEpub("note.epub")).opf).toContain(expectedBlock);
+  });
+
+  it("a linked export started from the note", async () => {
+    const { app, root } = await buildVault({
+      "root.md": fullNote([], "See [[leaf]]."),
+      "leaf.md": "# Leaf\n",
+    });
+
+    await makePlugin(app).exportLinked(tfile(root, "root.md"));
+
+    expect((await readEpub("root.epub")).opf).toContain(expectedBlock);
+  });
+
+  it("a folder export whose index note it is", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": fullNote(["tags: [book, main]"]),
+      "book/01_intro.md": "# Intro\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    expect((await readEpub("book.epub")).opf).toContain(expectedBlock);
   });
 });

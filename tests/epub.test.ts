@@ -3,6 +3,8 @@ import JSZip from "jszip";
 import { EpubBuilder, type NavItem, chapterHref, validateNavTree } from "../src/core/epub/epub";
 import { EPUB_CSS, FOOTNOTE_CSS } from "../src/core/epub/epub-css";
 import { escapeXml } from "../src/core/common/xml";
+import type { BookIdentity } from "../src/core/epub/book-identity";
+import type { ExportMeta } from "../src/core/types";
 
 const META = { title: "ทดสอบ & Book", author: "Pan", language: "th" };
 
@@ -624,5 +626,44 @@ describe("validateNavTree (shared with the preview)", () => {
     expect(() =>
       validateNavTree([chapter(0), { kind: "part", title: "Empty", indexChapter: null, children: [] }], 1)
     ).toThrow(/Empty/);
+  });
+});
+
+// 015-richer-book-metadata: the details ride on the dc:creator line, so a book
+// without them keeps a byte-identical package.opf (research R8).
+describe("book details in package.opf", () => {
+  const FIXED_IDENTITY: BookIdentity = {
+    uuid: "00000000-1111-4222-8333-444444444444",
+    modifiedAt: "2001-01-01T00:00:00Z",
+    zipDate: new Date("2001-01-01T00:00:00Z"),
+  };
+
+  async function packageOf(meta: ExportMeta): Promise<string> {
+    const builder = new EpubBuilder(meta, FIXED_IDENTITY);
+    builder.addChapter("Intro", "<p>hello</p>");
+    const zip = await JSZip.loadAsync(await builder.build());
+    return zip.file("OEBPS/package.opf")!.async("string");
+  }
+
+  it("writes the same package for no details and for an empty set of details", async () => {
+    const withoutDetails = await packageOf(META);
+    const withEmptyDetails = await packageOf({ ...META, details: {} });
+
+    expect(withEmptyDetails).toBe(withoutDetails);
+  });
+
+  it("writes the details right after dc:creator, and keeps the build time as dcterms:modified", async () => {
+    const opf = await packageOf({
+      ...META,
+      details: { description: "D", publisher: "P", date: "2024-01-15" },
+    });
+
+    expect(opf).toContain(
+      "<dc:creator>Pan</dc:creator>" +
+        "\n    <dc:description>D</dc:description>" +
+        "\n    <dc:publisher>P</dc:publisher>" +
+        "\n    <dc:date>2024-01-15</dc:date>" +
+        '\n    <meta property="dcterms:modified">2001-01-01T00:00:00Z</meta>'
+    );
   });
 });

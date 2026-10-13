@@ -19,12 +19,32 @@ const TINY_PNG = Buffer.from(
   "base64"
 );
 
+// 015-richer-book-metadata: every book detail, in its hardest legal shape, so
+// that CI's epubcheck gate validates all of them on every run (research R10):
+// markup characters, Thai text, a line break and several paragraphs in the
+// description, an apostrophe in the publisher (escaped as &apos;), and a
+// decimal series position.
+const SAMPLE_DESCRIPTION = [
+  "<b>คู่มือ</b> & notes on tidal pools, written as a sample.",
+  ...Array.from(
+    { length: 6 },
+    (_, i) => `Paragraph ${i + 2}: rock shelves, rock pools and the life on them.`
+  ),
+].join("\n");
+
 const b = new EpubBuilder({
   title: "ตัวอย่าง Sample",
   author: "Pan",
   language: "th",
   coverBytes: new Uint8Array(TINY_PNG),
   coverExt: "png",
+  details: {
+    description: SAMPLE_DESCRIPTION,
+    publisher: "Pan's Press",
+    date: "2024-01-15",
+    subjects: ["history", "reading/sci-fi"],
+    series: { name: "Tidal Notes", position: 2.5 },
+  },
 });
 b.addChapter(
   "บทที่หนึ่ง",

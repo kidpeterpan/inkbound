@@ -117,9 +117,12 @@ src/
   - `content/` — embedded-content handling: `math`, `footnotes`,
     `footnote-refs`, `bases`.
   - `book/` — what goes in the book and in what order: `book-plan`,
-    `book-tree`, `collect`, `naming`, `metadata`, `backlinks`, and
+    `book-tree`, `collect`, `naming`, `metadata`, `backlinks`,
+    `book-details` (description, publisher, date, series, subjects and the
+    warnings for values it cannot use), `book-date` (the date grammar), and
     `export-preview` (what a preview of a planned book shows).
   - `epub/` — building the file: `epub`, `epub-css`, `cover`, `book-identity`,
+    `package-details` (the book details as `package.opf` lines),
     `chapter-assets`, `image-fit`, `image-header`, `image-optimizer`,
     `image-codec`, `fonts`, `font-assets` (plus the `fonts/` directory of
     `.ttf` files, licence text and declaration).
@@ -211,7 +214,12 @@ from coverage for that reason.
    failure never becomes a "missing image". An optimized image keeps its type,
    because its `.ext` is already stamped into the chapter HTML.
 4. `metadata.ts`'s `resolveMeta` derives book metadata (title/author/
-   language/cover) from the exporting note's own frontmatter.
+   language/cover) from the exporting note's own frontmatter, and
+   `book-details.ts`'s `resolveBookDetails`, called beside it in
+   `NoteMetaSource.plan`, derives the optional book details and a warning for
+   each value it cannot use. `package-details.ts` appends them to `opf()`'s
+   `dc:creator` line, so a book without them keeps a byte-identical
+   `package.opf` (015; see docs/DEVELOPMENT.md "Book details (015)").
 5. Optionally, `booxdrop.ts`'s `BooxDropClient` (via `http.ts`'s
    `obsidianHttp`) pushes the finished EPUB to a Boox device. The local file
    is always written before any push is attempted.

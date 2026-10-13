@@ -6,6 +6,7 @@ import type { TocEntry } from "../render";
 import type { ExportMeta } from "../types";
 import { escapeXml } from "../common/xml";
 import { systemBookIdentity, type BookIdentity } from "./book-identity";
+import { detailsMetadataXml } from "./package-details";
 
 export function chapterHref(index: number): string {
   return `text/chapter_${String(index + 1).padStart(3, "0")}.xhtml`;
@@ -288,13 +289,18 @@ export class EpubBuilder {
     const cover = this.coverManifestItems();
     const items = this.contentManifestItems().join("\n    ");
     const spine = this.spineItems().join("\n    ");
+    // 015-richer-book-metadata: the book details ride on the dc:creator line
+    // instead of a template line of their own. A book without details gets ""
+    // there, so its package.opf stays byte-identical to what it was before the
+    // details existed (tests/footnote-free-identity.test.ts hashes one).
+    const details = detailsMetadataXml(this.meta.details);
     return `<?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:identifier id="uid">urn:uuid:${this.identity.uuid}</dc:identifier>
     <dc:title>${escapeXml(this.meta.title)}</dc:title>
     <dc:language>${escapeXml(this.meta.language)}</dc:language>
-    <dc:creator>${escapeXml(this.meta.author)}</dc:creator>
+    <dc:creator>${escapeXml(this.meta.author)}</dc:creator>${details}
     <meta property="dcterms:modified">${this.identity.modifiedAt}</meta>
     ${cover.meta}
   </metadata>

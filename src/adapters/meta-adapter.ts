@@ -9,6 +9,7 @@
 // reading as a sequence of steps.
 import { App, requestUrl, TAbstractFile, TFile } from "obsidian";
 import { resolveMeta, type MetaDefaults } from "../core/book/metadata";
+import { detailsWarning, hasBookDetails, resolveBookDetails } from "../core/book/book-details";
 import {
   parseCoverValue,
   findImageEmbeds,
@@ -28,6 +29,12 @@ import type { ExportMeta } from "../core/types";
 export interface MetaPlan {
   meta: ExportMeta;
   cover: CoverPlan;
+  /**
+   * 015-richer-book-metadata: one warning per book-detail value that could not
+   * be used. Known before anything is fetched or rendered, so a preview shows
+   * them and an export reports them, with the same text.
+   */
+  warnings: string[];
 }
 
 /**
@@ -40,7 +47,8 @@ export interface MetaPlan {
  * 014-preview-before-export: the work is two steps so a preview can do the
  * first without the second. `plan` decides (and never touches the network or
  * an image); `attachCover` carries the decision out; `resolve` is the two in
- * order, which is all an export ever did.
+ * order, which is all an export ever did — plus, since 015, passing on the
+ * plan's book-detail warnings before the cover's own.
  */
 export class NoteMetaSource {
   constructor(
@@ -61,8 +69,13 @@ export class NoteMetaSource {
       author: resolved.author,
       language: resolved.language,
     };
+    const { details, issues } = resolveBookDetails(fm);
+    // Attached only when there is something to write, so the ExportMeta of a
+    // note without these properties is exactly what it was before them.
+    if (hasBookDetails(details)) meta.details = details;
+    const warnings = file ? issues.map((issue) => detailsWarning(issue, file.path)) : [];
     const cover = await this.planCover(file, parseCoverValue(fm?.cover), resolved.coverUrl);
-    return { meta, cover };
+    return { meta, cover, warnings };
   }
 
   /** `plan`, then `attachCover`: the whole of what an export has always done. */
@@ -71,7 +84,8 @@ export class NoteMetaSource {
     fallbackBasename: string,
     warn: (message: string) => void
   ): Promise<ExportMeta> {
-    const { meta, cover } = await this.plan(file, fallbackBasename);
+    const { meta, cover, warnings } = await this.plan(file, fallbackBasename);
+    for (const warning of warnings) warn(warning);
     await this.attachCover(meta, cover, file, warn);
     return meta;
   }

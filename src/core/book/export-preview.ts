@@ -13,6 +13,7 @@
 import { describeCover, type CoverPlan } from "../epub/cover";
 import { validateNavTree, type NavItem } from "../epub/epub";
 import { tocFallbackWarning } from "./book-plan";
+import type { BookDetails, SeriesMembership } from "../types";
 
 /** One chapter of the planned book: the title it will carry and the note it comes from. */
 export interface PreviewChapter {
@@ -32,6 +33,8 @@ export interface PreviewInput {
   nav: NavItem[] | undefined;
   /** Planning warnings known before anything renders. */
   warnings: readonly string[];
+  /** 015-richer-book-metadata: what the book says about itself beyond the summary's first four lines. */
+  details?: BookDetails;
 }
 
 /**
@@ -45,7 +48,13 @@ export type PreviewRow =
 export interface BookPreview {
   title: string;
   /** The rest of who the book says it is, as the reader reads it. */
-  summary: { author: string; language: string; cover: string };
+  summary: {
+    author: string;
+    language: string;
+    cover: string;
+    /** One line per book detail the book will carry; absent when it carries none. */
+    details?: DetailLine[];
+  };
   chapterCount: number;
   rows: PreviewRow[];
   warnings: string[];
@@ -62,17 +71,55 @@ export const PREVIEW_INTRO =
 export const PREVIEW_UNKNOWNS =
   "Only known when the book is built: warnings about images, links and math, chapters that fail to render, whether the Thai font is embedded, and the backlink trails added to each chapter.";
 
+/** One labelled line of the summary, such as `Series: Tidal Notes, number 2`. */
+export interface DetailLine {
+  label: string;
+  value: string;
+}
+
 export function buildBookPreview(input: PreviewInput): BookPreview {
   const contents = tableOfContents(input.chapters, input.nav);
   return {
     title: input.title,
-    summary: { author: input.author, language: input.language, cover: describeCover(input.cover) },
+    summary: summaryOf(input),
     chapterCount: input.chapters.length,
     rows: contents.rows,
     warnings: [...input.warnings, ...contents.warnings],
     intro: PREVIEW_INTRO,
     unknowns: PREVIEW_UNKNOWNS,
   };
+}
+
+// A book with no details keeps exactly the summary it had before details
+// existed: no `details` key, rather than an empty one.
+function summaryOf(input: PreviewInput): BookPreview["summary"] {
+  const summary: BookPreview["summary"] = {
+    author: input.author,
+    language: input.language,
+    cover: describeCover(input.cover),
+  };
+  const details = detailLines(input.details);
+  if (details.length > 0) summary.details = details;
+  return summary;
+}
+
+/**
+ * The book details as the preview lists them, in the order of
+ * contracts/preview-summary.md, with a line only for a field the book carries.
+ */
+export function detailLines(details: BookDetails | undefined): DetailLine[] {
+  if (!details) return [];
+  const lines: DetailLine[] = [];
+  if (details.description !== undefined) lines.push({ label: "Description", value: details.description });
+  if (details.publisher !== undefined) lines.push({ label: "Publisher", value: details.publisher });
+  if (details.date !== undefined) lines.push({ label: "Date", value: details.date });
+  if (details.series !== undefined) lines.push({ label: "Series", value: describeSeries(details.series) });
+  if (details.subjects !== undefined) lines.push({ label: "Subjects", value: details.subjects.join(", ") });
+  return lines;
+}
+
+function describeSeries({ name, position }: SeriesMembership): string {
+  return position === undefined ? name : `${name}, number ${position}`;
 }
 
 // The rows, and the warning that explains them when the book builder would
