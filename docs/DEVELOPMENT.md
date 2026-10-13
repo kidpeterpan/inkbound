@@ -400,6 +400,22 @@ book built from a note with all six properties and a second volume
 - **Date and publisher.** Whether either is shown at all.
 - **Subjects.** Whether the library can find the book by a subject.
 
+**Export all books (016-export-all-books) — NOT yet verified by hand.** The
+book rule, the run, failures, clashes and the report are unit-tested, and the
+shipped bundle finds the smoke vault's one book. None of that shows a long run on
+a real device. These still need a person:
+
+- **A phone, a large library.** How long a 20-book run takes, and that it finishes
+  without the app being suspended or running out of memory.
+- **A long run of pushes to a real Boox.** Every book arrives. With the device off,
+  each book waits for its own push to fail, so a run can take a while (a stop after
+  repeated push failures is a possible follow-up).
+- **The run notice on a phone.** How `Exporting book 3 of 12: <title> — chapter
+  4/10…` reads on a small screen.
+- **Dot-folders.** Real Obsidian leaves `.obsidian` and other dot-folders out of the
+  vault tree the run walks; the test stub lists a directory as it is, and the test
+  vaults have none.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
@@ -451,6 +467,18 @@ by `src/core/epub/package-details.ts`. Three things are easy to break:
 
 Unusable values become warnings worded by `detailsWarning`. They are known at plan
 time, so the preview and the report show the same text.
+
+**Export all books (016).** `src/core/book/library.ts` decides which folders are
+books (a direct note tagged `book` and `main` through `hasBookIndexTags`, the check
+`pickIndexNote` shares; outermost only; never the top level) and which books of a run
+share a file name (`slugify` of the title, not the title). The run plans every book
+before its list opens, so the list can show each title and clash, and Export all runs
+exactly those plans, as a 014 preview's Export does. The pipeline takes its notices from
+an `ExportFeedback` (`src/adapters/export-notice.ts`): `noticeFeedback` is what every
+single export shows, unchanged, and the run's feedback (`src/adapters/library-export.ts`)
+drives one notice for the whole run and shows nothing per book. Each export's console
+lines are unchanged (010 FR-020). `lastReport` holds either one book's report or one
+run's (`LibraryReport`), and "Show last export report" opens the matching window.
 
 **Known gap: control characters in titles.** Obsidian hands control characters to a
 plugin unchanged, and one in `package.opf` is a fatal epubcheck error (research R13).

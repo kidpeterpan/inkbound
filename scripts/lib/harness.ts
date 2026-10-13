@@ -83,6 +83,7 @@ export interface HarnessPlugin {
   exportFolder(f: unknown): Promise<void>;
   exportLinked(f: unknown): Promise<void>;
   previewFolder(f: unknown): Promise<void>;
+  exportAllBooks(): Promise<void>;
 }
 
 export type HarnessPluginClass = new (app: unknown, manifest: unknown) => HarnessPlugin;

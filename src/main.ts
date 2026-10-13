@@ -2,7 +2,8 @@ import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } fr
 import type { NavItem } from "./core/epub/epub";
 import type { CoverPlan } from "./core/epub/cover";
 import type { FolderInput, NoteInput } from "./core/book/book-tree";
-import { bfsLinked } from "./core/book/collect";
+import { bfsLinked, hasBookIndexTags } from "./core/book/collect";
+import { findBookFolders, planLibraryRun, type LibraryFolder } from "./core/book/library";
 import {
   chapterOrderFallbackWarning,
   legacyChapterOrder,
@@ -21,7 +22,15 @@ import { openBookPreview } from "./adapters/preview-view";
 import { errorMessage } from "./core/common/error-text";
 import type { ExportReport } from "./core/delivery/report";
 import { openExportReport } from "./adapters/report-view";
-import { runExport as runExportPipeline, type Job } from "./adapters/export-pipeline";
+import {
+  runExport as runExportPipeline,
+  type ExportFeedback,
+  type ExportOutcome,
+  type Job,
+} from "./adapters/export-pipeline";
+import { listRow, type LibraryReport } from "./core/delivery/library-report";
+import { runLibraryExport, showLibrarySummary, type LibraryEntry } from "./adapters/library-export";
+import { openLibraryList, openLibraryReport } from "./adapters/library-view";
 
 // 014-preview-before-export: a book that has been DECIDED but not yet built —
 // which notes, in what order, under which Parts, with what title, author and
@@ -46,6 +55,9 @@ interface PlannedExport {
   metaFile: TFile | null;
 }
 
+/** The report "Show last export report" opens: one book's, or one run's over the library. */
+type LastReport = { kind: "book"; report: ExportReport } | { kind: "library"; report: LibraryReport };
+
 export default class EpubExportPlugin extends Plugin {
   settings: EpubExportSettings = DEFAULT_SETTINGS;
 
@@ -58,7 +70,9 @@ export default class EpubExportPlugin extends Plugin {
   // same in-memory, session-only shape as lastShareTarget above, and for the
   // same reason: the command that consumes it needs something to hand over,
   // and nothing about it belongs in a synced data.json.
-  private lastReport: ExportReport | null = null;
+  // 016-export-all-books: a run over the whole library leaves one report of the
+  // run instead of one per book, so the remembered report is either kind.
+  private lastReport: LastReport | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -79,6 +93,13 @@ export default class EpubExportPlugin extends Plugin {
       id: "export-folder",
       name: "Export folder as EPUB (active note's folder)",
       callback: () => this.withActiveFolder((folder) => void this.exportFolder(folder)),
+    });
+    // 016-export-all-books: every book in the vault in one run, after a list
+    // the reader confirms.
+    this.addCommand({
+      id: "export-all-books",
+      name: "Export all books",
+      callback: () => void this.exportAllBooks(),
     });
     this.addCommand({
       id: "export-linked",
@@ -117,7 +138,8 @@ export default class EpubExportPlugin extends Plugin {
           new Notice("No export has run yet — the report appears after your first export.");
           return;
         }
-        openExportReport(this.app, this.lastReport);
+        if (this.lastReport.kind === "book") openExportReport(this.app, this.lastReport.report);
+        else openLibraryReport(this.app, this.lastReport.report);
       },
     });
 
@@ -391,10 +413,76 @@ export default class EpubExportPlugin extends Plugin {
   // metadata and warnings because attaching the cover adds to both, and the
   // same PlannedExport may be what a preview window is still holding.
   private async exportPlanned(planned: PlannedExport): Promise<void> {
+    this.remember(await this.buildPlanned(planned));
+  }
+
+  // Builds the book a plan describes and reports through `feedback` (today's
+  // notices when absent), changing no plugin state: what to remember is the
+  // caller's decision, because a run over the library remembers one report of
+  // the whole run rather than each book's.
+  private async buildPlanned(planned: PlannedExport, feedback?: ExportFeedback): Promise<ExportOutcome> {
     const meta = { ...planned.meta };
     const warnings = [...planned.warnings];
     await this.metaSource().attachCover(meta, planned.cover, planned.metaFile, (m) => warnings.push(m));
-    await this.runExport({ meta, files: planned.files, nav: planned.nav, warnings });
+    return this.runPipeline({ meta, files: planned.files, nav: planned.nav, warnings }, feedback);
+  }
+
+  // ── export all books (016-export-all-books) ─────────────────────
+
+  // Every book is planned BEFORE the list opens: the list can name each book
+  // only because its plan exists, and Export all then runs exactly these plans,
+  // as Export in a preview runs the plan the preview showed (014).
+  async exportAllBooks(): Promise<void> {
+    const bookFolders = findBookFolders(this.libraryFolderOf(this.app.vault.getRoot()));
+    if (bookFolders.length === 0) {
+      new Notice("No books found. A book is a folder with a note tagged book and main.");
+      return;
+    }
+    const entries = await this.planLibrary(bookFolders);
+    const rows = entries.map((entry) => listRow({ ...entry.book, clashesWith: entry.clashesWith }));
+    openLibraryList(this.app, rows, () => void this.runLibrary(entries));
+  }
+
+  // The vault as the library rule sees it: which folders hold a note tagged
+  // book and main (read through tagsOf, as a folder export reads tags).
+  private libraryFolderOf(folder: TFolder): LibraryFolder {
+    const children = folder.children;
+    const isBookIndex = (child: TAbstractFile) =>
+      child instanceof TFile && child.extension === "md" && hasBookIndexTags(this.tagsOf(child));
+    return {
+      path: folder.path,
+      hasBookIndex: children.some(isBookIndex),
+      subfolders: children
+        .filter((c): c is TFolder => c instanceof TFolder)
+        .map((c) => this.libraryFolderOf(c)),
+    };
+  }
+
+  // Each book's plan, and whether an earlier book has its file name (FR-006).
+  // A folder that cannot be planned stays in the list under its folder's name,
+  // so the run can report it, but takes no file name: it will not be written.
+  private async planLibrary(folderPaths: readonly string[]): Promise<LibraryEntry<PlannedExport>[]> {
+    const entries: LibraryEntry<PlannedExport>[] = [];
+    for (const folderPath of folderPaths) {
+      const folder = this.app.vault.getAbstractFileByPath(folderPath);
+      const plan = folder instanceof TFolder ? await this.planFolder(folder) : null;
+      const title = plan ? plan.meta.title : (folderPath.split("/").pop() ?? folderPath);
+      entries.push({ book: { folderPath, title }, plan });
+    }
+    const { skipped } = planLibraryRun(
+      entries.filter((entry) => entry.plan !== null).map((entry) => entry.book)
+    );
+    const clashOf = new Map(skipped.map((book) => [book.folderPath, book.clashesWith]));
+    return entries.map((entry) => ({ ...entry, clashesWith: clashOf.get(entry.book.folderPath) ?? null }));
+  }
+
+  private async runLibrary(entries: readonly LibraryEntry<PlannedExport>[]): Promise<void> {
+    const result = await runLibraryExport(entries, {
+      buildBook: (plan, feedback) => this.buildPlanned(plan, feedback),
+    });
+    showLibrarySummary(this.app, result.report);
+    this.lastReport = { kind: "library", report: result.report };
+    this.lastShareTarget = result.shareTarget;
   }
 
   // ── preview (014-preview-before-export) ─────────────────────────
@@ -454,13 +542,22 @@ export default class EpubExportPlugin extends Plugin {
    * gets) and the plugin's own session state.
    */
   async runExport(job: Job): Promise<void> {
-    const outcome = await runExportPipeline(job, {
+    this.remember(await this.runPipeline(job));
+  }
+
+  private runPipeline(job: Job, feedback?: ExportFeedback): Promise<ExportOutcome> {
+    return runExportPipeline(job, {
       app: this.app,
       component: this,
       settings: this.settings,
       titleFor: (file: TFile) => this.titleFor(file),
+      feedback,
     });
-    this.lastReport = outcome.report;
+  }
+
+  // What the report and share commands hand over after a single export.
+  private remember(outcome: ExportOutcome): void {
+    this.lastReport = outcome.report ? { kind: "book", report: outcome.report } : null;
     this.lastShareTarget = outcome.shareTarget;
   }
 

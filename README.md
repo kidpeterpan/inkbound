@@ -163,6 +163,28 @@ proof: warnings about images, links and math, a chapter that fails to render, wh
 Thai font is embedded and the backlink trails are only known once the book is built, and
 the window says so. The one-step export commands above are unchanged.
 
+**Export all books at once.** **Export all books**, in the command palette, finds every
+book in your vault and exports each one exactly as exporting its folder would: the same
+chapters, order, Parts, metadata, file name and output folder, and the same push to your
+Boox when **Push after export** is on. Use it to refresh a whole library after updating
+Inkbound or after adding properties such as `description` or `series` to many books.
+
+- **What counts as a book:** a folder with a note tagged `book` and `main` (written as a
+  list, `tags: [book, main]`). A folder inside a book is one of its Parts, never a book of
+  its own. A note that is only named after its folder does not count, and neither does
+  the top level of the vault.
+- **Nothing happens until you confirm.** A window lists every book it found, by title and
+  folder; **Export all** runs them one after another, **Cancel** writes and pushes
+  nothing.
+- **Two books with the same file name:** the first one in the list is written and the
+  second is marked as skipped in the list, so neither silently replaces the other.
+  Titles that differ only in case or punctuation (`Tidal Notes`, `tidal notes`) name the
+  same file.
+- **One book failing never stops the rest.** One notice counts through the books; at the
+  end, one summary says how many were exported, with warnings, skipped or failed. Tap it
+  (or run **Show last export report**) for the report of the whole run, every book with
+  what happened to it and its warnings.
+
 The finished `.epub` is written to the folder set in **Settings → Inkbound →
 Output folder** (`~/Downloads` by default), and a notice in Obsidian confirms
 the path once the export finishes. If **Push after export** is turned on,

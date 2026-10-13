@@ -338,6 +338,10 @@ export function createVaultStub(vaultRoot: string, scanRootRel: string): VaultSt
 
   const vault = {
     getAbstractFileByPath,
+    // 016-export-all-books walks the whole vault from here. Real Obsidian leaves
+    // its config folder and other dot-folders out of this tree; this stub lists
+    // the directory as it is, and the test vaults hold no dot-folders.
+    getRoot: (): TFolder => new TFolder(vaultRoot, ""),
     async cachedRead(file: TFile): Promise<string> {
       return fs.promises.readFile(path.join(vaultRoot, file.path), "utf8");
     },
