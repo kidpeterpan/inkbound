@@ -3,6 +3,36 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.13.0
+
+Books describe themselves: a blurb, a publisher, a date, a series and subjects.
+
+- **Six new properties describe the book in your e-reader's library.** Add any of
+  them to the note a book takes its title from (the note itself, the note a linked
+  export starts from, or a folder's index note): **`description`** (the blurb),
+  **`publisher`**, **`date`**, **`series`** with **`series_index`** (the book's
+  position, such as `2` or `2.5`), and **`subjects`** (a list). Each is optional, and a
+  field you leave out is simply not in the book.
+- **The date is the content's date.** `2024`, `2024-01` or `2024-01-15`; a date with a
+  time keeps only its date, and a year needs four digits. Anything that is not clearly
+  a date (`01/02/2024`, `next spring`, `2024-02-30`) is left out rather than guessed.
+- **A series is written two ways**, in the EPUB 3 form and in Calibre's older form, so
+  more reader apps can group and order the volumes.
+- **Subjects are only what you write in `subjects`.** Tags never become subjects, so a
+  book you share never lists your `todo` or `work/…` tags.
+- **A value that cannot be used never breaks a book.** It is left out, the export
+  completes, and the export report names the property, the value and the note. The
+  preview shows the same warning before you build, and its summary now lists the
+  book details too. Invisible control characters (such as a form feed pasted from a
+  PDF) become spaces, because an EPUB cannot hold them.
+- **If your notes already use `date` or `description`** (for example a template that
+  stamps `date:` with the day a note was created), the books you export from them
+  after updating carry those values. Books from notes without any of the six
+  properties are unchanged.
+- **Not yet tried on a Boox.** Every entry passes the EPUB 3 spec check, but whether a
+  Boox library shows the description, groups a series or searches by subject is
+  listed in `docs/DEVELOPMENT.md` as still to be checked by hand.
+
 ## 1.12.0
 
 Look at a book before you build it: a preview of the chapters and Parts.
