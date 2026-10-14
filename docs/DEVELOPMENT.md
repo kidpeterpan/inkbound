@@ -598,6 +598,59 @@ control chars in regex literals (PUA sentinel instead of `\x01`), no
 no Promise-returning `SettingDefinitionAction`s (return `void`), and
 explicit casts over mathjax-full's `any`-typed adaptor surface.
 
+## What the bundle can touch (the review's capability findings)
+
+Obsidian's plugin review reports the capabilities it detects in the shipped
+bundle. For Inkbound that is two findings, and both are answered by the artifact
+rather than by reading `src/`:
+
+- **"Direct Filesystem Access"** (a warning): `src/adapters/output-adapter.ts`
+  writes the finished book with `fs.mkdir` + `fs.writeFile` on desktop. That is
+  the whole of it — no read, list, delete, rename, stat or watch anywhere in
+  `src/` — and the module cannot be reached on mobile, where the write goes
+  through `vault.adapter` inside the vault instead.
+- **"Clipboard Access"** (a recommendation): `navigator.clipboard.writeText`, from
+  the click handler of the report windows' **Copy report** button, on the plugin's
+  own report text. The plugin never reads the clipboard — which is the capability
+  the recommendation is about ("may expose content copied from outside Obsidian").
+
+The answer is written down **once**, as an allowlist with a reason per entry, in
+`scripts/lib/external-access.ts`. Two layers apply it, so a new capability cannot
+arrive quietly:
+
+| Layer | What it scans | When it fails |
+|---|---|---|
+| `npm run check-review-safe` (`scripts/check-review-safe.ts`) | the SHIPPED `main.js`, vendor code included — what the reviewer's scanner reads | in CI and in the release workflow, after the build |
+| `tests/external-access.test.ts` | `src/**/*.ts` | in `npm test`, before any build |
+
+Both directions were verified by hand: appending `require("net")`,
+`clipboard.readText()` or `fs.readFileSync()` to a copy of `main.js` made the gate
+exit 1 with the line and the capability named, and the real bundle exits 0 while
+printing what it found (`node builtins required: buffer, events, fs, os, stream,
+util; filesystem calls: mkdir, writeFile …; clipboard: 2 write(s), no reads`). The
+`buffer`/`events`/`stream`/`util` entries are node-compat shims inside bundled
+dependencies, not plugin imports — they are listed with that reason so the gate's
+output stays honest about the difference.
+
+The README's "What Inkbound touches" section is the same answer for readers. A
+capability that is real needs **both**: an allowlist entry with its reason, and a
+line in that section.
+
+**Answering a review round.** The findings are disclosures, not defects, so the
+reply is a justification — keep it factual and point at the code:
+
+> Both findings are intentional and disclosed. **Filesystem:** on desktop the
+> export writes the finished EPUB to the absolute folder the user configures in
+> Settings → Inkbound → Output folder (default `~/Downloads`), because Obsidian's
+> vault API is vault-relative and cannot address a user-chosen filesystem path.
+> The `fs` import is lazy and lexically inside a `Platform.isDesktop` guard so
+> mobile loads without it, and mobile writes through `vault.adapter` instead; the
+> plugin never reads, lists, deletes or renames any file outside the vault.
+> **Clipboard:** `navigator.clipboard.writeText` is called only from the "Copy
+> report" button's click handler, to copy the plugin's own report text, and it
+> degrades to a notice if the platform refuses; the plugin never reads the
+> clipboard.
+
 ## The CLI harness
 
 `npm run local-export -- <note|folder|linked> <vault-relative-path>` (via

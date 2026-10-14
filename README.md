@@ -493,6 +493,31 @@ don't see it, the book is still saved exactly where the notice said it is.
 **Push to a Boox works from mobile too**, over the same Wi-Fi, so you can go
 from note to e-reader without a computer anywhere in the loop.
 
+## What Inkbound touches
+
+The complete list. A build gate (`npm run check-review-safe`) scans the shipped
+plugin against exactly this list, so it cannot drift from the code.
+
+- **Your vault.** Notes and images are read through Obsidian's own API, and so are
+  the links and headings the book's order and table of contents come from.
+- **One file, on desktop.** On a computer the finished `.epub` is written with
+  Node's filesystem to the folder set in **Output folder** (default `~/Downloads`),
+  which is normally outside the vault — Obsidian's vault API cannot address a path
+  anywhere on disk. Inkbound creates that folder if it is missing and writes one
+  file per export. It never reads, lists, deletes, renames or watches any other
+  file. On a phone or tablet it cannot reach the filesystem at all: the import that
+  would do it is desktop-gated and never loads, and the book is written through
+  Obsidian's vault API into the **Output folder (mobile)**.
+- **The network, only when you ask for it.** A cover whose `cover:` / `coverUrl:`
+  is an `http(s)://` address is downloaded when you export, and with **Push after
+  export** on, the finished book is uploaded to the **Device URL** you set. Nothing
+  else: no telemetry, no analytics, no account.
+- **The clipboard, only when you press the button.** **Copy report** copies the
+  export report as plain text. Inkbound never reads the clipboard.
+- **Your settings**, in the plugin's own `data.json` — the settings table above,
+  and nothing else. The one thing kept besides that is the last export's report,
+  in memory, until Obsidian closes.
+
 ## Known limitations
 
 - **Where mobile can save.** On a phone or tablet, books are saved inside your
