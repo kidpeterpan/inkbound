@@ -4,9 +4,17 @@ import { orderChapters } from "../src/core/book/collect";
 
 // ── fixture helpers ─────────────────────────────────────────────────────
 
-function note(path: string, opts: { tags?: string[]; links?: string[] } = {}): NoteInput {
+function note(path: string, opts: { tags?: string[]; links?: string[]; leftOut?: boolean } = {}): NoteInput {
   const basename = path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-  return { path, basename, tags: opts.tags ?? [], linkTargets: opts.links ?? [] };
+  return {
+    path,
+    basename,
+    tags: opts.tags ?? [],
+    linkTargets: opts.links ?? [],
+    // 017-note-exclusion: absent means "in the book", so every case above is
+    // untouched by the flag existing at all.
+    leftOut: opts.leftOut,
+  };
 }
 
 function folder(path: string, notes: NoteInput[], subfolders: FolderInput[] = []): FolderInput {
@@ -509,5 +517,174 @@ describe("planBook — non-note or phantom targets under a Part never place it (
       )
     );
     expect(plan.order).toEqual(["book/book.md", "book/01_preface.md", "book/Part I/ch1.md"]);
+  });
+});
+
+// ── 017-note-exclusion: a note left out of the book ──────────────────────
+//
+// The marker is a SCOPE decision, taken before planning (research R2), so
+// "not a chapter", "not a Part" and "places nothing" are not three rules here:
+// they are what the existing rules already do with a note that is not in the
+// tree. These cases pin that, and the one thing that does NOT follow from it —
+// a left-out index note keeps its role (FR-006).
+describe("planBook — a note left out (017-note-exclusion)", () => {
+  it("is not a chapter, and the notes around it keep their order", () => {
+    const plan = planBook(
+      folder("book", [
+        note("book/book.md", { tags: ["book", "main"], links: ["book/1_a.md", "book/2_gone.md"] }),
+        note("book/1_a.md"),
+        note("book/2_gone.md", { leftOut: true }),
+        note("book/3_b.md"),
+      ])
+    );
+    expect(plan.order).toEqual(["book/book.md", "book/1_a.md", "book/3_b.md"]);
+    expect(plan.nav).toEqual(plan.order.map((path) => ({ kind: "chapter", path })));
+    expect(plan.leftOut).toEqual(["book/2_gone.md"]);
+  });
+
+  it("is not a chapter of the Part it lives in", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/book.md", { tags: ["book", "main"] })],
+        [folder("book/Part I", [note("book/Part I/keep.md"), note("book/Part I/gone.md", { leftOut: true })])]
+      )
+    );
+    expect(plan.order).toEqual(["book/book.md", "book/Part I/keep.md"]);
+  });
+
+  it("makes a subfolder holding nothing else stop being a Part (the assets/ rule)", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/book.md", { tags: ["book", "main"] })],
+        [folder("book/Part I", [note("book/Part I/gone.md", { leftOut: true })])]
+      )
+    );
+    expect(plan.order).toEqual(["book/book.md"]);
+    expect(plan.nav).toEqual([{ kind: "chapter", path: "book/book.md" }]);
+  });
+
+  it("is placed by nothing: a link to it leaves the Part in name order", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/book.md", { tags: ["book", "main"], links: ["book/Part Z/gone.md"] })],
+        [
+          folder("book/Part A", [note("book/Part A/a.md")]),
+          folder("book/Part Z", [
+            note("book/Part Z/gone.md", { leftOut: true }),
+            note("book/Part Z/keep.md"),
+          ]),
+        ]
+      )
+    );
+    // Part A first: the link selected nothing, so both Parts fall to name order.
+    expect(plan.order).toEqual(["book/book.md", "book/Part A/a.md", "book/Part Z/keep.md"]);
+  });
+
+  it("is not placed, while a link to a kept note of the same Part still places it (pin)", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/book.md", { tags: ["book", "main"], links: ["book/Part Z/keep.md"] })],
+        [
+          folder("book/Part A", [note("book/Part A/a.md")]),
+          folder("book/Part Z", [
+            note("book/Part Z/gone.md", { leftOut: true }),
+            note("book/Part Z/keep.md"),
+          ]),
+        ]
+      )
+    );
+    expect(plan.order).toEqual(["book/book.md", "book/Part Z/keep.md", "book/Part A/a.md"]);
+  });
+
+  it("keeps a left-out INDEX note's link order, and loses only its page (FR-006)", () => {
+    const plan = planBook(
+      folder("book", [
+        note("book/book.md", {
+          tags: ["book", "main"],
+          links: ["book/2_b.md", "book/1_a.md"],
+          leftOut: true,
+        }),
+        note("book/1_a.md"),
+        note("book/2_b.md"),
+      ])
+    );
+    expect(plan.order).toEqual(["book/2_b.md", "book/1_a.md"]);
+    expect(plan.nav).toEqual([
+      { kind: "chapter", path: "book/2_b.md" },
+      { kind: "chapter", path: "book/1_a.md" },
+    ]);
+    expect(plan.leftOut).toEqual(["book/book.md"]);
+  });
+
+  it("leaves a left-out Part INDEX note out of the reading order, with the Part still nested", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/book.md", { tags: ["book", "main"] })],
+        [
+          folder("book/Part I", [
+            note("book/Part I/overview.md", {
+              tags: ["book", "main"],
+              links: ["book/Part I/2_b.md"],
+              leftOut: true,
+            }),
+            note("book/Part I/1_a.md"),
+            note("book/Part I/2_b.md"),
+          ]),
+        ]
+      )
+    );
+    expect(plan.order).toEqual(["book/book.md", "book/Part I/2_b.md", "book/Part I/1_a.md"]);
+    expect(plan.nav).toEqual([
+      { kind: "chapter", path: "book/book.md" },
+      {
+        kind: "part",
+        folderName: "Part I",
+        indexPath: "book/Part I/overview.md",
+        children: [
+          { kind: "chapter", path: "book/Part I/2_b.md" },
+          { kind: "chapter", path: "book/Part I/1_a.md" },
+        ],
+      },
+    ]);
+  });
+
+  it("plans an empty book when every note is left out", () => {
+    const plan = planBook(
+      folder("book", [
+        note("book/a.md", { leftOut: true }),
+        note("book/book.md", { tags: ["book", "main"], leftOut: true }),
+      ])
+    );
+    expect(plan.order).toEqual([]);
+    expect(plan.nav).toEqual([]);
+    expect(plan.leftOut).toEqual(["book/a.md", "book/book.md"]);
+  });
+
+  it("lists what it left out in tree order, never in reading order", () => {
+    const plan = planBook(
+      folder(
+        "book",
+        [note("book/z.md", { leftOut: true }), note("book/a.md"), note("book/m.md", { leftOut: true })],
+        [folder("book/Part I", [note("book/Part I/gone.md", { leftOut: true }), note("book/Part I/keep.md")])]
+      )
+    );
+    expect(plan.leftOut).toEqual(["book/z.md", "book/m.md", "book/Part I/gone.md"]);
+    expect(plan.leftOut.filter((p) => plan.order.includes(p))).toEqual([]);
+  });
+
+  it("plans exactly what it did before the flag existed when no note is left out (pin)", () => {
+    const input = folder("book", [
+      note("book/book.md", { tags: ["book", "main"], links: ["book/1_a.md"] }),
+      note("book/1_a.md"),
+      note("book/2_b.md"),
+    ]);
+    const plan = planBook(input);
+    expect(plan.order).toEqual(["book/book.md", "book/1_a.md", "book/2_b.md"]);
+    expect(plan.leftOut).toEqual([]);
   });
 });

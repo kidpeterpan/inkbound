@@ -42,13 +42,42 @@ export function pickIndexNote(
   return named ? named.basename : null;
 }
 
-export function bfsLinked(
+/** What one link walk reached: the book's chapters, and what the marker kept out. */
+export interface LinkedWalk {
+  /** The notes the book will contain: the start note first, then level by level, each level sorted. */
+  chapters: string[];
+  /**
+   * 017-note-exclusion FR-007: the left-out notes the walk REACHED — the ones
+   * this book would otherwise have contained — in the order it reached them. A
+   * marked note the walk never touched is not named, because it was never going
+   * to be in this book.
+   */
+  leftOut: string[];
+}
+
+/**
+ * The notes a note + linked notes export will use, in reading order, out to
+ * `depth` hops (was `bfsLinked`; renamed in 017 because it answers two questions
+ * now, and because a walk that cannot pass through a left-out note is a
+ * different traversal rather than a filter applied afterwards).
+ *
+ * `isLeftOut` is REQUIRED and consulted only for notes the walk actually
+ * reaches: pruning the graph up front instead would mean asking about every
+ * note in the vault, since `links` is the whole vault's link graph (research
+ * R5). It is required rather than defaulted because every caller has a marker
+ * concept — a caller that has none passes `() => false`, which says so at the
+ * call site instead of hiding it in this module. The START note is never tested:
+ * the reader asked for it by name, and its own links are still followed (FR-005).
+ */
+export function walkLinkedNotes(
   links: Record<string, Record<string, number>>,
   start: string,
-  depth: number
-): string[] {
+  depth: number,
+  isLeftOut: (path: string) => boolean
+): LinkedWalk {
   const seen = new Set<string>([start]);
-  const out: string[] = [start];
+  const chapters: string[] = [start];
+  const leftOut: string[] = [];
   let frontier = [start];
   for (let d = 0; d < depth; d++) {
     const next: string[] = [];
@@ -56,12 +85,16 @@ export function bfsLinked(
       for (const target of Object.keys(links[node] ?? {})) {
         if (!target.endsWith(".md") || seen.has(target)) continue;
         seen.add(target);
-        next.push(target);
+        // Recorded, and deliberately NOT added to the frontier: a left-out note
+        // is never walked through, so a note reachable only through one is not
+        // pulled into the book (FR-004).
+        if (isLeftOut(target)) leftOut.push(target);
+        else next.push(target);
       }
     }
     next.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-    out.push(...next);
+    chapters.push(...next);
     frontier = next;
   }
-  return out;
+  return { chapters, leftOut };
 }

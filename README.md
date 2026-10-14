@@ -139,7 +139,7 @@ context menu:
 
 - **Export note to EPUB** — exports the active note (or the note you
   right-clicked) as a single-chapter book.
-- **Export folder as EPUB (active note's folder)** — exports every note in
+- **Export folder as EPUB (active note's folder)** — exports the notes in
   the active note's folder as one book. Right-clicking a folder directly
   offers the same export for that folder.
 - **Export note + linked notes to EPUB** — exports the active note plus the
@@ -210,6 +210,41 @@ long as Obsidian stays open. A **Copy report** button in the report copies it
 as plain text, which is what to paste into a bug report. A clean export shows
 its usual notice with nothing extra, and the report simply says there were no
 warnings.
+
+### Keeping a note out of a book
+
+Add `export: false` to a note's properties and that note is left out of the book:
+not a chapter, not in the table of contents, not a Part. Every other note keeps
+its place, and the note itself stays in your vault where it is, with every link
+to it intact — so a chapter template, a scratch note or last year's draft can
+live in the book's folder without being shipped to your reader.
+
+```yaml
+---
+export: false
+---
+```
+
+- **Only the real `false` counts.** `export: "false"` (quoted) is text, and the
+  note stays in the book — as does `export: true`, or any value that is not
+  `false`. A typo therefore ships a note rather than silently dropping one.
+- **Folder books and note + linked notes books both honour it.** A marked note
+  reached by the link walk is not walked _through_ either, so a note that only it
+  links to is not pulled in. The note you asked for by name is always in the
+  book: exporting a marked note on its own writes its book, and a linked export
+  still starts with the note you ran it on.
+- **The note a book takes its title from keeps that job.** Marking a book's index
+  note removes its page, not its role: the book keeps the title, author, language
+  and cover that note gives it, and its links still decide the chapter order. A
+  Part whose index note is marked keeps that note's title and opens on its first
+  chapter.
+- **You are told what was left out.** The preview and the export report each
+  carry one line naming the notes, so a note you marked months ago is never
+  missing from a book without you knowing.
+- **A book whose every note is marked is not written.** The export says the
+  folder has no Markdown notes, exactly as it does for an empty folder.
+
+Books with no marked notes are unchanged, entry for entry.
 
 ## Settings
 
@@ -323,8 +358,10 @@ Reading/
 - Folders with no notes beneath them (an `assets/` folder) produce nothing.
 
 Note that this is a change from earlier versions, which ignored subfolders
-entirely: a `drafts/` folder inside a book folder now shows up as a Part. Move
-such folders out of the book folder if you don't want them in the book.
+entirely: a `drafts/` folder inside a book folder now shows up as a Part. Mark
+the notes you don't want in the book with `export: false` (see
+[Keeping a note out of a book](#keeping-a-note-out-of-a-book)), or move the
+folder out of the book folder.
 
 Chapter titles come from each note's first `#` heading when there is one, so
 `03_recursion` with an `# Recursion` heading appears in the table of contents
@@ -372,6 +409,10 @@ note for folder exports). Recognised fields:
 - **`tags: [book, main]`** — for **folder** exports, marks which note in the
   folder is the index/metadata source. If no note is tagged this way,
   Inkbound looks for a note whose filename matches the folder name.
+- **`export`** — `false` leaves that note out of the book: not a chapter, not in
+  the table of contents, not a Part. Every other value (including the quoted
+  `"false"`, which is text) leaves the note in. See
+  [Keeping a note out of a book](#keeping-a-note-out-of-a-book).
 
 ### Book details
 
@@ -502,9 +543,10 @@ from note to e-reader without a computer anywhere in the loop.
   16 million pixels after shrinking, is kept as it is with a warning in the
   export report.
 - **The preview is read-only.** It shows the plan and lets you export or cancel; it
-  cannot reorder chapters or leave one out. To change the book, change the vault (the
-  index note's links, a note's name, a folder) and preview again. It does not estimate
-  the book's size either, since nothing is rendered.
+  cannot reorder chapters or leave one out from the window itself. To change the book,
+  change the vault — the index note's links, a note's name, a folder, or `export: false`
+  on a note you want left out — and preview again. It does not estimate the book's size
+  either, since nothing is rendered.
 - **Mermaid diagrams export as images, not text.** They are converted to
   pictures at export time so e-ink readers can display them, which means
   they are no longer selectable or searchable text inside the EPUB.

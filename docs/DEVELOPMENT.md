@@ -416,6 +416,20 @@ a real device. These still need a person:
   vault tree the run walks; the test stub lists a directory as it is, and the test
   vaults have none.
 
+**Keeping a note out of a book (017-note-exclusion) — NOT yet verified by hand.** The
+marker's rules are unit-tested, the adapter's read is tested end to end from real
+fixture files, and the shipped bundle exports the smoke vault's marked fixture note
+out of its book (`check-export-works` asserts its sentinel is in no entry, and the
+book it belongs to is unchanged against the review-pack baseline). None of that is a
+person looking at a book on a reader. These still need one:
+
+- **A marked note's absence on a device.** A book exported with a marked note should
+  read on a Boox exactly like the same book with that note deleted from the vault.
+- **The line on a phone.** How `2 notes left out of the book (export: false): …` reads
+  in a preview window on a small screen.
+- **The index-note case in real Obsidian.** Marking a book's own index note: the book
+  keeps its title, file name and chapter order, and only its first page is gone.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
@@ -480,12 +494,71 @@ drives one notice for the whole run and shows nothing per book. Each export's co
 lines are unchanged (010 FR-020). `lastReport` holds either one book's report or one
 run's (`LibraryReport`), and "Show last export report" opens the matching window.
 
-**Known gap: control characters in titles.** Obsidian hands control characters to a
-plugin unchanged, and one in `package.opf` is a fatal epubcheck error (research R13).
-The six book-detail fields replace such characters with a space. A title taken from
-`aliases` does not yet, so a title with, say, a form feed pasted into it still produces
-a book that fails validation. The fix belongs in the shared escaping and is a separate
-change.
+**Keeping a note out of a book (017).** A reader marks a note `export: false` and the note
+leaves the book's pages while keeping every other role it has. The marker is read by
+`isLeftOut` (`src/core/book/book-plan.ts`) — only the BOOLEAN false counts, because the safe
+direction of a misread is to ship a note rather than silently drop one (spec FR-002). It is a
+SCOPE decision, taken before planning: `main.ts`'s `buildFolderInput` sets an optional `leftOut`
+on each `NoteInput`, and the pure planner does the rest — a left-out note is not an item, not a
+link target (so a link to it places nothing, and a subfolder whose only notes are left out stops
+being a Part under 009's `hasNotes` rule), and not a chapter. `leftOut` is OPTIONAL and absent
+means "in the book", which is what makes "a book with no marker is unchanged" structural rather
+than careful (FR-011; the review pack and the fixture fingerprints are the check on it).
+
+A left-out INDEX note keeps naming and ordering the book (FR-006): `pickIndexNote` still sees it,
+`planBook` omits only its page, and `toNavItems`'s `indexChapter` lookup is null-safe so a Part
+whose index note is left out keeps its title and opens on its first chapter (009's no-index rule).
+`legacyChapterOrder` drops a left-out note from the pre-009 order but still returns it as
+`indexBasename`, so the degraded path — reachable when planning throws — cannot put a left-out
+note back into a book.
+
+The linked walk is `collect.ts`'s `walkLinkedNotes` (renamed from `bfsLinked`), which takes the
+marker as a LAZY predicate consulted only for notes the walk reaches: a left-out target is
+recorded and NOT added to the frontier, so the walk cannot pass through it and a note reachable
+only through one is not pulled in (FR-004). Pruning the graph up front instead would mean reading
+the whole vault's frontmatter on every linked export.
+
+One line says what was left out (`leftOutWarning`), and it is a PLANNING WARNING — so it reaches
+the preview and the report's book group through the channel both already use, with no second
+channel and no wording in two places. It counts as a warning, so a book that left notes out is
+reported as having warnings; that is deliberate, and recorded as a product assumption in the
+spec.
+
+The vault stub's frontmatter parser types an unquoted `true`/`false` as a boolean (017 research
+R1): the marker IS that boolean, so a stub handing over the string "false" could not exercise the
+feature from a fixture file at all. A quoted value stays text, which is what makes `export:
+"false"` a different value. This is narrower than 015's R12 decision to leave the stub alone — no
+fixture in the repository uses a boolean frontmatter value, so nothing existing changed shape.
+
+**Characters XML cannot hold (018, closes the gap this file used to record).** Obsidian hands
+control characters to a plugin unchanged, and one in a document is a FATAL epubcheck error (015
+research R13). The rule now lives once, in `src/core/common/xml.ts`: `replaceUnencodable` turns
+every XML 1.0-forbidden character into a single space (code points below 0x20 except tab, line
+feed and carriage return; unpaired surrogates; U+FFFE; U+FFFF), and `escapeXml` applies it before
+escaping — so every interpolated, note-derived value is covered in one call: the title, the
+author, chapter titles, the table of contents, the backlink trails, and 015's six fields, which
+now import the same function instead of keeping a private copy.
+
+Two further boundaries were found while writing 018 and are fixed with it, because a fix that
+left them would still ship books that will not open:
+
+- **A chapter's body.** `chapterDoc` interpolates the serialized body raw — it is the one string
+  that arrives already built rather than escaped value by value. Measured in this repo's own
+  jsdom, `XMLSerializer` emits a form feed literally, in text and in attributes, so a control
+  character in a note's *content* (not only in a title) produced an invalid chapter. The
+  fragment is cleaned as a whole, which is safe because a forbidden character can only be in a
+  text node or an attribute value, never in tag syntax.
+- **A book's file name.** Windows forbids 0x00–0x1F in a file name, so the same pasted
+  character could make an export FAIL rather than merely spoil a name (Constitution II).
+  `slugify` runs the rule first, so the space it becomes folds into the existing `_` rule; and
+  because `library.ts` compares the books of a run by `slugify`'s output, two titles that differ
+  only by such a character are detected as the clash they are.
+
+**CI proves it on every run**: `scripts/build-sample.ts` gives the hand-built sample book a form
+feed in its own title, next to 015's hardest-legal-shape details, so `npm run epubcheck` fails
+without the fix (verified both ways by hand: FATAL RSC-016 "An invalid XML character (Unicode:
+0xc)" with the rule removed, PASS with it in place). `sanitizeHeadingId` already restricted
+heading ids to XML name characters, which is why a nav fragment link could never carry one.
 
 ## Bundled fonts (.ttf loader trio)
 

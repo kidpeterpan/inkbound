@@ -89,3 +89,24 @@ describe("deriveChapterTitle and footnote references (011 FR-012)", () => {
     }
   });
 });
+
+// 018-xml-text-encodability: a file name is a boundary too. Windows forbids
+// 0x00–0x1F in one, so a character pasted from a PDF could make an export FAIL
+// rather than merely spoil a name (Constitution II). The replacement runs FIRST,
+// so the space it becomes folds into the "_" the rest of a name already uses.
+describe("slugify: a character a file name cannot hold (018)", () => {
+  it("replaces it, and folds the space it becomes into the name's own rule", () => {
+    expect(slugify("Tidal\u000cNotes")).toBe("tidal_notes");
+    expect(slugify("a\u0000b")).toBe("a_b");
+  });
+
+  it("names the same file for two titles that differ only by such a character", () => {
+    // This is what makes "Export all books" report them as the clash they are:
+    // library.ts compares books by slugify's output.
+    expect(slugify("Tidal\u000cNotes")).toBe(slugify("Tidal Notes"));
+  });
+
+  it("falls back to 'export' when the title is nothing but such a character", () => {
+    expect(slugify("\u000c")).toBe("export");
+  });
+});

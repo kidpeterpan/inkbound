@@ -105,6 +105,16 @@ describe("resolveBookDetails: description and publisher (text values)", () => {
     expect(descriptionOf([null, "  ", "C"])).toBe("C");
   });
 
+  // 018-xml-text-encodability: this replacement is 015's, unchanged — the rule
+  // only moved to src/core/common/xml.ts and is now shared with the escaper.
+  // The value is USABLE, merely cleaned, so there is no issue to report.
+  it("replaces a character XML cannot hold with a space, and reports no issue", () => {
+    const resolved = resolveBookDetails({ description: "a\u000cb" });
+
+    expect(resolved.details.description).toBe("a b");
+    expect(resolved.issues).toEqual([]);
+  });
+
   it.each([null, "", "   ", []])("leaves the description out for an empty value: %j", (raw) => {
     expect(descriptionOf(raw)).toBeUndefined();
   });

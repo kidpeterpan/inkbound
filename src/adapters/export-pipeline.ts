@@ -292,7 +292,7 @@ function backlinkDecorator(
 ): (file: TFile, xhtmlBody: string) => string {
   // Backlink trail: which chapters in THIS book link to each chapter,
   // in book order. Sources come from the same resolvedLinks graph the
-  // linked-notes collector consumed, so anything bfsLinked counted as a
+  // linked-notes collector consumed, so anything walkLinkedNotes counted as a
   // link is guaranteed to show up as a backlink here.
   const fileByPath = new Map(files.map((f) => [f.path, f]));
   const backlinks = computeBacklinks(
