@@ -4,7 +4,7 @@ import { usesFootnoteMarkup } from "../content/footnotes";
 import { thaiFontCss, THAI_FONT_META, OFL_LICENSE_HREF, type ThaiFontAsset } from "./fonts";
 import type { TocEntry } from "../render";
 import type { ExportMeta } from "../types";
-import { escapeXml } from "../common/xml";
+import { escapeXml, replaceUnencodable } from "../common/xml";
 import { systemBookIdentity, type BookIdentity } from "./book-identity";
 import { detailsMetadataXml } from "./package-details";
 
@@ -398,6 +398,14 @@ export class EpubBuilder {
     // markup uses it — matching an attribute inside a tag, not prose that mentions one —
     // so every other chapter stays byte-identical (FR-023/FR-024).
     const epubNs = /<[^<>]*\sepub:type=/.test(ch.body) ? ' xmlns:epub="http://www.idpf.org/2007/ops"' : "";
+    // 018-xml-text-encodability: the body is the ONE string that arrives already
+    // built (serializeBody's XMLSerializer output) rather than escaped value by
+    // value, so it is the one place a note's own CONTENT — not only its title —
+    // can carry a character XML 1.0 forbids. Measured: XMLSerializer emits a form
+    // feed literally, in text and in attribute values. Cleaning the whole fragment
+    // is safe because escapeXml already ran when the markup was assembled, so a
+    // forbidden character can only be sitting in a text node or an attribute
+    // value, never in tag syntax.
     return `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml"${epubNs}>
@@ -406,7 +414,7 @@ export class EpubBuilder {
     <link rel="stylesheet" type="text/css" href="../style/epub.css"/>
   </head>
   <body>
-${ch.body}
+${replaceUnencodable(ch.body)}
   </body>
 </html>`;
   }

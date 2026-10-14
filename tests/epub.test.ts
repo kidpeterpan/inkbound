@@ -180,6 +180,31 @@ describe("EpubBuilder container", () => {
   it("escapeXml handles the five specials", () => {
     expect(escapeXml(`<a b="c">&'`)).toBe("&lt;a b=&quot;c&quot;&gt;&amp;&apos;");
   });
+
+  // 018-xml-text-encodability: a character XML cannot hold must never reach a
+  // document. Obsidian hands control characters over unchanged, and one in an
+  // XML document is a FATAL epubcheck error (015 research R13), so the shared
+  // escaper replaces them — which covers every interpolated, note-derived value
+  // at once, since they all come through here.
+  it("replaces every character XML 1.0 cannot hold with one space", () => {
+    for (const codePoint of [0x0, 0x1, 0x8, 0xb, 0xc, 0x1f, 0xfffe, 0xffff]) {
+      const character = String.fromCodePoint(codePoint);
+      expect(escapeXml(`a${character}b`), `U+${codePoint.toString(16).padStart(4, "0")}`).toBe("a b");
+    }
+    // An unpaired surrogate, which a broken paste can leave behind.
+    expect(escapeXml("a\uD800b")).toBe("a b");
+  });
+
+  it("keeps the three control characters XML does allow", () => {
+    expect(escapeXml("a\tb\nc\rd")).toBe("a\tb\nc\rd");
+  });
+
+  it("treats a forbidden character exactly as the space it becomes", () => {
+    // Escaping is not idempotent, so this is the property that matters: the
+    // replacement happens FIRST, and what is escaped afterwards is the clean text.
+    expect(escapeXml("a\u000cb<&>")).toBe(escapeXml("a b<&>"));
+    expect(escapeXml("plain text")).toBe("plain text");
+  });
 });
 
 describe("heading sub-entries in nav.xhtml", () => {
@@ -665,5 +690,36 @@ describe("book details in package.opf", () => {
         "\n    <dc:date>2024-01-15</dc:date>" +
         '\n    <meta property="dcterms:modified">2001-01-01T00:00:00Z</meta>'
     );
+  });
+});
+
+// ── 018-xml-text-encodability: the chapter body ──────────────────────────
+//
+// The body is the ONE string that reaches a chapter document without being
+// escaped value by value: it arrives already built (`serializeBody`'s
+// XMLSerializer output) and `chapterDoc` interpolates it raw. Measured in this
+// repository's own jsdom, XMLSerializer emits a form feed literally, so this is
+// where a control character in a note's CONTENT — not only in a title — would
+// produce a chapter that epubcheck rejects.
+describe("018: the chapter body", () => {
+  async function chapterFor(body: string): Promise<string> {
+    const b = new EpubBuilder(META);
+    b.addChapter("Ch", body);
+    const zip = await JSZip.loadAsync(await b.build());
+    return zip.file("OEBPS/text/chapter_001.xhtml")!.async("string");
+  }
+
+  it("replaces a character XML cannot hold, in text and in an attribute", async () => {
+    const chapter = await chapterFor('<p>a\u000cb</p><p title="p\u000cq">x</p>');
+
+    expect(chapter).toContain("<p>a b</p>");
+    expect(chapter).toContain('<p title="p q">x</p>');
+    expect(chapter).not.toContain("\u000c");
+  });
+
+  it("leaves a clean body exactly as it was, tabs and line breaks included (pin)", async () => {
+    const body = '<h1>T</h1><p>a\tb\nc</p><p title="x">y</p>';
+
+    expect(await chapterFor(body)).toContain(body);
   });
 });

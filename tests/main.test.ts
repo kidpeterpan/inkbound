@@ -360,6 +360,36 @@ describe("vault-stub: FileCache.links", () => {
   });
 });
 
+// ── 017-note-exclusion: fixture sanity ──────────────────────────────────
+//
+// The stub's frontmatter parser is deliberately small, but a value it types
+// differently from Obsidian makes a test lie. Real Obsidian parses YAML, so an
+// unquoted `export: false` reaches a plugin as the boolean false — and that
+// boolean IS the marker (spec FR-002), so a stub handing over the string
+// "false" could not exercise the feature at all (017 research R1). A quoted
+// value stays the text it really is.
+describe("vault-stub: frontmatter shapes", () => {
+  it("hands over an unquoted true/false as a boolean, and a quoted one as text", async () => {
+    const { app, root } = await buildVault({
+      "marker.md": "---\nexport: false\n---\n\nbody\n",
+      "quoted.md": '---\nexport: "false"\n---\n\nbody\n',
+      "on.md": "---\nexport: true\n---\n\nbody\n",
+    });
+    const frontmatterOf = (path: string) =>
+      (
+        app as unknown as {
+          metadataCache: {
+            getFileCache(f: unknown): { frontmatter?: Record<string, unknown> } | null;
+          };
+        }
+      ).metadataCache.getFileCache(tfile(root, path))?.frontmatter ?? {};
+
+    expect(frontmatterOf("marker.md").export).toBe(false);
+    expect(frontmatterOf("quoted.md").export).toBe("false");
+    expect(frontmatterOf("on.md").export).toBe(true);
+  });
+});
+
 // ── 009-index-order-parts: planner fallback (research R5, FR-016) ────────
 describe("folder export: planner fallback", () => {
   it("falls back to filename order with a warning when planning throws, instead of failing the export", async () => {
@@ -4570,5 +4600,359 @@ describe("export all books: the account of the run (016 US4)", () => {
       resetPlatform();
       setShareHost(null);
     }
+  });
+});
+
+// ── 017-note-exclusion: the marker in a folder book ──────────────────────
+//
+// Stub-backed, from real note files: this is where the adapter's half of the
+// feature is pinned — reading `export: false` off the metadata cache and
+// deciding which files the export uses. The planner's own rules are unit-tested
+// in tests/book-tree.test.ts and tests/book-plan.test.ts.
+describe("017: export: false in a folder book", () => {
+  /** Every chapter document, concatenated, for "is this text in the book?" assertions. */
+  const chapterText = async (epub: Awaited<ReturnType<typeof readEpub>>): Promise<string> =>
+    (
+      await Promise.all(
+        epub.names
+          .filter((n) => /^OEBPS\/text\/chapter_\d+\.xhtml$/.test(n))
+          .sort()
+          .map((n) => epub.zip.file(n)!.async("string"))
+      )
+    ).join("\n");
+
+  const leftOutLine = (paths: string[]) =>
+    `${paths.length} ${paths.length === 1 ? "note" : "notes"} left out of the book (export: false): ${paths.join(", ")}`;
+
+  it("leaves the marked note out of the book, keeps the others in their order, and says so", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\nRead [[1_a]] and [[2_gone]] and [[3_b]].\n",
+      "book/1_a.md": "# A\n\nbody-a\n",
+      "book/2_gone.md": "---\nexport: false\n---\n\n# Gone\n\nGONE-SENTINEL\n",
+      "book/3_b.md": "# B\n\nbody-b\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    const text = await chapterText(epub);
+    expect(text).not.toContain("GONE-SENTINEL");
+    expect(text).toContain("body-a");
+    expect(text).toContain("body-b");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    expect(warnings.some((w) => w.includes(leftOutLine(["book/2_gone.md"])))).toBe(true);
+  });
+
+  it("leaves a marked note out of a Part, and the Part keeps its place", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[Part One/1_a]]\n",
+      "book/Part One/1_a.md": "# A\n\nbody-a\n",
+      "book/Part One/2_gone.md": "---\nexport: false\n---\n\nGONE-SENTINEL\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(await chapterText(epub)).not.toContain("GONE-SENTINEL");
+    expect(epub.nav).toContain("Part One");
+    expect(warnings.some((w) => w.includes(leftOutLine(["book/Part One/2_gone.md"])))).toBe(true);
+  });
+
+  it("keeps the book's title, author and file name when the INDEX note itself is marked (FR-006)", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "aliases: [Kept Title]",
+        "author: Someone",
+        "export: false",
+        "---",
+        "",
+        "# Book",
+        "",
+        "INDEX-SENTINEL",
+        "",
+        "Read [[1_a]] then [[2_b]].",
+        "",
+      ].join("\n"),
+      "book/1_a.md": "# A\n\nbody-a\n",
+      "book/2_b.md": "# B\n\nbody-b\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("kept_title.epub");
+    const text = await chapterText(epub);
+    expect(epub.opf).toContain("Kept Title");
+    expect(epub.opf).toContain("Someone");
+    expect(text).not.toContain("INDEX-SENTINEL");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    // Its links still order the book: 1_a before 2_b, as the index note wrote them.
+    expect(text.indexOf("body-a")).toBeLessThan(text.indexOf("body-b"));
+    expect(warnings.some((w) => w.includes(leftOutLine(["book/book.md"])))).toBe(true);
+  });
+
+  it("writes nothing and says the folder has no notes when every note is marked (FR-008)", async () => {
+    const { app, root } = await buildVault({
+      "book/a.md": "---\nexport: false\n---\n\nA\n",
+      "book/book.md": "---\ntags: [book, main]\nexport: false\n---\n\nB\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    expect(await outDirEntries()).toEqual([]);
+    expect(NOTICES).toContain("Folder has no Markdown notes.");
+  });
+
+  it('ignores a quoted "false", which is text rather than the marker (pin, FR-002)', async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n",
+      "book/quoted.md": '---\nexport: "false"\n---\n\n# Quoted\n\nQUOTED-SENTINEL\n',
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(await chapterText(epub)).toContain("QUOTED-SENTINEL");
+    expect(warnings.filter((w) => w.includes("left out"))).toEqual([]);
+  });
+
+  it("produces the same book and no line when nothing is marked (pin, FR-011)", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\nRead [[1_a]] and [[2_b]].\n",
+      "book/1_a.md": "# A\n\nbody-a\n",
+      "book/2_b.md": "# B\n\nbody-b\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("book.epub");
+    expect(epub.spineCount(epub.opf)).toBe(3);
+    expect(warnings.filter((w) => w.includes("left out"))).toEqual([]);
+  });
+});
+
+// ── 017-note-exclusion: the marker in a note + linked notes book ─────────
+//
+// The walk is the one export a reader cannot steer by folder layout, so this is
+// where FR-004 (no walking through a left-out note) and FR-005 (the note the
+// reader asked for is always in) are pinned end to end.
+describe("017: export: false in a linked-notes book", () => {
+  const chapterText = async (epub: Awaited<ReturnType<typeof readEpub>>): Promise<string> =>
+    (
+      await Promise.all(
+        epub.names
+          .filter((n) => /^OEBPS\/text\/chapter_\d+\.xhtml$/.test(n))
+          .sort()
+          .map((n) => epub.zip.file(n)!.async("string"))
+      )
+    ).join("\n");
+
+  it("leaves the marked note out, does not walk through it, and says so", async () => {
+    const { app, root } = await buildVault({
+      "start.md": "# Start\n\nstart-body\n\n[[mid]] and [[kept]]\n",
+      "mid.md": "---\nexport: false\n---\n\n# Mid\n\nMID-SENTINEL\n\n[[beyond]]\n",
+      "kept.md": "# Kept\n\nkept-body\n",
+      "beyond.md": "# Beyond\n\nbeyond-body\n",
+    });
+
+    await makePlugin(app, { linkDepth: 2 }).exportLinked(tfile(root, "start.md"));
+
+    const epub = await readEpub("start.epub");
+    const text = await chapterText(epub);
+    expect(text).not.toContain("MID-SENTINEL");
+    // beyond.md is reachable only through the marked note, so the walk never
+    // reaches it — this is the whole point of not walking through.
+    expect(text).not.toContain("beyond-body");
+    expect(text).toContain("kept-body");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(warnings.some((w) => w.includes("1 note left out of the book (export: false): mid.md"))).toBe(
+      true
+    );
+  });
+
+  it("keeps the note the reader asked for, and still follows its links, when it is marked (FR-005)", async () => {
+    const { app, root } = await buildVault({
+      "start.md": "---\nexport: false\n---\n\n# Start\n\nstart-body\n\n[[kept]]\n",
+      "kept.md": "# Kept\n\nkept-body\n",
+    });
+
+    await makePlugin(app).exportLinked(tfile(root, "start.md"));
+
+    const epub = await readEpub("start.epub");
+    const text = await chapterText(epub);
+    expect(text).toContain("start-body");
+    expect(text).toContain("kept-body");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(warnings.filter((w) => w.includes("left out"))).toEqual([]);
+  });
+
+  it("still exports a marked note on its own — the reader named it (FR-005)", async () => {
+    const { app, root } = await buildVault({
+      "solo.md": "---\nexport: false\n---\n\n# Solo\n\nsolo-body\n",
+    });
+
+    await makePlugin(app).exportSingle(tfile(root, "solo.md"));
+
+    const epub = await readEpub("solo.epub");
+    expect(await chapterText(epub)).toContain("solo-body");
+    expect(warnings.filter((w) => w.includes("left out"))).toEqual([]);
+  });
+
+  it("walks the same book and says nothing when no linked note is marked (pin, FR-011)", async () => {
+    const { app, root } = await buildVault({
+      "start.md": "# Start\n\nstart-body\n\n[[kept]]\n",
+      "kept.md": "# Kept\n\nkept-body\n",
+    });
+
+    await makePlugin(app).exportLinked(tfile(root, "start.md"));
+
+    const epub = await readEpub("start.epub");
+    const text = await chapterText(epub);
+    expect(text).toContain("start-body");
+    expect(text).toContain("kept-body");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(warnings.filter((w) => w.includes("left out"))).toEqual([]);
+  });
+});
+
+// ── 017-note-exclusion: the line the reader sees (US3) ───────────────────
+//
+// PINNED rather than built: the left-out line is a planning warning, and
+// planning warnings already reach both surfaces (research R6 — the preview
+// renders `BookPreview.warnings`, and the pipeline files the job's warnings
+// under the book scope). These cases exist to catch the day one of those
+// surfaces stops showing them, which would make a dropped note silent.
+describe("017: what the reader is told", () => {
+  const MARKED_BOOK = {
+    "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[1_a]]\n",
+    "book/1_a.md": "# A\n\nbody-a\n",
+    "book/2_gone.md": "---\nexport: false\n---\n\n# Gone One\n\nbody-gone-one\n",
+    "book/3_gone.md": "---\nexport: false\n---\n\n# Gone Two\n\nbody-gone-two\n",
+  };
+  const LINE = "2 notes left out of the book (export: false): book/2_gone.md, book/3_gone.md";
+
+  it("names what was left out in the preview window, and lists neither note as a chapter", async () => {
+    const { app, root } = await buildVault(MARKED_BOOK);
+
+    await makePlugin(app).previewFolder(tfolder(root, "book"));
+
+    const window = previewWindow();
+    expect(window.textContent).toContain(LINE);
+    // A left-out note is absent from the chapter list: its own title appears
+    // nowhere (the line names it by path, never by title).
+    expect(window.textContent).not.toContain("Gone One");
+    expect(window.textContent).not.toContain("Gone Two");
+    expect(window.querySelector("h3")?.textContent).toBe("Known before building");
+    buttonNamed(window, "Cancel").click();
+  });
+
+  it("shows the same line in the report the completion notice opens", async () => {
+    const { app, root } = await buildVault(MARKED_BOOK);
+    const plugin = await makeOnloadedPlugin(app);
+
+    await plugin.exportFolder(tfolder(root, "book"));
+    MODALS.length = 0;
+    tapLastNotice();
+
+    const report = MODALS[0].contentEl;
+    expect(report.textContent).toContain(BOOK_GROUP_LABEL);
+    expect(report.textContent).toContain(LINE);
+  });
+
+  it("says nothing about the marker when nothing was left out (pin)", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": "---\ntags: [book, main]\n---\n\n# Book\n\n[[1_a]]\n",
+      "book/1_a.md": "# A\n\nbody-a\n",
+    });
+    const plugin = await makeOnloadedPlugin(app);
+
+    await plugin.previewFolder(tfolder(root, "book"));
+    const window = previewWindow();
+    expect(window.textContent).not.toContain("left out");
+    buttonNamed(window, "Cancel").click();
+
+    MODALS.length = 0;
+    await plugin.exportFolder(tfolder(root, "book"));
+    MODALS.length = 0;
+    commandsOf(plugin)["show-export-report"].callback!();
+    expect(MODALS[0].contentEl.textContent).not.toContain("left out");
+  });
+});
+
+// ── 018-xml-text-encodability: a real export from pasted text ────────────
+//
+// The character this feature is about is what a PDF or web-page paste leaves
+// behind. Stub-backed from real note files, so the whole path is exercised: the
+// metadata cache's frontmatter, the title, the chapter titles, the body.
+describe("018: a note whose text carries a character XML cannot hold", () => {
+  const FORBIDDEN = "\u000c"; // a form feed
+
+  /** Every XML document in the book, for "does any of them contain it?" assertions.
+   *  Binary entries are skipped: a font's bytes can legitimately hold 0x0C. */
+  const xmlEntriesOf = async (epub: Awaited<ReturnType<typeof readEpub>>): Promise<string> =>
+    (
+      await Promise.all(
+        epub.names
+          .filter((n) => /\.(xhtml|opf|xml|ncx)$/.test(n))
+          .map((n) => epub.zip.file(n)!.async("string"))
+      )
+    ).join("\n");
+
+  it("writes the title, the chapter titles and the body with a space instead, and no entry keeps it", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        `aliases: ["Bad${FORBIDDEN}Title"]`,
+        `author: "A${FORBIDDEN}B"`,
+        "---",
+        "",
+        `# Head${FORBIDDEN}ing`,
+        "",
+        `body${FORBIDDEN}text`,
+        "",
+      ].join("\n"),
+      "book/ch.md": `# Ch\n\nmore${FORBIDDEN}body\n`,
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    // The file name is writable everywhere (FR-003), and the metadata reads.
+    const epub = await readEpub("bad_title.epub");
+    expect(epub.opf).toContain("<dc:title>Bad Title</dc:title>");
+    expect(epub.opf).toContain("<dc:creator>A B</dc:creator>");
+    // The chapter title (from the H1) reaches nav.xhtml, and the body reaches
+    // the chapter document — the two surfaces the recorded gap did not name.
+    expect(epub.nav).toContain("Head ing");
+    expect(await epub.chapter(1)).toContain("body text");
+    // And nothing in the book's XML holds the character at all.
+    expect(await xmlEntriesOf(epub)).not.toContain(FORBIDDEN);
+  });
+
+  it("leaves a book of clean text exactly as it was (pin, FR-005)", async () => {
+    const { app, root } = await buildVault({
+      "book/book.md": [
+        "---",
+        "tags: [book, main]",
+        "aliases: [Clean Title]",
+        "---",
+        "",
+        "# A Heading",
+        "",
+        "body\twith a tab",
+        "",
+      ].join("\n"),
+      "book/ch.md": "# Ch\n\nmore body\n",
+    });
+
+    await makePlugin(app).exportFolder(tfolder(root, "book"));
+
+    const epub = await readEpub("clean_title.epub");
+    expect(epub.opf).toContain("<dc:title>Clean Title</dc:title>");
+    expect(epub.nav).toContain("A Heading");
+    // A tab is a legal XML character and must survive: only the forbidden set is
+    // replaced.
+    expect(await epub.chapter(1)).toContain("body\twith a tab");
   });
 });

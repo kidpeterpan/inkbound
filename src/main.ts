@@ -2,10 +2,12 @@ import { Menu, Notice, Plugin, TAbstractFile, TFile, TFolder, parseLinktext } fr
 import type { NavItem } from "./core/epub/epub";
 import type { CoverPlan } from "./core/epub/cover";
 import type { FolderInput, NoteInput } from "./core/book/book-tree";
-import { bfsLinked, hasBookIndexTags } from "./core/book/collect";
+import { hasBookIndexTags, walkLinkedNotes } from "./core/book/collect";
 import { findBookFolders, planLibraryRun, type LibraryFolder } from "./core/book/library";
 import {
   chapterOrderFallbackWarning,
+  isLeftOut,
+  leftOutWarning,
   legacyChapterOrder,
   normalizeTags,
   orderedLinkTargets,
@@ -265,20 +267,46 @@ export default class EpubExportPlugin extends Plugin {
   }
 
   // The notes the link walk reaches at the reader's link depth, in the order
-  // the export will use. Shared with the linked-notes preview.
+  // the export will use. Shared with the linked-notes preview. 017-note-exclusion:
+  // the walk is given the marker, so a left-out note is not a chapter and is not
+  // walked through (FR-004), and what it left out becomes the plan's warning line
+  // (FR-007) — the same line a folder export adds, in the same first position.
   private async planLinked(file: TFile): Promise<PlannedExport> {
-    const paths = bfsLinked(this.app.metadataCache.resolvedLinks, file.path, this.settings.linkDepth);
-    const files = paths
+    const walk = walkLinkedNotes(
+      this.app.metadataCache.resolvedLinks,
+      file.path,
+      this.settings.linkDepth,
+      (path) => this.isLeftOutPath(path)
+    );
+    const files = walk.chapters
       .map((p) => this.app.vault.getAbstractFileByPath(p))
       .filter((f): f is TFile => f instanceof TFile);
-    const { meta, cover, warnings } = await this.metaSource().plan(file, file.basename);
+    const { meta, cover, warnings: metaWarnings } = await this.metaSource().plan(file, file.basename);
+    const line = leftOutWarning(walk.leftOut);
+    const warnings = line === null ? metaWarnings : [line, ...metaWarnings];
     return { files, warnings, meta, cover, metaFile: file };
+  }
+
+  // 017-note-exclusion: whether the note at this vault path is left out — the
+  // walk's predicate. Called only for notes the walk reaches, so a linked export
+  // never reads the whole vault's frontmatter. A path that is not a Markdown file
+  // in the vault is simply not left out; the file list drops it, as it always has.
+  private isLeftOutPath(path: string): boolean {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    return file instanceof TFile ? isLeftOut(this.frontmatterOf(file)) : false;
   }
 
   // The frontmatter read; the shape rule (why a scalar `tags` string is NOT
   // tags) lives in core/book/book-plan.ts normalizeTags.
   private tagsOf(f: TFile): string[] {
     return normalizeTags(this.app.metadataCache.getFileCache(f)?.frontmatter?.tags);
+  }
+
+  // 017-note-exclusion: one note's own properties, for the rules that read them
+  // (today: the `export: false` marker, whose meaning lives in isLeftOut). Same
+  // single metadata-cache read tagsOf makes.
+  private frontmatterOf(f: TFile): Record<string, unknown> | undefined {
+    return this.app.metadataCache.getFileCache(f)?.frontmatter;
   }
 
   // Reads one note's regular links off the metadata cache and hands them to
@@ -302,7 +330,10 @@ export default class EpubExportPlugin extends Plugin {
 
   // Plain-data mirror of a TFolder subtree for the pure planner. Only `.md`
   // files become notes; every subfolder is included (the planner drops the
-  // ones with no notes beneath them).
+  // ones with no notes beneath them). 017-note-exclusion: a note marked
+  // `export: false` is still carried here — the planner needs it to know the
+  // book's index note is still the index note — but flagged, so it never
+  // becomes a chapter (FR-001, FR-006).
   private buildFolderInput(folder: TFolder, byPath: Map<string, TFile>): FolderInput {
     const notes: NoteInput[] = [];
     const subfolders: FolderInput[] = [];
@@ -315,6 +346,7 @@ export default class EpubExportPlugin extends Plugin {
           basename: child.basename,
           tags: this.tagsOf(child),
           linkTargets: this.linkTargetsOf(child),
+          leftOut: isLeftOut(this.frontmatterOf(child)),
         });
       } else if (child instanceof TFolder) {
         subfolders.push(this.buildFolderInput(child, byPath));
@@ -330,7 +362,15 @@ export default class EpubExportPlugin extends Plugin {
   // (unique within one folder — these are direct children of a single TFolder).
   private legacyFolderOrder(mdFiles: TFile[], folder: TFolder): { index: TFile | null; files: TFile[] } {
     const { indexBasename, order } = legacyChapterOrder(
-      mdFiles.map((f) => ({ basename: f.basename, tags: this.tagsOf(f) })),
+      // 017-note-exclusion: the marker is passed through, so the degraded order
+      // cannot re-print a note the reader left out (research R8). The index
+      // note is still RESOLVED over every note, marked or not, because the book
+      // takes its metadata from it (FR-006).
+      mdFiles.map((f) => ({
+        basename: f.basename,
+        tags: this.tagsOf(f),
+        leftOut: isLeftOut(this.frontmatterOf(f)),
+      })),
       folder.name
     );
     const fileNamed = (basename: string): TFile => mdFiles.find((f) => f.basename === basename)!;

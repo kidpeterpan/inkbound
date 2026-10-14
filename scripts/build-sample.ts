@@ -33,7 +33,11 @@ const SAMPLE_DESCRIPTION = [
 ].join("\n");
 
 const b = new EpubBuilder({
-  title: "ตัวอย่าง Sample",
+  // 018-xml-text-encodability: the title carries a form feed — the character a
+  // PDF paste leaves behind, and one XML 1.0 cannot hold. The builder must
+  // replace it with a space, so CI's epubcheck gate validates this case on every
+  // run; without the fix the sample is a FATAL error and the gate fails.
+  title: "ตัวอย่าง Sample\u000cwith a form feed",
   author: "Pan",
   language: "th",
   coverBytes: new Uint8Array(TINY_PNG),

@@ -23,6 +23,14 @@ export interface NoteInput {
   tags: string[];
   /** Resolved vault paths of the note's regular links, in document order. Embeds excluded. */
   linkTargets: string[];
+  /**
+   * 017-note-exclusion: true when the note is left out of the book (its own
+   * frontmatter says `export: false`). OPTIONAL, and absent means "in the
+   * book": that is the shape every pre-017 caller passes, which is what makes
+   * "a book with no marker is unchanged" structural rather than careful
+   * (FR-011).
+   */
+  leftOut?: boolean;
 }
 
 export interface FolderInput {
@@ -41,9 +49,30 @@ export interface BookPlan {
   order: string[];
   /** Top-level TOC entries; depth-first traversal yields `order` (FR-015). */
   nav: NavPlanNode[];
+  /**
+   * 017-note-exclusion FR-007: the paths this plan left out, in the tree's own
+   * order (a folder's own notes as given, then its subfolders), so the report
+   * line is deterministic. Disjoint from `order` by construction.
+   */
+  leftOut: string[];
+}
+
+/**
+ * 017-note-exclusion: every note under `folder` that is left out, in tree order.
+ * The one place the left-out paths are collected, so the planner and the
+ * degraded flat-order fallback (which has no plan to read them from) cannot
+ * disagree about what was left out (research R8).
+ */
+export function leftOutPaths(folder: FolderInput): string[] {
+  const out: string[] = [];
+  for (const note of folder.notes) if (note.leftOut) out.push(note.path);
+  for (const sub of folder.subfolders) out.push(...leftOutPaths(sub));
+  return out;
 }
 
 function findIndex(folder: FolderInput): NoteInput | null {
+  // A left-out note is still an index CANDIDATE: the marker removes a note's
+  // page, not its role in naming and ordering the book (FR-006).
   const name = pickIndexNote(
     folder.notes.map((n) => ({ basename: n.basename, tags: n.tags })),
     folder.name
@@ -54,7 +83,10 @@ function findIndex(folder: FolderInput): NoteInput | null {
 type Item = { kind: "note"; note: NoteInput } | { kind: "folder"; folder: FolderInput };
 
 function hasNotes(folder: FolderInput): boolean {
-  return folder.notes.length > 0 || folder.subfolders.some(hasNotes);
+  // Left-out notes do not keep a folder alive: a subfolder whose every note is
+  // left out is not a Part, exactly as an `assets/` folder with no notes is
+  // not one (FR-007 of 009).
+  return folder.notes.some((n) => !n.leftOut) || folder.subfolders.some(hasNotes);
 }
 
 function planFolder(
@@ -62,7 +94,7 @@ function planFolder(
   allNotes: Set<string>
 ): { indexPath: string | null; children: NavPlanNode[] } {
   const index = findIndex(folder);
-  const rest = folder.notes.filter((n) => n !== index);
+  const rest = folder.notes.filter((n) => n !== index && !n.leftOut);
   // A subfolder with no notes anywhere beneath it (an `assets/` folder) is
   // not a Part (FR-007). Everything else is an item to be ordered alongside
   // this folder's own notes.
@@ -79,7 +111,8 @@ function planFolder(
   // Part (FR-011). The prefix carries a trailing "/" so "book/Part I" never
   // captures "book/Part II/x" (research R4). Targets that select nothing —
   // outside the folder, missing, the index itself, non-notes such as an image
-  // that happens to live inside a Part — are ignored (FR-004).
+  // that happens to live inside a Part, and (017) a note that is left out, which
+  // is not in `allNotes` — are ignored (FR-004).
   const byNotePath = new Map(items.filter((i) => i.kind === "note").map((i) => [keyOf(i), i]));
   const folderItems = items.filter((i): i is Extract<Item, { kind: "folder" }> => i.kind === "folder");
   const selectFor = (target: string): Item | null =>
@@ -113,26 +146,38 @@ function partNode(folder: FolderInput, allNotes: Set<string>): NavPlanNode {
 }
 
 function collectNotePaths(folder: FolderInput, into: Set<string>): Set<string> {
-  for (const n of folder.notes) into.add(n.path);
+  // A left-out note is not part of the book, so a link to it must not place the
+  // Part it happens to live in (FR-003).
+  for (const n of folder.notes) if (!n.leftOut) into.add(n.path);
   for (const sub of folder.subfolders) collectNotePaths(sub, into);
   return into;
 }
 
-function flatten(nav: NavPlanNode[]): string[] {
+function flatten(nav: NavPlanNode[], leftOut: ReadonlySet<string>): string[] {
   const out: string[] = [];
   for (const node of nav) {
     if (node.kind === "chapter") out.push(node.path);
     else {
-      if (node.indexPath !== null) out.push(node.indexPath);
-      out.push(...flatten(node.children));
+      // A Part's index note is its first chapter — unless it is left out, in
+      // which case the Part opens on its first child (009's no-index rule). Its
+      // indexPath stays, so the Part is still named after it (FR-006).
+      if (node.indexPath !== null && !leftOut.has(node.indexPath)) out.push(node.indexPath);
+      out.push(...flatten(node.children, leftOut));
     }
   }
   return out;
 }
 
 export function planBook(root: FolderInput): BookPlan {
+  const leftOutList = leftOutPaths(root);
+  const leftOut = new Set(leftOutList);
   const { indexPath, children } = planFolder(root, collectNotePaths(root, new Set()));
+  // The root index note leads the book — unless it is left out, in which case
+  // the book simply starts with its first chapter. The caller still resolves the
+  // book's metadata from that note (FR-006).
   const nav: NavPlanNode[] =
-    indexPath === null ? children : [{ kind: "chapter", path: indexPath }, ...children];
-  return { order: flatten(nav), nav };
+    indexPath === null || leftOut.has(indexPath)
+      ? children
+      : [{ kind: "chapter", path: indexPath }, ...children];
+  return { order: flatten(nav, leftOut), nav, leftOut: leftOutList };
 }

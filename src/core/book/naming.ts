@@ -1,14 +1,26 @@
+import { firstNonEmptyString } from "./metadata";
+import { stripFootnoteRefs } from "../content/footnote-refs";
+import { replaceUnencodable } from "../common/xml";
+
+/**
+ * A book's file name, from its title.
+ *
+ * 018-xml-text-encodability: a file name is a boundary of its own — Windows
+ * forbids 0x00–0x1F in one, so a character pasted from a PDF could make an
+ * export FAIL rather than merely spoil a name (Constitution II). The replacement
+ * runs FIRST, so the space it becomes folds into the `_` the rest of a name
+ * already uses; and because `library.ts` compares the books of a run by this
+ * function's output, two titles that differ only by such a character are
+ * detected as the same file name.
+ */
 export function slugify(title: string): string {
-  const cleaned = title
+  const cleaned = replaceUnencodable(title)
     .toLowerCase()
     .replace(/[/\\:*?"<>|#^[\]]/g, "")
     .trim()
     .replace(/\s+/g, "_");
   return cleaned.length > 0 ? cleaned : "export";
 }
-
-import { firstNonEmptyString } from "./metadata";
-import { stripFootnoteRefs } from "../content/footnote-refs";
 
 // Chapter-title precedence (007-chapter-titles, resolved from the original
 // plan's Task 11): first usable H1 → first usable frontmatter alias → basename.

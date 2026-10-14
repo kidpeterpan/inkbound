@@ -15,7 +15,9 @@
 // in tests/fixtures/smoke-vault, runs a folder export through the real
 // orchestrator, and asserts the resulting EPUB is a book: correct container
 // files, both chapters, the embedded image, the Thai fonts, typeset math, and a
-// wikilink rewritten to its sibling chapter.
+// wikilink rewritten to its sibling chapter. Since 017 it also asserts that
+// `Book/99 Scratch.md` (`export: false`) is in no entry of the book — the one
+// place the shipped artifact's marker handling runs against a real file.
 //
 // WHAT IT DOES NOT PROVE: Node resolves a native `import("os")` happily, so
 // the exact 1.7.0 failure ("Failed to resolve module specifier") does NOT
@@ -314,6 +316,21 @@ async function checkBook(epubPath: string): Promise<string[]> {
     // A real TrueType file starts with the 0x00010000 sfnt tag.
     if (bytes.length < 1000 || bytes[0] !== 0 || bytes[1] !== 1 || bytes[2] !== 0 || bytes[3] !== 0) {
       problems.push(`${f} is not a TrueType font (${bytes.length} bytes)`);
+    }
+  }
+
+  // 017-note-exclusion: `Book/99 Scratch.md` carries `export: false`, so it is
+  // left out — and this book must therefore be exactly the book this folder
+  // produced before that note existed (the review-pack baseline records the
+  // other half of that claim). A marker that stopped working would add a fourth
+  // chapter, so both halves are asserted here: no fourth chapter file, and the
+  // note's sentinel text in no entry at all.
+  if (entries.has("OEBPS/text/chapter_004.xhtml")) {
+    problems.push("chapter_004.xhtml exists — the marked fixture note was not left out");
+  }
+  for (const name of entries) {
+    if ((await text(name)).includes("SCRATCH-NOTE-SENTINEL")) {
+      problems.push(`${name} contains the left-out fixture note's text`);
     }
   }
 

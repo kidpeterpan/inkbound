@@ -85,7 +85,7 @@ function parseFrontmatter(content: string): Record<string, unknown> {
           .filter((s) => s.length > 0);
         currentListKey = null;
       } else {
-        fm[key] = stripQuotes(rest);
+        fm[key] = typedScalar(rest);
         currentListKey = null;
       }
     } else {
@@ -93,6 +93,22 @@ function parseFrontmatter(content: string): Record<string, unknown> {
     }
   }
   return fm;
+}
+
+// 017-note-exclusion (research R1): Obsidian parses frontmatter as YAML, so an
+// unquoted `true`/`false` reaches a plugin as a BOOLEAN — and the `export:
+// false` marker is nothing but that boolean, so a stub handing over the string
+// "false" could not exercise the feature from a fixture file at all. A QUOTED
+// value stays text, which is what makes `export: "false"` a different value
+// (spec FR-002). Numbers and dates keep their string shape: 015's research R12
+// records that difference, and typing every YAML scalar would rewrite other
+// tests' expectations for values they already rely on.
+function typedScalar(raw: string): unknown {
+  const unquoted = stripQuotes(raw);
+  if (unquoted !== raw) return unquoted; // was quoted: text, whatever it says
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return unquoted;
 }
 
 // Computed against the FULL content (frontmatter included, no stripping) —

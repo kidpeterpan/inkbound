@@ -13,6 +13,7 @@
 // (spec Q1, FR-008).
 import type { BookDetails, SeriesMembership } from "../types";
 import { parseBookDate, type FieldRead } from "./book-date";
+import { replaceUnencodable } from "../common/xml";
 
 /** One property, or one `subjects` item, that was present but could not be used. */
 export interface MetaIssue {
@@ -213,31 +214,11 @@ function positionValue(position: number): FieldRead<number> {
   return isUsable ? { kind: "value", value: position } : UNUSABLE;
 }
 
-// Obsidian hands control characters to a plugin unchanged, and one of them in
-// package.opf is a fatal epubcheck error: a form feed pasted from a PDF would
-// break the book (research R13). Each becomes a space, not nothing, so two
-// words it separated stay two words. Silent, because the character is
-// invisible in the note.
-//
-// Walked by code point rather than matched with a regex: spotting an unpaired
-// surrogate with a regex needs a lookbehind, which older iOS WebViews reject as
-// a syntax error at load time.
-function replaceUnencodable(text: string): string {
-  let cleaned = "";
-  for (const character of text) cleaned += isEncodable(character) ? character : " ";
-  return cleaned;
-}
-
-/** Whether XML 1.0, and so an EPUB package, can hold this character. */
-function isEncodable(character: string): boolean {
-  const codePoint = character.codePointAt(0) ?? 0;
-  const isTabOrLineBreak = codePoint === 0x9 || codePoint === 0xa || codePoint === 0xd;
-  if (isTabOrLineBreak) return true;
-  if (codePoint < 0x20) return false;
-  const isUnpairedSurrogate = codePoint >= 0xd800 && codePoint <= 0xdfff;
-  if (isUnpairedSurrogate) return false;
-  return codePoint !== 0xfffe && codePoint !== 0xffff;
-}
+// 018-xml-text-encodability: the rule for characters XML 1.0 cannot hold now
+// lives in the shared XML text module (it is what the escaper applies too), and
+// is applied here as well so the PREVIEW and the REPORT show the same text the
+// book carries — 015's decision, unchanged. It is idempotent, so the escaper
+// applying it a second time costs nothing.
 
 const REASON_TEXT: Record<MetaIssue["reason"], string> = {
   "not-text": "is not text",

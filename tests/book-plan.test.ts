@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   chapterOrderFallbackWarning,
   degradedFolderPlan,
+  isLeftOut,
+  leftOutWarning,
   legacyChapterOrder,
   normalizeTags,
   orderedLinkTargets,
@@ -19,7 +21,11 @@ import {
 } from "../src/core/book/book-plan";
 import type { FolderInput, NavPlanNode } from "../src/core/book/book-tree";
 
-const note = (basename: string, tags: string[] = []): IndexCandidate => ({ basename, tags });
+const note = (basename: string, tags: string[] = [], leftOut?: boolean): IndexCandidate => ({
+  basename,
+  tags,
+  leftOut,
+});
 
 describe("normalizeTags: frontmatter tags shape (009 Fix 3)", () => {
   it("keeps a genuine array", () => {
@@ -90,6 +96,31 @@ describe("legacyChapterOrder: the pre-009 flat order (research R5)", () => {
     const order = legacyChapterOrder([note("10 Ten"), note("9 Nine")], "Nowhere");
 
     expect(order.order).toEqual(["10 Ten", "9 Nine"]);
+  });
+
+  // 017-note-exclusion: the degraded (pre-009) order is the path an export
+  // takes when planning throws, so it must honour the marker too — otherwise a
+  // planning bug would silently put a left-out note back in the book (FR-001,
+  // research R8).
+  it("drops a left-out note from the order, keeping the rest in their places", () => {
+    const order = legacyChapterOrder(
+      [note("Reader", ["book", "main"]), note("01_One"), note("02_Gone", [], true), note("Alpha")],
+      "Reader"
+    );
+
+    expect(order.order).toEqual(["Reader", "01_One", "Alpha"]);
+  });
+
+  it("keeps a left-out index note as the book's index while leaving it out of the order", () => {
+    const order = legacyChapterOrder(
+      [note("Reader", ["book", "main"], true), note("01_One"), note("Alpha")],
+      "Reader"
+    );
+
+    // The index still names the book — that is what indexBasename is for — but
+    // it is not printed (FR-006).
+    expect(order.indexBasename).toBe("Reader");
+    expect(order.order).toEqual(["01_One", "Alpha"]);
   });
 });
 
@@ -208,6 +239,35 @@ describe("toNavItems: position-keyed nav, parts only (FR-013, research R2)", () 
     ]);
   });
 
+  // 017-note-exclusion FR-006: a Part's index note that is left out is still the
+  // note the Part is named after — losing a page must not rename the Part — but
+  // it is not a chapter to open, so the entry falls back to the Part's first
+  // chapter, exactly as a Part with no index note does (009's rule).
+  it("keeps a left-out index note's title and opens the Part on its first chapter", () => {
+    const nav: NavPlanNode[] = [
+      {
+        kind: "part",
+        folderName: "Part I",
+        indexPath: "Part I/A.md",
+        children: [{ kind: "chapter", path: "Part I/B.md" }],
+      },
+    ];
+    // The index note is left out, so it has no position in the reading order.
+    const withoutIndex = new Map([
+      ["Book.md", 0],
+      ["Part I/B.md", 1],
+    ]);
+
+    expect(toNavItems(nav, withoutIndex, titleForNote)).toEqual([
+      {
+        kind: "part",
+        title: "Title of Part I/A.md",
+        indexChapter: null,
+        children: [{ kind: "chapter", chapter: 1 }],
+      },
+    ]);
+  });
+
   it("maps nested Parts recursively", () => {
     const nav: NavPlanNode[] = [
       {
@@ -318,6 +378,69 @@ describe("tocFallbackWarning", () => {
   it("reads a thrown non-Error the same way the other fallback warning does", () => {
     expect(tocFallbackWarning("plain string")).toBe(
       "table of contents fell back to a flat list: plain string"
+    );
+  });
+});
+
+// 017-note-exclusion: the marker a reader puts in a note's own properties. The
+// table is deliberately the whole rule: only the boolean `false` leaves a note
+// out, because the safe direction of a misread is "in the book" — a typo ships
+// a note rather than silently dropping one (spec FR-002).
+describe("isLeftOut: the export: false marker", () => {
+  it("leaves the note out for the boolean false, and nothing else", () => {
+    expect(isLeftOut({ export: false })).toBe(true);
+  });
+
+  it("keeps the note for every other shape a frontmatter value can take", () => {
+    const kept: (Record<string, unknown> | undefined)[] = [
+      undefined,
+      {},
+      { export: true },
+      // A quoted "false" is TEXT, and Obsidian hands it over as a string — the
+      // one case a reader can surprise themselves with, so it is pinned here.
+      { export: "false" },
+      { export: "no" },
+      { export: 0 },
+      { export: [] },
+      { export: null },
+      { export: { value: false } },
+    ];
+    for (const frontmatter of kept) {
+      expect(isLeftOut(frontmatter), JSON.stringify(frontmatter)).toBe(false);
+    }
+  });
+});
+
+describe("leftOutWarning: the one line saying what was left out (FR-007)", () => {
+  it("says nothing when nothing was left out", () => {
+    expect(leftOutWarning([])).toBeNull();
+  });
+
+  it("names a single note in the singular", () => {
+    expect(leftOutWarning(["drafts/ch1.md"])).toBe(
+      "1 note left out of the book (export: false): drafts/ch1.md"
+    );
+  });
+
+  it("names several notes by their vault paths, in the order the plan left them out", () => {
+    expect(leftOutWarning(["_template.md", "drafts/ch1.md"])).toBe(
+      "2 notes left out of the book (export: false): _template.md, drafts/ch1.md"
+    );
+  });
+
+  it("names five notes in full", () => {
+    expect(leftOutWarning(["a.md", "b.md", "c.md", "d.md", "e.md"])).toBe(
+      "5 notes left out of the book (export: false): a.md, b.md, c.md, d.md, e.md"
+    );
+  });
+
+  it("caps the names at five and counts the rest, so the report stays readable", () => {
+    expect(leftOutWarning(["a.md", "b.md", "c.md", "d.md", "e.md", "f.md"])).toBe(
+      "6 notes left out of the book (export: false): a.md, b.md, c.md, d.md, e.md and 1 more"
+    );
+    const twelve = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"].map((n) => `${n}.md`);
+    expect(leftOutWarning(twelve)).toBe(
+      "12 notes left out of the book (export: false): a.md, b.md, c.md, d.md, e.md and 7 more"
     );
   });
 });
