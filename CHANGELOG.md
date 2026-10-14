@@ -3,6 +3,45 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.15.0
+
+Keep a note out of a book, and a book built from pasted text always opens.
+
+- **Keep a note out of a book.** Add `export: false` to a note's properties and that note is
+  not in the book: not a chapter, not in the table of contents, not a Part. A chapter
+  template, a scratch note or last year's draft can live in the book's folder without being
+  shipped to your reader — and the note stays in your vault, where it is, with every link to
+  it intact.
+- **Folder books and note + linked notes books both honour it.** A marked note reached by the
+  link walk is not walked _through_ either, so a note that only it links to is not pulled in.
+  The note you asked for by name is always in the book: exporting a marked note on its own
+  writes its book, and a linked export still starts with the note you ran it on.
+- **Only the real `false` counts.** `export: "false"` (quoted) is text, and the note stays in
+  the book — as does `export: true`, or any value that is not `false`. A typo therefore ships
+  a note rather than silently dropping one.
+- **The note a book takes its title from keeps that job.** Marking a book's index note removes
+  its page, not its role: the book keeps the title, author, language, cover and output file
+  name that note gives it, and its links still decide the chapter order. A Part whose index
+  note is marked keeps that note's title and opens on its first chapter.
+- **You are told what was left out.** The preview and the export report each carry one line
+  naming the notes, so a note you marked months ago is never missing from a book without you
+  knowing. A book whose every note is marked is not written — the same message an empty folder
+  gives.
+- **An invisible character can no longer break a book.** Pasting from a PDF, a web page or a
+  chat message can carry a character XML cannot hold — a form feed is the common one. It used
+  to travel into the finished book, and an e-reader or a validator would then refuse the file:
+  the export looked like it had worked, and the book would not open. It is now replaced with a
+  space everywhere it could reach: the title, author and series metadata, chapter titles, the
+  table of contents, the "Linked from:" trails, and the text of the chapters themselves.
+- **A title can always name a file.** Windows forbids those characters in a file name, so the
+  same paste could make an export fail outright. The file name is cleaned too, and two titles
+  that differ only by such a character are recognised as the same name.
+- **Your existing books are unchanged**, entry for entry: a vault with no marker and clean text
+  produces the same books it did before.
+- **Not yet checked by hand.** A marked note's absence on a real Boox, the line in a preview on
+  a phone, and the marked-index-note case in real Obsidian are listed in `docs/DEVELOPMENT.md`
+  as still to be checked by hand.
+
 ## 1.14.0
 
 Refresh your whole library in one go: Export all books.
