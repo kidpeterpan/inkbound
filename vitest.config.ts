@@ -63,6 +63,9 @@ export default defineConfig({
         "scripts/lib/obsidian-drift.ts",
         "scripts/lib/release-notes.ts",
         "scripts/lib/review-pack.ts",
+        // Same kind as the three above: pure decision logic with no I/O of its own
+        // (the review gates' capability allowlist), so the 85% gate applies to it.
+        "scripts/lib/external-access.ts",
       ],
       // Interfaces only — emits no JS, so v8 reports 0/0 and would fail any threshold.
       exclude: ["src/core/types.ts"],
