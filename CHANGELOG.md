@@ -3,6 +3,20 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.15.1
+
+Documentation and review hygiene — nothing about how books are exported changes.
+
+- **Inkbound now says what it touches.** The README gained a "What Inkbound touches" section: your
+  vault is read through Obsidian's own API; on a computer the finished `.epub` is written to the
+  folder you set, one file per export, and nothing else outside the vault is read, listed, deleted
+  or renamed; the network is used only for a cover URL you set or a push to your Boox; the clipboard
+  only when you press **Copy report**.
+- **That list is enforced, not just promised.** A build gate scans the shipped plugin against it and
+  a test scans the source, so a capability cannot arrive without being disclosed.
+- **No change to any book you export.** The plugin's own code is untouched: `main.js` in this
+  release is identical, byte for byte, to the one in 1.15.0.
+
 ## 1.15.0
 
 Keep a note out of a book, and a book built from pasted text always opens.
