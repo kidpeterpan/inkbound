@@ -12,6 +12,8 @@
 Inkbound exports your Obsidian notes as EPUB ebooks, so you can read them
 comfortably on an e-ink device instead of a laptop screen.
 
+Website: [kidpeterpan.github.io/inkbound](https://kidpeterpan.github.io/inkbound/)
+
 ## What you get
 
 Export from the command palette or a right-click menu, in three ways:
