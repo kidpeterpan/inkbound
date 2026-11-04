@@ -2,10 +2,10 @@
   "name": "app-image",
   "covers": "the app:// image src branch of rewriteImages, for a wikilink embed and a markdown image",
   "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
-  "obsidianVersion": "1.14.4",
-  "capturedAt": "2026-10-08",
+  "obsidianVersion": "1.14.5",
+  "capturedAt": "2026-11-04",
   "basePath": "/VAULT",
   "sourceMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
   "renderedMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
-  "html": "<p dir=\"auto\"><span alt=\"99. temp/Test Book/assets/pic.png\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"99. temp/Test Book/assets/pic.png\" src=\"app://2791c715cdb5b3c2993fcee9e5ed59bcf423/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://2791c715cdb5b3c2993fcee9e5ed59bcf423/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>"
+  "html": "<p dir=\"auto\"><span alt=\"99. temp/Test Book/assets/pic.png\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"99. temp/Test Book/assets/pic.png\" src=\"app://bd20b09cc114504be912cbd0c5f7b4dd9f56/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://bd20b09cc114504be912cbd0c5f7b4dd9f56/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>"
 }
