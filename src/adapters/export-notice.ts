@@ -39,6 +39,13 @@ export interface ProgressHandle {
   hide(): void;
 }
 
+/**
+ * What the reader is told when they start an export while another one is still
+ * running. Exported so the one place that says it and the tests that look for it
+ * cannot drift apart.
+ */
+export const EXPORT_ALREADY_RUNNING = "Another export is still running — wait for it to finish.";
+
 /** Today's notices: what every single export shows, unchanged (016 FR-009). */
 export function noticeFeedback(app: App): ExportFeedback {
   return {

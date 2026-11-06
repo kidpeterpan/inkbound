@@ -8,6 +8,18 @@
 // the zero-"obsidian"-import constraint).
 import { replaceWithPlainTextSpan } from "./dom";
 
+// The path part of a linktext: everything before the first "#". Obsidian's
+// `getFirstLinkpathDest` takes a LINKPATH and answers null for "Note#Heading" or
+// "Note#^block" (measured on Obsidian 1.14.5), so a link's `data-href` — which is
+// the whole linktext — must be cut down before it is resolved, the same way
+// main.ts cuts the index note's links with `parseLinktext`. Only "#" splits, as in
+// `parseLinktext`: a "^" is part of the name. A same-note link ("#Heading") has no
+// path at all, which is "" here.
+function linkpathOf(linktext: string): string {
+  const subpathStart = linktext.indexOf("#");
+  return subpathStart === -1 ? linktext : linktext.slice(0, subpathStart);
+}
+
 export function rewriteLinks(
   root: HTMLElement,
   hrefByPath: Map<string, string>,
@@ -18,7 +30,12 @@ export function rewriteLinks(
     const isInternalLink = anchor.classList.contains("internal-link") || dataHref !== null;
     if (!isInternalLink) return; // external link: leave untouched
 
-    const targetPath = dataHref ? resolve(dataHref) : null;
+    // A link into another note's heading or block links to that note's CHAPTER, with no
+    // #fragment: heading ids exist only when the TOC depth is above 0, so a fragment
+    // could point at an id that is not there (epubcheck RSC-012). A same-note link has
+    // no path to resolve and stays plain text.
+    const linkpath = dataHref ? linkpathOf(dataHref) : "";
+    const targetPath = linkpath ? resolve(linkpath) : null;
     const chapterHref = targetPath ? hrefByPath.get(targetPath) : undefined;
     if (!chapterHref) {
       replaceWithPlainTextSpan(anchor);

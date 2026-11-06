@@ -305,6 +305,66 @@ describe("renderUnitToChapter", () => {
     expect(r.xhtmlBody).toContain("Nowhere");
   });
 
+  // appWith(dest) above answers with `dest` for ANY input, which is why a heading link never
+  // failed a test. Obsidian's getFirstLinkpathDest takes a linkpath: bare name → the file,
+  // "Name#Heading" / "Name#^block" → null (measured on Obsidian 1.14.5). This resolver says
+  // the same, so a link keeps working only if the adapter hands it the path part alone.
+  describe("a wikilink with a heading or block subpath", () => {
+    const destTwo = new TFile("/vault", "book/02_two.md");
+    const hrefByPath = new Map([["book/02_two.md", "text/chapter_002.xhtml"]]);
+    const strictResolve = (linkpath: string) => (linkpath === "Chapter Two" ? destTwo : null);
+
+    it("control: the strict resolver still links a bare name", async () => {
+      const r = await renderUnitToChapter(
+        appWithNotes({}, strictResolve),
+        newComponent(),
+        "[[Chapter Two]]",
+        "note.md",
+        hrefByPath,
+        "/vault",
+        0
+      );
+      expect(r.xhtmlBody).toContain('href="chapter_002.xhtml"');
+    });
+
+    it.each([
+      ["[[Chapter Two#Intro]]", "a heading"],
+      ["[[Chapter Two#^abc123]]", "a block"],
+      ["[[Chapter Two#Intro#Sub]]", "a nested heading"],
+      ["[[Chapter Two#Intro|see here]]", "a heading with an alias"],
+    ])("%s (%s) links to the chapter, with no fragment", async (markdown) => {
+      const r = await renderUnitToChapter(
+        appWithNotes({}, strictResolve),
+        newComponent(),
+        markdown,
+        "note.md",
+        hrefByPath,
+        "/vault",
+        0
+      );
+      expect(r.xhtmlBody).toContain('href="chapter_002.xhtml"');
+      expect(r.xhtmlBody).not.toMatch(/chapter_002\.xhtml#/);
+      expect(r.xhtmlBody).not.toContain("data-href");
+    });
+
+    it("keeps working inside an embedded note, resolved against the embedded note", async () => {
+      const destEmbedded = new TFile("/vault", "folder-b/Embedded Note.md");
+      const app = appWithNotes({ "folder-b/Embedded Note.md": "See [[Chapter Two#Intro]]." }, (linkpath) =>
+        linkpath === "Embedded Note" ? destEmbedded : strictResolve(linkpath)
+      );
+      const r = await renderUnitToChapter(
+        app,
+        newComponent(),
+        "![[Embedded Note]]",
+        "folder-a/Host.md",
+        hrefByPath,
+        "/vault",
+        0
+      );
+      expect(r.xhtmlBody).toContain('href="chapter_002.xhtml"');
+    });
+  });
+
   it("rasterizes a mermaid diagram to a PNG <img>, composing numbering with a regular image in the same doc", async () => {
     // Fractional width (a real mermaid svg's width, e.g. "774.8046875") is
     // deliberate: XHTML's `width` attribute must be an integer (epubcheck

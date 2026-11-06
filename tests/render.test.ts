@@ -1022,6 +1022,51 @@ describe("rewriteLinks", () => {
     rewriteLinks(el, new Map(), resolve);
     expect(el.querySelector("a")?.getAttribute("href")).toBe("https://example.com");
   });
+
+  // Obsidian's getFirstLinkpathDest takes a LINKPATH (the path part of a linktext). Asked for
+  // "Chapter Two#Intro" it answers null — measured on Obsidian 1.14.5, where the bare name
+  // resolves and the "#"-suffixed forms do not. `resolve` above is strict in the same way
+  // (it knows only the bare name), so these cases fail unless rewriteLinks splits the subpath
+  // off first. No #fragment is added to the href: heading ids exist only when the TOC depth
+  // is above 0, so a fragment would point at an id that may not be there (epubcheck RSC-012).
+  it.each([
+    ["a heading", "Chapter Two#Intro"],
+    ["a block", "Chapter Two#^abc123"],
+    ["a nested heading", "Chapter Two#Intro#Sub"],
+    ["an empty heading", "Chapter Two#"],
+  ])("a link to %s in a chapter of the set links to the chapter, with no fragment", (_kind, dataHref) => {
+    const el = div(`<a class="internal-link" data-href="${dataHref}" href="${dataHref}">jump</a>`);
+    const map = new Map([["book/02_two.md", "text/chapter_002.xhtml"]]);
+    rewriteLinks(el, map, resolve);
+    const anchor = el.querySelector("a");
+    expect(anchor?.getAttribute("href")).toBe("chapter_002.xhtml");
+    expect(anchor?.hasAttribute("data-href")).toBe(false);
+  });
+  // Obsidian splits a linktext at the first "#" only (parseLinktext), so a "^" belongs to the
+  // name. Splitting there too would unlink a note literally named "Odd^Name".
+  it("a note whose name contains ^ is still linked by that name", () => {
+    const el = div('<a class="internal-link" data-href="Odd^Name" href="Odd^Name">odd</a>');
+    const map = new Map([["book/odd.md", "text/chapter_003.xhtml"]]);
+    rewriteLinks(el, map, (lp) => (lp === "Odd^Name" ? "book/odd.md" : null));
+    expect(el.querySelector("a")?.getAttribute("href")).toBe("chapter_003.xhtml");
+  });
+  it("a heading link to a note outside the set still degrades to text", () => {
+    const el = div(
+      '<a class="internal-link" data-href="Elsewhere#Intro" href="Elsewhere#Intro">see this</a>'
+    );
+    rewriteLinks(el, new Map(), resolve);
+    expect(el.querySelector("a")).toBeNull();
+    expect(el.textContent).toBe("see this");
+  });
+  // Decided with the reader: a link to a heading of the SAME note keeps today's behavior
+  // (plain text). This case documents that decision and passes before and after the fix.
+  it("a same-note heading link ([[#Heading]]) stays plain text", () => {
+    const el = div('<a class="internal-link" data-href="#Intro" href="#Intro">see below</a>');
+    const map = new Map([["book/02_two.md", "text/chapter_002.xhtml"]]);
+    rewriteLinks(el, map, resolve);
+    expect(el.querySelector("a")).toBeNull();
+    expect(el.textContent).toBe("see below");
+  });
 });
 
 describe("rewriteImages", () => {

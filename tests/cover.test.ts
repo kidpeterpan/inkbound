@@ -6,7 +6,43 @@ import {
   declaredCover,
   planCoverFromEmbeds,
   describeCover,
+  sniffCoverExt,
 } from "../src/core/epub/cover";
+
+// What a downloaded cover really is, read from its first bytes. A server's
+// content-type is a claim; this is the file.
+describe("sniffCoverExt", () => {
+  const ascii = (text: string) => [...text].map((character) => character.charCodeAt(0));
+  const bytes = (...parts: number[][]) => Uint8Array.from(parts.flat());
+
+  it.each([
+    ["a PNG", bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "png"],
+    ["a PNG cut off right after its four-byte mark", bytes([0x89, 0x50, 0x4e, 0x47]), "png"],
+    ["a JPEG", bytes([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), "jpg"],
+    ["a JPEG that is only its three-byte mark", bytes([0xff, 0xd8, 0xff]), "jpg"],
+    ["a WebP", bytes(ascii("RIFF"), [0x24, 0x00, 0x00, 0x00], ascii("WEBP")), "webp"],
+  ])("recognises %s", (_name, input, expected) => {
+    expect(sniffCoverExt(input)).toBe(expected);
+  });
+
+  it.each([
+    ["no bytes at all", bytes()],
+    ["a PNG mark one byte short", bytes([0x89, 0x50, 0x4e])],
+    ["a JPEG mark one byte short", bytes([0xff, 0xd8])],
+    ["a JPEG start with the wrong third byte", bytes([0xff, 0xd8, 0x00])],
+    ["a WAV file (RIFF, but not WEBP)", bytes(ascii("RIFF"), [0x24, 0x00, 0x00, 0x00], ascii("WAVE"))],
+    [
+      "a RIFF header cut off before the WEBP mark",
+      bytes(ascii("RIFF"), [0x24, 0x00, 0x00, 0x00], ascii("WEB")),
+    ],
+    ["a GIF", bytes(ascii("GIF89a"))],
+    ["an AVIF", bytes([0x00, 0x00, 0x00, 0x1c], ascii("ftypavif"))],
+    ["an HTML page", bytes(ascii("<!doctype html><html><body>Access denied</body></html>"))],
+    ["an SVG", bytes(ascii('<svg xmlns="http://www.w3.org/2000/svg"/>'))],
+  ])("answers null for %s", (_name, input) => {
+    expect(sniffCoverExt(input)).toBeNull();
+  });
+});
 
 describe("parseCoverValue", () => {
   it("accepts a vault-relative path", () => {

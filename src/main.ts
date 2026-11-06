@@ -33,6 +33,7 @@ import {
 import { listRow, type LibraryReport } from "./core/delivery/library-report";
 import { runLibraryExport, showLibrarySummary, type LibraryEntry } from "./adapters/library-export";
 import { openLibraryList, openLibraryReport } from "./adapters/library-view";
+import { EXPORT_ALREADY_RUNNING } from "./adapters/export-notice";
 
 // 014-preview-before-export: a book that has been DECIDED but not yet built —
 // which notes, in what order, under which Parts, with what title, author and
@@ -75,6 +76,18 @@ export default class EpubExportPlugin extends Plugin {
   // 016-export-all-books: a run over the whole library leaves one report of the
   // run instead of one per book, so the remembered report is either kind.
   private lastReport: LastReport | null = null;
+  // True from the moment an export (or a whole library run) starts until it ends,
+  // however it ends. The preview and library windows ignore a second tap on their own
+  // button, but the palette, a hotkey and the file menu all start exports too, and two
+  // exports of one book finish together and write the SAME file at once. Measured only
+  // synthetically — two concurrent `fs.writeFile`s of buffers with one shared body and
+  // different last bytes, where a ZIP keeps its central directory — 10–16 of 40 trials
+  // left a mix of both buffers; not reproduced inside Obsidian. Plugin state
+  // only — no filesystem call — so what the plugin can touch (README, "What Inkbound
+  // touches") is unchanged. In-flight work is not queued: the second request is refused
+  // and the reader asks again, because a queued export would run on a vault that may
+  // have changed since it was asked for.
+  private exportRunning = false;
 
   async onload() {
     await this.loadSettings();
@@ -256,10 +269,31 @@ export default class EpubExportPlugin extends Plugin {
     return new NoteMetaSource(this.app, this.metaDefaults());
   }
 
+  // Runs `task` unless an export is already running, in which case the reader is told
+  // and nothing starts. Released in `finally`, so a task that throws — or an export
+  // that fails — never leaves the plugin refusing every later request. Applied at the
+  // three places an export STARTS (a note, a planned book, a library run) and nowhere
+  // inside them: guarding the pipeline too would refuse the export that already holds
+  // the lock.
+  private async exclusively(task: () => Promise<void>): Promise<void> {
+    if (this.exportRunning) {
+      new Notice(EXPORT_ALREADY_RUNNING);
+      return;
+    }
+    this.exportRunning = true;
+    try {
+      await task();
+    } finally {
+      this.exportRunning = false;
+    }
+  }
+
   async exportSingle(file: TFile) {
-    const warnings: string[] = [];
-    const meta = await this.metaFromNote(file, file.basename, (m) => warnings.push(m));
-    await this.runExport({ meta, files: [file], warnings });
+    await this.exclusively(async () => {
+      const warnings: string[] = [];
+      const meta = await this.metaFromNote(file, file.basename, (m) => warnings.push(m));
+      await this.runExport({ meta, files: [file], warnings });
+    });
   }
 
   async exportLinked(file: TFile) {
@@ -453,7 +487,9 @@ export default class EpubExportPlugin extends Plugin {
   // metadata and warnings because attaching the cover adds to both, and the
   // same PlannedExport may be what a preview window is still holding.
   private async exportPlanned(planned: PlannedExport): Promise<void> {
-    this.remember(await this.buildPlanned(planned));
+    await this.exclusively(async () => {
+      this.remember(await this.buildPlanned(planned));
+    });
   }
 
   // Builds the book a plan describes and reports through `feedback` (today's
@@ -516,13 +552,18 @@ export default class EpubExportPlugin extends Plugin {
     return entries.map((entry) => ({ ...entry, clashesWith: clashOf.get(entry.book.folderPath) ?? null }));
   }
 
+  // The whole run holds the lock, not each book in turn: between two books nothing is
+  // running at that instant, yet an export started there would write while the run is
+  // still going.
   private async runLibrary(entries: readonly LibraryEntry<PlannedExport>[]): Promise<void> {
-    const result = await runLibraryExport(entries, {
-      buildBook: (plan, feedback) => this.buildPlanned(plan, feedback),
+    await this.exclusively(async () => {
+      const result = await runLibraryExport(entries, {
+        buildBook: (plan, feedback) => this.buildPlanned(plan, feedback),
+      });
+      showLibrarySummary(this.app, result.report);
+      this.lastReport = { kind: "library", report: result.report };
+      this.lastShareTarget = result.shareTarget;
     });
-    showLibrarySummary(this.app, result.report);
-    this.lastReport = { kind: "library", report: result.report };
-    this.lastShareTarget = result.shareTarget;
   }
 
   // ── preview (014-preview-before-export) ─────────────────────────

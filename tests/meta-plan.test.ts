@@ -253,6 +253,80 @@ describe("NoteMetaSource.attachCover: carries the decision out", () => {
     expect(warnings).toEqual(["cover download failed: https://example.com/gone.png (status 404)"]);
   });
 
+  // A 200 is not a picture. A page that sits where the image should be (hotlink
+  // protection, a soft 404, a login wall) or a type the book cannot hold used to be
+  // written in as cover.jpg: epubcheck then fails the whole book (OPF-029 / PKG-021).
+  // What the bytes ARE decides, never what the server says they are.
+  describe("a cover address that answers 200 with something that is not a PNG, JPEG or WebP", () => {
+    const REFUSED = "cover download failed: https://example.com/c (not a PNG, JPEG or WebP image)";
+    const text = (value: string) => new TextEncoder().encode(value);
+    const serve = (contentType: string | undefined, body: Uint8Array) => {
+      const headers: Record<string, string> =
+        contentType === undefined ? {} : { "content-type": contentType };
+      setRequestUrlImpl(async () => ({
+        status: 200,
+        headers,
+        arrayBuffer: body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength) as ArrayBuffer,
+        text: "",
+        json: null,
+      }));
+    };
+    const attach = async (): Promise<{ meta: ExportMeta; warnings: string[] }> => {
+      const { source, file } = await probe({ "n.md": note([]) });
+      const meta = baseMeta();
+      const warnings: string[] = [];
+      await source.attachCover(meta, { kind: "url", url: "https://example.com/c" }, file("n.md"), (m) =>
+        warnings.push(m)
+      );
+      return { meta, warnings };
+    };
+
+    it.each([
+      ["an HTML page", "text/html; charset=utf-8", text("<!doctype html><html>Access denied</html>")],
+      ["a GIF", "image/gif", text("GIF89a\u0001\u0000\u0001\u0000")],
+      ["an AVIF", "image/avif", Uint8Array.of(0, 0, 0, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66)],
+      ["an SVG", "image/svg+xml", text('<svg xmlns="http://www.w3.org/2000/svg"/>')],
+      ["nothing at all", "image/jpeg", new Uint8Array(0)],
+    ])("leaves the book coverless, with a warning, for %s", async (_name, contentType, body) => {
+      serve(contentType, body);
+      const { meta, warnings } = await attach();
+
+      expect(meta.coverBytes).toBeUndefined();
+      expect(meta.coverExt).toBeUndefined();
+      expect(warnings).toEqual([REFUSED]);
+    });
+
+    it("trusts the bytes over the header: a JPEG header on an HTML body is no cover", async () => {
+      serve("image/jpeg", text("<html>Please log in</html>"));
+      const { meta, warnings } = await attach();
+
+      expect(meta.coverBytes).toBeUndefined();
+      expect(warnings).toEqual([REFUSED]);
+    });
+
+    it.each([
+      ["no content-type at all", undefined],
+      ["application/octet-stream", "application/octet-stream"],
+      ["a JPEG header (the header is wrong)", "image/jpeg"],
+    ])("keeps a real PNG labelled png even when it arrives with %s", async (_name, contentType) => {
+      serve(contentType, PNG);
+      const { meta, warnings } = await attach();
+
+      expect(meta.coverExt).toBe("png");
+      expect(meta.coverBytes).toEqual(PNG);
+      expect(warnings).toEqual([]);
+    });
+
+    it("keeps a real WebP labelled webp, and a real JPEG labelled jpg, whatever the header says", async () => {
+      const webp = Uint8Array.of(0x52, 0x49, 0x46, 0x46, 0x24, 0, 0, 0, 0x57, 0x45, 0x42, 0x50);
+      serve("image/png", webp);
+      expect((await attach()).meta.coverExt).toBe("webp");
+
+      serve("application/octet-stream", Uint8Array.of(0xff, 0xd8, 0xff, 0xe0));
+      expect((await attach()).meta.coverExt).toBe("jpg");
+    });
+  });
+
   it("reads a path plan from the vault", async () => {
     const { source, file, binaryReads } = await probe({ "n.md": note([]), "assets/c.png": PNG });
     const meta = baseMeta();

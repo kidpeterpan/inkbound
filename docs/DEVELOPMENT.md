@@ -416,6 +416,37 @@ a real device. These still need a person:
   vault tree the run walks; the test stub lists a directory as it is, and the test
   vaults have none.
 
+**One export at a time — NOT yet verified by hand.** The plugin refuses an export (a
+note, a folder, a preview's Export, or Export all) while another is running, with the
+notice "Another export is still running — wait for it to finish." The rule is
+unit-tested by holding an export at its cover download; it does not show what a
+reader sees on a device. These still need a person:
+
+- **A phone, a double tap.** Starting **Export note to EPUB** twice in quick
+  succession from the palette gives one book and the notice once, not two exports.
+- **The notice is read in time.** On a phone the "Exporting…" progress notice is up
+  while the refusal appears, so check the two do not hide each other.
+
+Not changed on purpose: the book is still written in place, so a write that is cut
+off (a full disk, the app killed) can leave a partial file where the previous book
+was. A temp-file-and-rename write would fix that, but it needs `fs.rename`, which
+`tests/external-access.test.ts` and the README's "What Inkbound touches" forbid; that
+is a decision about the plugin's disclosed capabilities, not a bug fix.
+
+**Links into a heading or block — NOT yet verified by hand.** `[[Note#Heading]]` and
+`[[Note#^block]]` used to become plain text in the book, because Obsidian's
+`getFirstLinkpathDest` answers null for a linktext that carries a subpath (measured
+live on 1.14.5: the bare name resolves, `Name#x` and `Name#^x` do not). The rules are
+unit-tested with a resolver that behaves that way, and the vault stub models it too.
+This still needs a person, on a real device, with a book whose first note links to
+`[[Second#Some heading]]` and `[[Second#^someblock]]`:
+
+- **The link works.** Tapping it opens the second chapter. It opens at the chapter's
+  start, not at the heading: a heading id exists only when the TOC depth is above 0,
+  so the link carries no fragment.
+- **A same-note link stays text.** `[[#Heading]]` is still not a link (a decision,
+  not an oversight).
+
 **Keeping a note out of a book (017-note-exclusion) — NOT yet verified by hand.** The
 marker's rules are unit-tested, the adapter's read is tested end to end from real
 fixture files, and the shipped bundle exports the smoke vault's marked fixture note

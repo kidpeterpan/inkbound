@@ -7,7 +7,7 @@ import EpubExportPlugin from "../src/main";
 import { setSvgRasterizer } from "../src/adapters/render-adapter";
 import { setImageCodec } from "../src/core/epub/image-codec";
 import { fakeImageCodec, SHRUNK_BYTES } from "./fixtures/fake-image-codec";
-import { pngBytes } from "./fixtures/image-bytes";
+import { jpegBytes, pngBytes } from "./fixtures/image-bytes";
 import { setThaiFontLoader } from "../src/core/epub/font-assets";
 import { setBaseRenderer, type BaseRenderOutcome } from "../src/adapters/bases-adapter";
 import { buildStaticTable, extractBaseTable } from "../src/core/content/bases";
@@ -37,6 +37,7 @@ import {
 import type { StubCommand } from "./fixtures/obsidian-stub";
 import { createVaultStub } from "./fixtures/vault-stub";
 import { setShareHost } from "../src/core/delivery/share";
+import { EXPORT_ALREADY_RUNNING } from "../src/adapters/export-notice";
 import { BOOK_GROUP_LABEL } from "../src/core/delivery/report";
 import type { EpubExportSettings } from "../src/adapters/settings";
 import { PREVIEW_UNKNOWNS } from "../src/core/book/export-preview";
@@ -987,6 +988,23 @@ describe("exportLinked", () => {
     expect(epub2.spineCount(epub2.opf)).toBe(4);
     expect(epub2.nav).toContain(">d<");
   });
+
+  // Obsidian's resolvedLinks counts [[b#Intro]] as a link to b, so the walk pulls b into the
+  // book and b's backlink trail names a. The vault stub models that (and its
+  // getFirstLinkpathDest refuses "b#Intro", like the real one), so the link in a's own text
+  // must be a real link too — not the plain text it used to become.
+  it("a heading link pulls its target in AND stays a working link in the text", async () => {
+    const { app, root } = await buildVault({
+      "linked/a.md": "Start note: see [[b#Intro]] for the rest.\n",
+      "linked/b.md": "# b\n\n## Intro\n\nLeaf note b.\n",
+    });
+    await makePlugin(app).exportLinked(tfile(root, "linked/a.md"));
+
+    const epub = await readEpub("a.epub");
+    expect(epub.spineCount(epub.opf)).toBe(2);
+    expect(await epub.chapter(2)).toContain('<a href="chapter_001.xhtml">a</a>');
+    expect(await epub.chapter(1)).toContain('href="chapter_002.xhtml"');
+  });
 });
 
 // ── backlink trail (specs/001-breadcrumb-trail) ─────────────────────────
@@ -1100,7 +1118,7 @@ describe("backlink trail", () => {
 });
 
 describe("cover art", () => {
-  it("case 6: embeds a downloaded cover with the extension matching its content-type", async () => {
+  it("case 6: embeds a downloaded cover with the extension matching what the file is", async () => {
     const { app, root } = await buildVault({
       "cover_note.md": ["---", 'coverUrl: "https://example.com/cover.jpg"', "---", "", "Body text.", ""].join(
         "\n"
@@ -1111,7 +1129,7 @@ describe("cover art", () => {
     setRequestUrlImpl(async () => ({
       status: 200,
       headers: { "content-type": "image/jpeg" },
-      arrayBuffer: new Uint8Array([1, 2, 3, 4]).buffer,
+      arrayBuffer: jpegBytes({ width: 1, height: 1 }).buffer as ArrayBuffer,
       text: "",
       json: null,
     }));
@@ -1123,7 +1141,7 @@ describe("cover art", () => {
     setRequestUrlImpl(async () => ({
       status: 200,
       headers: { "content-type": "image/png" },
-      arrayBuffer: new Uint8Array([5, 6, 7, 8]).buffer,
+      arrayBuffer: pngBytes({ width: 1, height: 1 }).buffer as ArrayBuffer,
       text: "",
       json: null,
     }));
@@ -1312,6 +1330,31 @@ describe("cover degradation (declared cover: failures)", () => {
     expect(epub.names).not.toContain("OEBPS/images/cover.jpg");
     expect(epub.opf).not.toContain('properties="cover-image"');
     expect(warnings.some((w) => w.includes("cover download failed"))).toBe(true);
+  });
+
+  // A cover: URL that answers 200 with a page (hotlink protection, a soft 404) used to be
+  // embedded as cover.jpg, which epubcheck rejects (OPF-029 / PKG-021). It is now no cover, said
+  // plainly, and the book keeps no trace of a cover at all.
+  it("warns and exports coverless when a remote cover: URL answers with a page, not a picture", async () => {
+    const { app, root } = await buildVault({
+      "page_note.md": ["---", 'cover: "https://example.com/cover.jpg"', "---", "", "Body.", ""].join("\n"),
+    });
+    const page = new TextEncoder().encode("<!doctype html><html>Access denied</html>");
+    setRequestUrlImpl(async () => ({
+      status: 200,
+      headers: { "content-type": "image/jpeg" },
+      arrayBuffer: page.buffer.slice(page.byteOffset, page.byteOffset + page.byteLength) as ArrayBuffer,
+      text: "",
+      json: null,
+    }));
+    await makePlugin(app).exportSingle(tfile(root, "page_note.md"));
+    const epub = await readEpub("page_note.epub");
+    expect(epub.names.filter((name) => name.startsWith("OEBPS/images/cover."))).toEqual([]);
+    expect(epub.names).not.toContain("OEBPS/text/cover.xhtml");
+    expect(epub.opf).not.toContain("cover-image");
+    expect(
+      warnings.some((w) => w.includes("cover download failed") && w.includes("not a PNG, JPEG or WebP"))
+    ).toBe(true);
   });
 
   it("normalizes a .jpeg cover: reference to the canonical jpg asset name", async () => {
@@ -2198,10 +2241,11 @@ describe("failure paths", () => {
     expect(successNotices()).toHaveLength(1);
   });
 
-  it("a cover response with no content-type header at all still embeds, defaulting to jpg", async () => {
-    // Exercises `(res.headers["content-type"] ?? "").includes("png")`'s own
-    // `?? ""` fallback for real (a server that omits the header entirely),
-    // rather than every cover test so far which always sets one.
+  it("a cover response with no content-type header at all still embeds, labelled by its own bytes", async () => {
+    // A server that omits the header entirely says nothing about the file, so the
+    // label comes from the bytes (sniffCoverExt) — here a real JPEG start, so jpg.
+    // This case used to assert "defaulting to jpg" for the bytes [1, 2, 3, 4], i.e.
+    // that ANY body was written in as a JPEG, which is the defect it now guards.
     const { app, root } = await buildVault({
       "cover_no_header.md": ["---", 'coverUrl: "https://example.com/cover"', "---", "", "Body.", ""].join(
         "\n"
@@ -2210,7 +2254,7 @@ describe("failure paths", () => {
     setRequestUrlImpl(async () => ({
       status: 200,
       headers: {},
-      arrayBuffer: new Uint8Array([1, 2, 3, 4]).buffer,
+      arrayBuffer: jpegBytes({ width: 1, height: 1 }).buffer as ArrayBuffer,
       text: "",
       json: null,
     }));
@@ -4954,5 +4998,206 @@ describe("018: a note whose text carries a character XML cannot hold", () => {
     // A tab is a legal XML character and must survive: only the forbidden set is
     // replaced.
     expect(await epub.chapter(1)).toContain("body\twith a tab");
+  });
+});
+
+// ── one export at a time ──────────────────────────────────────────────────
+//
+// Two exports of one book finish together and each writes the same file. Measured only
+// synthetically — two concurrent `fs.writeFile`s of buffers sharing a body and differing in
+// their last bytes — 10–16 of 40 trials left a mix of both buffers; not reproduced inside
+// Obsidian. The preview and library windows already ignore a second tap on their own button;
+// nothing stopped the palette, a hotkey or the file menu from starting a second export. So the
+// PLUGIN refuses one.
+//
+// An export is held in flight at its cover download: that is before anything is written, so the
+// test decides exactly when it ends and needs no real waiting.
+
+/** A cover server whose `heldRequest`-th answer waits for `release()`; every other answer is immediate. */
+function holdCoverRequest(heldRequest: number) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requests = 0;
+  setRequestUrlImpl(async () => {
+    requests += 1;
+    if (requests === heldRequest) await gate;
+    const png = pngBytes({ width: 1, height: 1 });
+    return {
+      status: 200,
+      headers: { "content-type": "image/png" },
+      arrayBuffer: png.buffer as ArrayBuffer,
+      text: "",
+      json: null,
+    };
+  });
+  return { release, requests: () => requests };
+}
+
+const coverIndex = (title: string, url: string) =>
+  `---\ntags: [book, main]\ncover: "${url}"\n---\n\n# ${title}\n`;
+
+const busyNotices = () => NOTICES.filter((notice) => notice === EXPORT_ALREADY_RUNNING);
+
+describe("one export at a time", () => {
+  const BUSY_BOOK = {
+    "Busy/Busy.md": coverIndex("Busy", "https://example.com/c.png"),
+    "Busy/01 One.md": "# One\n\nBody.\n",
+  };
+
+  it("an export asked for while another is running is refused with a notice, and starts nothing", async () => {
+    const { app, root } = await buildVault(BUSY_BOOK);
+    const plugin = makePlugin(app);
+    const cover = holdCoverRequest(1);
+    const first = plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+    await vi.waitFor(() => expect(cover.requests()).toBe(1));
+
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md")); // comes back without waiting for the first
+
+    expect(busyNotices()).toHaveLength(1);
+    expect(cover.requests()).toBe(1);
+    cover.release();
+    await first;
+    expect(await outDirEntries()).toEqual(["busy.epub"]);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  // Every way of starting an export is covered, not only the one that happened to be pressed
+  // twice: a book export, a folder export, the Export button of a preview, and Export all.
+  it.each([
+    [
+      "export note + linked notes",
+      async () => {},
+      (plugin: EpubExportPlugin, root: string) => plugin.exportLinked(tfile(root, "Busy/Busy.md")),
+    ],
+    [
+      "export folder",
+      async () => {},
+      (plugin: EpubExportPlugin, root: string) => plugin.exportFolder(tfolder(root, "Busy")),
+    ],
+    [
+      "Export in a preview window",
+      (plugin: EpubExportPlugin, root: string) => plugin.previewFolder(tfolder(root, "Busy")),
+      (plugin: EpubExportPlugin) => pressExport(plugin, previewWindow()),
+    ],
+    [
+      "Export all in the library window",
+      (plugin: EpubExportPlugin) => plugin.exportAllBooks(),
+      (plugin: EpubExportPlugin) => pressExportAll(plugin),
+    ],
+  ])(
+    "%s is refused while an export is running",
+    async (_name, prepare: (p: EpubExportPlugin, r: string) => Promise<void>, attempt) => {
+      const { app, root } = await buildVault(BUSY_BOOK);
+      const plugin = makePlugin(app);
+      await prepare(plugin, root); // opens the window whose button is pressed below
+      const cover = holdCoverRequest(1);
+      const first = plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+      await vi.waitFor(() => expect(cover.requests()).toBe(1));
+
+      await attempt(plugin, root);
+
+      expect(busyNotices()).toHaveLength(1);
+      expect(cover.requests()).toBe(1);
+      cover.release();
+      await first;
+      expect(await outDirEntries()).toEqual(["busy.epub"]);
+    }
+  );
+
+  it("five requests at once run exactly one export", async () => {
+    const { app, root } = await buildVault(BUSY_BOOK);
+    const plugin = makePlugin(app);
+    const cover = holdCoverRequest(1);
+    const first = plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+    await vi.waitFor(() => expect(cover.requests()).toBe(1));
+
+    await Promise.all(Array.from({ length: 4 }, () => plugin.exportSingle(tfile(root, "Busy/Busy.md"))));
+
+    expect(busyNotices()).toHaveLength(4);
+    cover.release();
+    await first;
+    expect(cover.requests()).toBe(1);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  it("is free again once an export has finished", async () => {
+    const { app, root } = await buildVault(BUSY_BOOK);
+    const plugin = makePlugin(app);
+
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+
+    expect(busyNotices()).toEqual([]);
+    expect(successNotices()).toHaveLength(2);
+  });
+
+  it("is free again after an export that failed to write", async () => {
+    const { app, root } = await buildVault(BUSY_BOOK);
+    const plugin = makePlugin(app);
+    // An output "folder" that is really a file: writing the book must fail.
+    const blocker = join(outDir, "not-a-folder");
+    await fs.writeFile(blocker, "x");
+    plugin.settings.outputFolder = blocker;
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+    expect(NOTICES.some((notice) => notice.startsWith("EPUB export failed"))).toBe(true);
+
+    plugin.settings.outputFolder = outDir;
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+
+    expect(busyNotices()).toEqual([]);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  it("is free again after an export that threw before the pipeline started", async () => {
+    const { app, root } = await buildVault(BUSY_BOOK);
+    const plugin = makePlugin(app);
+    const cache = app.metadataCache as unknown as { getFileCache: (f: unknown) => unknown };
+    const working = cache.getFileCache.bind(cache);
+    cache.getFileCache = () => {
+      throw new Error("metadata cache unavailable");
+    };
+    await expect(plugin.exportSingle(tfile(root, "Busy/Busy.md"))).rejects.toThrow(
+      "metadata cache unavailable"
+    );
+
+    cache.getFileCache = working;
+    await plugin.exportSingle(tfile(root, "Busy/Busy.md"));
+
+    expect(busyNotices()).toEqual([]);
+    expect(successNotices()).toHaveLength(1);
+  });
+
+  // The window of Export all must hold the whole run, not one book of it: between two books of
+  // the run there is nothing running at that instant, yet an export started there would write
+  // while the run is still going.
+  it("a run over the library holds it for every book, and frees it when the run ends", async () => {
+    const { app, root } = await buildVault({
+      "A/A.md": coverIndex("A", "https://example.com/a.png"),
+      "A/01 One.md": "# One\n",
+      "B/B.md": coverIndex("B", "https://example.com/b.png"),
+      "B/01 Two.md": "# Two\n",
+    });
+    const plugin = makePlugin(app);
+    await plugin.exportAllBooks();
+    const cover = holdCoverRequest(2); // book A answers at once; book B waits
+    const target = plugin as unknown as Record<string, (...a: unknown[]) => Promise<void>>;
+    const original = target.runLibrary.bind(plugin);
+    let run!: Promise<void>;
+    target.runLibrary = (...args) => (run = original(...args));
+    buttonNamed(libraryWindow(), "Export all").click();
+    await vi.waitFor(() => expect(cover.requests()).toBe(2)); // book A is written, book B is in flight
+
+    await plugin.exportSingle(tfile(root, "A/A.md"));
+
+    expect(busyNotices()).toHaveLength(1);
+    expect(cover.requests()).toBe(2);
+    cover.release();
+    await run;
+    expect((await outDirEntries()).sort()).toEqual(["a.epub", "b.epub"]);
+
+    await plugin.exportSingle(tfile(root, "A/A.md"));
+    expect(busyNotices()).toHaveLength(1); // no new refusal: the run released it
   });
 });

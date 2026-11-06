@@ -406,8 +406,12 @@ note for folder exports). Recognised fields:
   Anything else falls back to the **Language** setting.
 
 - **`coverUrl`** — the book's cover image, as a full `http://` or `https://`
-  URL. A cover that fails to download degrades the export to coverless
-  rather than failing it.
+  URL. The downloaded file must really be a PNG, JPEG or WebP: Inkbound goes by
+  the file itself, not by what the server says it is, so an address that
+  answers with a web page (a hotlink-protected image, a login wall) or with a
+  GIF or AVIF gives a book with no cover and a warning in the export report. A
+  cover that fails to download degrades the export to coverless rather than
+  failing it.
 - **`tags: [book, main]`** — for **folder** exports, marks which note in the
   folder is the index/metadata source. If no note is tagged this way,
   Inkbound looks for a note whose filename matches the folder name.
@@ -537,6 +541,11 @@ plugin against exactly this list, so it cannot drift from the code.
   running, so this needs the Bases core plugin enabled. A Base too big to
   render in full is exported as far as it goes, and the report says how many
   rows are missing.
+- **A link to a heading or block opens the chapter, not the spot.** A link like
+  `[[Note#Heading]]` or `[[Note#^block]]` becomes a working link to that note's
+  chapter, but it opens the chapter at its start: the book does not link to the
+  heading itself. A link to a heading of the _same_ note (`[[#Heading]]`) is
+  shown as plain text.
 - **A scoped embed does not bring its footnotes along.** `![[Note#Heading]]` and
   `![[Note^block]]` embed only that part of the note. If a paragraph you embed
   refers to a footnote whose text lives elsewhere in the note, Obsidian shows just

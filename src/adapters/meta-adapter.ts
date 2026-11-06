@@ -14,6 +14,7 @@ import {
   parseCoverValue,
   findImageEmbeds,
   isSupportedCoverExt,
+  sniffCoverExt,
   declaredCover,
   planCoverFromEmbeds,
   type CoverPlan,
@@ -150,15 +151,23 @@ export class NoteMetaSource {
     }
   }
 
-  // Remote cover: fetch and sniff png/webp from the content-type; anything
-  // else is treated as jpeg (existing coverUrl behavior, extended with webp).
+  // Remote cover: fetch it and decide what it is from its own bytes (sniffCoverExt),
+  // never from the content-type. A 200 can carry a page, a GIF or an AVIF, and
+  // writing any of those in as cover.jpg makes the whole book invalid, so anything
+  // that is not a PNG, JPEG or WebP is a warning and a coverless book — the same
+  // degradation every other cover failure gets.
   private async downloadCover(meta: ExportMeta, url: string, warn: (message: string) => void): Promise<void> {
     try {
       const res = await requestUrl({ url, throw: false });
       if (res.status === 200) {
-        const contentType = res.headers["content-type"] ?? "";
-        meta.coverBytes = new Uint8Array(res.arrayBuffer);
-        meta.coverExt = contentType.includes("png") ? "png" : contentType.includes("webp") ? "webp" : "jpg";
+        const bytes = new Uint8Array(res.arrayBuffer);
+        const ext = sniffCoverExt(bytes);
+        if (ext === null) {
+          warn(`cover download failed: ${url} (not a PNG, JPEG or WebP image)`);
+          return;
+        }
+        meta.coverBytes = bytes;
+        meta.coverExt = ext;
       } else {
         warn(`cover download failed: ${url} (status ${res.status})`);
       }

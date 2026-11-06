@@ -101,6 +101,33 @@ export function isSupportedCoverExt(ext: string): boolean {
   return COVER_EXTS.includes(ext.toLowerCase());
 }
 
+// The first bytes of each cover format the book can hold. Only as many as it takes to
+// tell the formats apart, not to prove the picture decodes: this labels a download, it
+// does not validate it (a cut-off PNG is still labelled a PNG).
+const PNG_MARK = [0x89, 0x50, 0x4e, 0x47]; // 0x89 "PNG"
+const JPEG_MARK = [0xff, 0xd8, 0xff];
+const RIFF_MARK = [0x52, 0x49, 0x46, 0x46]; // "RIFF", bytes 0-3
+const WEBP_MARK = [0x57, 0x45, 0x42, 0x50]; // "WEBP", bytes 8-11 (4-7 are the length)
+const WEBP_MARK_OFFSET = 8;
+
+function hasBytesAt(bytes: Uint8Array, mark: readonly number[], offset = 0): boolean {
+  return bytes.length >= offset + mark.length && mark.every((expected, i) => bytes[offset + i] === expected);
+}
+
+/**
+ * What a downloaded cover REALLY is, read from its first bytes, or null when it is not
+ * a PNG, a JPEG or a WebP. A server's content-type is only a claim — a page where the
+ * picture should be (hotlink protection, a soft 404, a login wall), a GIF or an AVIF
+ * all arrive with status 200 — and a cover written in under the wrong name is a book
+ * epubcheck rejects (OPF-029, PKG-021). The bytes win over the header.
+ */
+export function sniffCoverExt(bytes: Uint8Array): "png" | "jpg" | "webp" | null {
+  if (hasBytesAt(bytes, PNG_MARK)) return "png";
+  if (hasBytesAt(bytes, JPEG_MARK)) return "jpg";
+  if (hasBytesAt(bytes, RIFF_MARK) && hasBytesAt(bytes, WEBP_MARK, WEBP_MARK_OFFSET)) return "webp";
+  return null;
+}
+
 // 014-preview-before-export: WHICH cover a book will get, decided apart from
 // fetching it. A preview shows the decision and must not carry it out (no
 // download, no image read), and the export carries out the very decision the
