@@ -3,6 +3,28 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.15.2
+
+Three fixes to how a book is built: links into a heading work, a cover address that is not a
+picture no longer breaks the book, and two exports can no longer start at once.
+
+- **A link into a heading or block now works.** `[[Note#Heading]]` and `[[Note#^block]]` used to
+  turn into plain text in the book, even when that note was in the book and listed under "Linked
+  from". They now link to that note's chapter. They open the chapter at its start, not at the
+  heading itself, and the README says so under "Known limitations". A link to a heading of the
+  _same_ note (`[[#Heading]]`) is still shown as plain text.
+- **A cover address that does not return a picture no longer makes an invalid book.** A
+  downloaded cover is now recognised by the file itself, not by what the server says it is. An
+  address that answers with a web page (hotlink protection, a login wall), a GIF or an AVIF gives
+  a book with no cover and a line in the export report saying why. Before, that file was written
+  into the book as a JPEG and the book failed EPUB validation.
+- **Only one export runs at a time.** Starting an export while another is still running now shows
+  "Another export is still running — wait for it to finish." Before, two exports of one book could
+  write the same file at once. **Export all books** holds this for the whole run, not one book at a
+  time.
+- **No other change to any book you export.** A book with no heading link and no URL cover is
+  built exactly as before.
+
 ## 1.15.1
 
 Documentation and review hygiene — nothing about how books are exported changes.
