@@ -6,7 +6,7 @@
 // compare entry by entry" (CLAUDE.md, tests/fixtures/epub-fingerprint.ts).
 // Injecting the identity makes the artifact reproducible, which is what lets
 // these tests compare the actual bytes instead of fingerprinting around them.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { EpubBuilder } from "../src/core/epub/epub";
 import { systemBookIdentity, type BookIdentity } from "../src/core/epub/book-identity";
@@ -50,6 +50,21 @@ describe("a fixed identity makes the built book byte-identical", () => {
     expect(second).toEqual(first);
   });
 
+  describe("when the clock moves between two builds", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("still produces the same bytes", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-11-21T04:00:10Z"));
+      const first = await buildBook(FIXED_IDENTITY);
+      vi.setSystemTime(new Date("2026-11-21T04:00:20Z"));
+      const second = await buildBook(FIXED_IDENTITY);
+      expect(second).toEqual(first);
+    });
+  });
+
   it("produces different bytes once any part of the identity changes", async () => {
     const base = await buildBook(FIXED_IDENTITY);
     const otherUuid = await buildBook({
@@ -66,9 +81,15 @@ describe("a fixed identity makes the built book byte-identical", () => {
 
   it("stamps every ZIP entry with the identity's date, not the current clock", async () => {
     const zip = await JSZip.loadAsync(await buildBook(FIXED_IDENTITY));
-    // Directory entries carry no date of their own, so assert over files only.
-    const entries = Object.values(zip.files).filter((entry) => !entry.dir);
-    expect(entries.length).toBeGreaterThan(5); // mimetype, container, opf, nav, css, 2 chapters, 1 asset
+    const entries = Object.values(zip.files);
+    expect(entries.filter((entry) => entry.dir).map((entry) => entry.name)).toEqual([
+      "META-INF/",
+      "OEBPS/",
+      "OEBPS/style/",
+      "OEBPS/text/",
+      "OEBPS/images/",
+    ]);
+    expect(entries.length).toBeGreaterThan(10);
 
     for (const entry of entries) {
       // ZIP stores timestamps in 2-second DOS units, hence the slack.

@@ -165,7 +165,17 @@ export class EpubBuilder {
     data: string | Uint8Array,
     options: JSZip.JSZipFileOptions = {}
   ): void {
+    this.addMissingParentFolders(zip, path);
     zip.file(path, data, { ...options, date: this.identity.zipDate });
+  }
+
+  private addMissingParentFolders(zip: JSZip, path: string): void {
+    const folderNames = path.split("/").slice(0, -1);
+    folderNames.forEach((_, depth) => {
+      const folderPath = `${folderNames.slice(0, depth + 1).join("/")}/`;
+      if (zip.files[folderPath] !== undefined) return;
+      zip.file(folderPath, null, { dir: true, date: this.identity.zipDate });
+    });
   }
 
   setNavTree(tree: NavItem[]): void {
