@@ -3,6 +3,32 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.16.0
+
+Dataview blocks no longer vanish without a word, and no form of them runs inside an export.
+
+- **Every Dataview block is reported.** A ` ```dataview ` query or ` ```dataviewjs ` block
+  cannot be carried into a book. Until now it was replaced by "[dynamic content omitted]"
+  and the export report said nothing. Now each one adds a line to the report, under the note
+  it is written in (an embedded note's block is listed under that note), and the export
+  notice counts it like any other warning.
+- **The marker says what is missing.** In the book, the block's place now reads
+  `[Dataview query omitted]` or `[DataviewJS omitted]`, styled like the Bases marker. Books
+  that contain a Dataview block show the new wording after you re-export them.
+- **Every way of writing the block is recognised.** Tilde fences (`~~~dataview`), longer
+  fences (` ````dataview `), a word after the language, and blocks inside a callout, a
+  quotation or a list item are all handled. Before, some of these slipped through and
+  Dataview ran them while the book was being built. That could leave "Loading..." in the
+  book, or, if you had DataviewJS enabled, run its code. Neither can happen now: Inkbound
+  never runs a Dataview block.
+- **Code samples about Dataview are left alone.** A ` ````markdown ` example that shows a
+  query used to lose the query. A four-backtick block came out as stray backticks. Both
+  now come through exactly as written. So does a ` ```Dataview ` block with a capital D,
+  which Obsidian itself shows as an ordinary code block.
+- **Books without Dataview are unchanged**, entry for entry.
+- **Not yet checked on a Boox.** How the new markers look on a device is listed in
+  `docs/DEVELOPMENT.md` as still to be checked by hand.
+
 ## 1.15.2
 
 Three fixes to how a book is built: links into a heading work, a cover address that is not a
