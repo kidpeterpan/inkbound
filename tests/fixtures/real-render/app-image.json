@@ -2,10 +2,10 @@
   "name": "app-image",
   "covers": "the app:// image src branch of rewriteImages, for a wikilink embed and a markdown image",
   "method": "obsidian vault=<name> eval → dataview api.renderValue (Obsidian's real MarkdownRenderer), detached element, nothing written to the vault; the vault's absolute path is replaced by /VAULT",
-  "obsidianVersion": "1.14.5",
-  "capturedAt": "2026-11-04",
+  "obsidianVersion": "1.15.1",
+  "capturedAt": "2026-11-21",
   "basePath": "/VAULT",
-  "sourceMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
-  "renderedMarkdown": "![[99. temp/Test Book/assets/pic.png]]\n\n![caption](99.%20temp/Test%20Book/assets/pic.png)\n",
-  "html": "<p dir=\"auto\"><span alt=\"99. temp/Test Book/assets/pic.png\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"99. temp/Test Book/assets/pic.png\" src=\"app://bd20b09cc114504be912cbd0c5f7b4dd9f56/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>\n<p dir=\"auto\"><span alt=\"caption\" src=\"99. temp/Test Book/assets/pic.png\" class=\"internal-embed media-embed image-embed is-loaded\"><img alt=\"caption\" src=\"app://bd20b09cc114504be912cbd0c5f7b4dd9f56/VAULT/99.%20temp/Test%20Book/assets/pic.png?1788748124407\"></span></p>"
+  "sourceMarkdown": "![[Inkbound Capture/pixel.png]]\n\n![caption](Inkbound%20Capture/pixel.png)\n",
+  "renderedMarkdown": "![[Inkbound Capture/pixel.png]]\n\n![caption](Inkbound%20Capture/pixel.png)\n",
+  "html": "<p dir=\"auto\"><span class=\"internal-embed media-embed image-embed is-loaded\" src=\"Inkbound Capture/pixel.png\" alt=\"Inkbound Capture/pixel.png\"><img alt=\"Inkbound Capture/pixel.png\" src=\"app://468e9905a8af96f084e29eb8cc44faa57707/VAULT/Inkbound%20Capture/pixel.png?1795240824795\"></span></p>\n<p dir=\"auto\"><span class=\"internal-embed media-embed image-embed is-loaded\" src=\"Inkbound Capture/pixel.png\" alt=\"caption\"><img alt=\"caption\" src=\"app://468e9905a8af96f084e29eb8cc44faa57707/VAULT/Inkbound%20Capture/pixel.png?1795240824795\"></span></p>"
 }
