@@ -15,6 +15,7 @@
 // HOW TO RUN (a maintainer task, not a CI step — it needs a running Obsidian):
 //   npm run capture-real-render                # vault "pan_vault"
 //   npm run capture-real-render -- --vault=X   # another vault
+//   npm run capture-real-render -- --png="Some Folder/pixel.png"
 // Requirements: the `obsidian` CLI on PATH, that vault open, and the
 // dataview community plugin enabled in it (`require("obsidian")` is not
 // available inside `eval`, which is why dataview is the route to the real
@@ -33,8 +34,10 @@
 // PORTABILITY of the output: the vault's absolute path appears inside every
 // app:// image URL, so it is replaced with the token /VAULT in both the
 // captured HTML and the recorded basePath — the fixtures carry no home
-// directory. The image snippet references whichever .png the vault holds
-// first; its path is recorded in the fixture's markdown fields.
+// directory. The image snippet's .png path is recorded in the fixture's
+// markdown fields, and the repo is public: pass --png=<vault path> to name an
+// invented image put there for the capture. Without it the snippet falls back
+// to whichever .png the vault holds first, which can be a real file's name.
 
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -52,7 +55,8 @@ interface Snippet {
   markdown: string;
 }
 
-// {{PNG}} is replaced inside Obsidian with the first .png the vault has;
+// {{PNG}} is replaced inside Obsidian with the --png image, or else the first
+// .png the vault has;
 // {{PNG_URL}} with the same path percent-encoded, as a markdown image needs.
 const SNIPPETS: Snippet[] = [
   {
@@ -128,12 +132,19 @@ function preRender(source: string): string {
 }
 
 // Runs inside Obsidian. Kept as a plain string so nothing here is bundled.
-function program(snippets: { name: string; covers: string; source: string; rendered: string }[]): string {
+function program(
+  snippets: { name: string; covers: string; source: string; rendered: string }[],
+  requestedPng: string | null
+): string {
   return `(async () => {
   const dv = app.plugins.plugins.dataview;
   if (!dv) throw new Error("the dataview plugin must be enabled in this vault");
-  const png = app.vault.getFiles().find((f) => f.extension === "png");
-  const pngPath = png ? png.path : "missing.png";
+  const requestedPng = ${JSON.stringify(requestedPng)};
+  if (requestedPng && !app.vault.getAbstractFileByPath(requestedPng)) {
+    throw new Error("--png names a file the vault does not have: " + requestedPng);
+  }
+  const png = requestedPng ? null : app.vault.getFiles().find((f) => f.extension === "png");
+  const pngPath = requestedPng ?? (png ? png.path : "missing.png");
   const fill = (s) => s.replace(/\\{\\{PNG\\}\\}/g, pngPath).replace(/\\{\\{PNG_URL\\}\\}/g, pngPath.replace(/ /g, "%20"));
   const results = [];
   for (const s of ${JSON.stringify(snippets)}) {
@@ -158,6 +169,8 @@ function main(): void {
   const vault = vaultArg ? vaultArg.slice("--vault=".length) : "pan_vault";
   const outArg = process.argv.find((a) => a.startsWith("--out="));
   const outDir = outArg ? outArg.slice("--out=".length) : join("tests", "fixtures", "real-render");
+  const pngArg = process.argv.find((a) => a.startsWith("--png="));
+  const requestedPng = pngArg ? pngArg.slice("--png=".length) : null;
 
   const version = spawnSync("obsidian", ["version"], { encoding: "utf8" });
   // "1.13.7 (installer 1.12.7)" — the first token is the app; the user agent
@@ -170,7 +183,7 @@ function main(): void {
     source: s.markdown,
     rendered: preRender(s.markdown),
   }));
-  const run = spawnSync("obsidian", [`vault=${vault}`, "eval", `code=${program(prepared)}`], {
+  const run = spawnSync("obsidian", [`vault=${vault}`, "eval", `code=${program(prepared, requestedPng)}`], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
   });
