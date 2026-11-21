@@ -3,6 +3,19 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.16.1
+
+A fix to how the book file is put together, with no change to what any book contains.
+
+- **A book built twice from the same notes is now identical every time.** The folders inside
+  the `.epub` file (`META-INF/`, `OEBPS/` and the ones below it) were stamped with the moment
+  the book was built, while every file in them carried the book's own date. Two builds that fell
+  on either side of a two-second boundary therefore came out different, which made one of the
+  release checks fail at random (it stopped the first run of the 1.16.0 release). The folders
+  now carry the same date as the files.
+- **No change to what you read.** The chapters, pictures, table of contents and metadata are
+  untouched, and so is the list of files inside the book. Only the date on its folders changed.
+
 ## 1.16.0
 
 Dataview blocks no longer vanish without a word, and no form of them runs inside an export.
