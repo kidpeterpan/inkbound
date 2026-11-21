@@ -17,7 +17,6 @@ import { footnoteSourceWarnings, processFootnotes, scanFootnoteSource } from "..
 import type { ChapterImage } from "../core/types";
 import {
   stripFrontmatter,
-  stripDynamicBlocks,
   cleanupDom,
   splitEmbedTarget,
   isImageEmbedSrc,
@@ -39,6 +38,7 @@ import {
   type ListItemInfo,
 } from "../core/render";
 import { protectMath, renderMath, type MathSpan } from "../core/content/math";
+import { protectDataview, resolveDataviewPlaceholders, type SinkBlock } from "../core/content/dataview";
 import { getBaseRenderer } from "./bases-adapter";
 
 // Adapts real Obsidian's CachedMetadata shapes (position.start.line-based)
@@ -118,6 +118,11 @@ interface MathSink {
   spans: MathSpan[];
 }
 
+interface DataviewSink {
+  counter: { next: number };
+  blocks: SinkBlock[];
+}
+
 // State threaded through an embed expansion that does not change between
 // recursion levels: the Obsidian runtime, the chapter's link/image bookkeeping,
 // and the shared math accumulator.
@@ -127,6 +132,7 @@ interface EmbedPipeline {
   hrefByPath: Map<string, string>;
   basePath: string;
   math: MathSink;
+  dataview: DataviewSink;
 }
 
 interface EmbeddedImage {
@@ -270,7 +276,7 @@ type EmbedSource = { ok: true; md: string } | { ok: false; reason: "heading-not-
 // heading/block-scoped embed (`![[Note#Heading]]`, `![[Note^block]]`) selects.
 function embedSource(app: App, dest: TFile, target: EmbedTarget, rawMd: string): EmbedSource {
   if (!target.heading && !target.block) {
-    return { ok: true, md: stripDynamicBlocks(stripFrontmatter(rawMd)) };
+    return { ok: true, md: stripFrontmatter(rawMd) };
   }
   const mdLines = rawMd.split(/\r?\n/);
   const cache = app.metadataCache.getFileCache(dest);
@@ -292,7 +298,7 @@ function embedSource(app: App, dest: TFile, target: EmbedTarget, rawMd: string):
     if ("fromListItem" in loc && loc.fromListItem) sliced = dedentBlock(sliced);
     sliced = stripBlockMarker(sliced, target.block);
   }
-  return { ok: true, md: stripDynamicBlocks(sliced) };
+  return { ok: true, md: sliced };
 }
 
 function offsetMathPlaceholderIndices(md: string, offset: number): string {
@@ -326,6 +332,15 @@ function protectIntoChapter(md: string, sink: MathSink): string {
   );
   sink.counter.next += protectedMd.spans.length;
   return offset === 0 ? protectedMd.md : offsetMathPlaceholderIndices(protectedMd.md, offset);
+}
+
+function protectDataviewIntoChapter(md: string, sink: DataviewSink, notePath: string): string {
+  const protectedMd = protectDataview(md, sink.counter.next);
+  protectedMd.blocks.forEach((block, position) => {
+    sink.blocks.push({ index: sink.counter.next + position, kind: block.kind, notePath, fence: block.fence });
+  });
+  sink.counter.next += protectedMd.blocks.length;
+  return protectedMd.md;
 }
 
 // Finalises one run of rendered DOM: wikilinks become chapter hrefs, images
@@ -364,6 +379,7 @@ async function expandMarkdownEmbed(
 ): Promise<EmbedExpansion> {
   const warnings: string[] = [];
   const spansBefore = pipeline.math.spans.length;
+  const dataviewBlocksBefore = pipeline.dataview.blocks.length;
   try {
     const rawMd = await pipeline.app.vault.cachedRead(dest);
     const source = embedSource(pipeline.app, dest, target, rawMd);
@@ -376,13 +392,14 @@ async function expandMarkdownEmbed(
     // that lives elsewhere in the note). Obsidian's renderer then shows just the bare label
     // and the DOM keeps no trace, so the problem is only visible here, in the slice's source.
     // Named for the embedded note (`dest.path`), whose source holds it.
-    warnings.push(...footnoteSourceWarnings(scanFootnoteSource(source.md), dest.path));
+    const embedMd = protectDataviewIntoChapter(source.md, pipeline.dataview, dest.path);
+    warnings.push(...footnoteSourceWarnings(scanFootnoteSource(embedMd), dest.path));
 
     const ourDiv = wrapper.createDiv();
     ourDiv.setAttribute(EMBED_RENDERED_ATTR, "");
     await MarkdownRenderer.render(
       pipeline.app,
-      protectIntoChapter(source.md, pipeline.math),
+      protectIntoChapter(embedMd, pipeline.math),
       ourDiv,
       dest.path,
       pipeline.component
@@ -412,6 +429,7 @@ async function expandMarkdownEmbed(
     // it no longer exist and must not be counted. The counter itself is not
     // rolled back: placeholder indices only need to be unique, not dense.
     pipeline.math.spans.length = spansBefore;
+    pipeline.dataview.blocks.length = dataviewBlocksBefore;
     wrapper.setAttribute("data-embed-reason", "render-failed");
     wrapper.setAttribute("data-embed-detail", errorMessage(e));
     return { warnings, images: [] };
@@ -445,6 +463,7 @@ interface ChapterBuild {
   images: ChapterImage[];
   nextImageNumber: number;
   math: MathSink;
+  dataview: DataviewSink;
 }
 
 // Phase 1 — steps 2-4 of the pipeline: render the note, render our own copy
@@ -470,6 +489,7 @@ async function renderChapterDom(
   build.images.push(...embedRewrite.images);
   build.nextImageNumber += embedRewrite.images.length;
 
+  build.warnings.push(...resolveDataviewPlaceholders(el, build.dataview.blocks));
   build.warnings.push(...cleanupDom(el).map(attributedTo(sourcePath)));
 }
 
@@ -535,22 +555,27 @@ function finalizeChapterFootnotes(build: ChapterBuild, el: HTMLElement, tocDepth
  * THE PAGE PIPELINE RUNS IN THIS ORDER, and two of these steps are
  * order-sensitive in ways that are not obvious from the calls alone:
  *
- *   1. protectMath             — placeholders in, before any renderer sees $…$
- *   2. MarkdownRenderer.render — the real renderer, once per note      ┐
- *   3. populateEmbeds          — our own copy of every embedded note   ├ renderChapterDom
- *   4. cleanupDom              — flattenEmbeds + chrome + Bases        ┘
- *   5. rewriteLinks            — wikilinks -> sibling chapter hrefs    ┐ finalizeChapterLinks
- *   6. rewriteImages           — vault images -> numbered ../images/…  ┘
- *   7. rasterizeMermaidDiagrams— Mermaid -> PNG                        ┐ finalizeChapterMedia
- *   8. renderMath              — placeholders -> PNG                   ┘
- *   9. processFootnotes        — every note -> one EPUB 3 notes area   ┐ finalizeChapterFootnotes
- *  10. collectHeadingToc       — heading ids + nav entries (depth > 0) ┘
- *  11. serializeBody           — the finished XHTML (below)
+ *   1. protectDataview         — Dataview blocks -> placeholders, so Dataview never runs
+ *   2. protectMath             — placeholders in, before any renderer sees $…$
+ *   3. MarkdownRenderer.render — the real renderer, once per note      ┐
+ *   4. populateEmbeds          — our own copy of every embedded note   │ renderChapterDom
+ *   5. resolveDataviewPlaceholders — placeholders -> omission markers  │
+ *   6. cleanupDom              — flattenEmbeds + chrome + Bases        ┘
+ *   7. rewriteLinks            — wikilinks -> sibling chapter hrefs    ┐ finalizeChapterLinks
+ *   8. rewriteImages           — vault images -> numbered ../images/…  ┘
+ *   9. rasterizeMermaidDiagrams— Mermaid -> PNG                        ┐ finalizeChapterMedia
+ *  10. renderMath              — placeholders -> PNG                   ┘
+ *  11. processFootnotes        — every note -> one EPUB 3 notes area   ┐ finalizeChapterFootnotes
+ *  12. collectHeadingToc       — heading ids + nav entries (depth > 0) ┘
+ *  13. serializeBody           — the finished XHTML (below)
  *
  * The load-bearing constraints: footnotes must run AFTER flattenEmbeds (each
  * embed brings its own `section.footnotes` into the DOM) and BEFORE heading
  * ids (so heading text can exclude markers and ids can avoid the footnote
- * ids). Steps 3-8 all stamp `<img>` hrefs into the chapter, so they share ONE
+ * ids). Dataview blocks are protected BEFORE math and the footnote scan, so a
+ * `$` or `[^1]` inside a query is never read as either, and resolved AFTER
+ * every embed is populated, while each embed's placeholders are still in the
+ * DOM. Steps 4-10 all stamp `<img>` hrefs into the chapter, so they share ONE
  * running image counter (ChapterBuild.nextImageNumber), advanced in step order.
  */
 export async function renderUnitToChapter(
@@ -568,8 +593,9 @@ export async function renderUnitToChapter(
     images: [],
     nextImageNumber: startImageIndex,
     math: { counter: { next: 0 }, spans: [] },
+    dataview: { counter: { next: 0 }, blocks: [] },
   };
-  const md = stripDynamicBlocks(stripFrontmatter(markdown));
+  const md = protectDataviewIntoChapter(stripFrontmatter(markdown), build.dataview, sourcePath);
   // 011-footnote-semantics: orphan footnotes in the host note itself. See the matching call
   // in populateEmbeds for why this reads the source rather than the rendered DOM.
   build.warnings.push(...footnoteSourceWarnings(scanFootnoteSource(md), sourcePath));
@@ -578,7 +604,14 @@ export async function renderUnitToChapter(
   // into the DOM. Indices stay chapter-unique via the shared sink as embeds
   // add their own spans.
   const protectedMd = protectIntoChapter(md, build.math);
-  const pipeline: EmbedPipeline = { app, component, hrefByPath, basePath, math: build.math };
+  const pipeline: EmbedPipeline = {
+    app,
+    component,
+    hrefByPath,
+    basePath,
+    math: build.math,
+    dataview: build.dataview,
+  };
   // Obsidian's createEl (ambient Node.prototype augmentation installed by the
   // real app before plugin code runs — see tests/fixtures/obsidian-stub.ts's
   // polyfill of the same) both creates the element and appends it to `this`

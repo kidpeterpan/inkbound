@@ -22,7 +22,7 @@
 // detached element. Re-run after an Obsidian upgrade and commit the diff.
 //
 // FAITHFULNESS: the renderer is handed what renderUnitToChapter hands it —
-// the source after stripFrontmatter, stripDynamicBlocks and protectMath — so
+// the source after stripFrontmatter, protectDataview and protectMath — so
 // the captured markup is what the pure passes see in production. Both the
 // original (`sourceMarkdown`) and what was rendered (`renderedMarkdown`) are
 // recorded. Two dataview artefacts are undone or noted: its bare wrapper
@@ -40,7 +40,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { protectMath } from "../src/core/content/math";
-import { stripDynamicBlocks, stripFrontmatter } from "../src/core/render";
+import { protectDataview } from "../src/core/content/dataview";
+import { stripFrontmatter } from "../src/core/render";
 
 export const BASE_PATH_TOKEN = "/VAULT";
 
@@ -123,7 +124,7 @@ const SNIPPETS: Snippet[] = [
 
 /** What renderUnitToChapter does to the source before MarkdownRenderer sees it. */
 function preRender(source: string): string {
-  return protectMath(stripDynamicBlocks(stripFrontmatter(source))).md;
+  return protectMath(protectDataview(stripFrontmatter(source)).md).md;
 }
 
 // Runs inside Obsidian. Kept as a plain string so nothing here is bundled.

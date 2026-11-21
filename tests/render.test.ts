@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   stripFrontmatter,
-  stripDynamicBlocks,
   cleanupDom,
   flattenEmbeds,
   splitEmbedTarget,
@@ -139,16 +138,6 @@ describe("stripFrontmatter", () => {
   });
   it("leaves body-only notes alone", () => {
     expect(stripFrontmatter("# Hi\n---\nrule")).toBe("# Hi\n---\nrule");
-  });
-});
-
-describe("stripDynamicBlocks", () => {
-  it("replaces dataview fences", () => {
-    const md = "before\n```dataview\nLIST\n```\nafter";
-    expect(stripDynamicBlocks(md)).toBe("before\n*[dynamic content omitted]*\nafter");
-  });
-  it("replaces dataviewjs fences too", () => {
-    expect(stripDynamicBlocks("```dataviewjs\ndv.list()\n```")).toBe("*[dynamic content omitted]*");
   });
 });
 

@@ -22,7 +22,8 @@ import {
   setSvgRasterizer,
 } from "../src/core/render";
 import { renderMath, protectMath } from "../src/core/content/math";
-import { stripDynamicBlocks, stripFrontmatter } from "../src/core/render";
+import { protectDataview } from "../src/core/content/dataview";
+import { stripFrontmatter } from "../src/core/render";
 import { processFootnotes } from "../src/core/content/footnotes";
 
 interface RealRenderFixture {
@@ -57,7 +58,7 @@ function mount(html: string): HTMLElement {
 async function runPurePipeline(fixture: RealRenderFixture) {
   // Recomputes the math spans the same way the adapter does, so the fixture
   // only has to record markup — and proves protectMath is deterministic.
-  const protectedMd = protectMath(stripDynamicBlocks(stripFrontmatter(fixture.sourceMarkdown)));
+  const protectedMd = protectMath(protectDataview(stripFrontmatter(fixture.sourceMarkdown)).md);
   expect(protectedMd.md).toBe(fixture.renderedMarkdown);
   const spans = protectedMd.spans;
   const el = mount(fixture.html);

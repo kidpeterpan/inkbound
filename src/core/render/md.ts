@@ -13,10 +13,6 @@ export function stripFrontmatter(md: string): string {
   return m ? md.slice(m[0].length) : md;
 }
 
-export function stripDynamicBlocks(md: string): string {
-  return md.replace(/```dataview(js)?\r?\n[\s\S]*?```/g, "*[dynamic content omitted]*");
-}
-
 // Known-image extensions Obsidian embeds inline as `<img>` rather than as a
 // note transclusion — mirrors media-types.ts's allowlist scope, kept as its
 // own narrow regex here so this pure module doesn't need to import from it.

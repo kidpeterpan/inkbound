@@ -461,6 +461,15 @@ person looking at a book on a reader. These still need one:
 - **The index-note case in real Obsidian.** Marking a book's own index note: the book
   keeps its title, file name and chapter order, and only its first page is gone.
 
+**Dataview blocks (019-dataview-snapshots) — NOT yet verified on a device.** How the
+blocks are recognised was measured in real Obsidian (below), and the shipped bundle
+exports the smoke vault's `Dataview/` fixture with every marker and report line
+asserted (`check-export-works`). Still needs a person:
+
+- **The markers on a Boox.** `[Dataview query omitted]` and `[DataviewJS omitted]`
+  should read like the Bases marker: an italic grey line where the block was, inside
+  a callout or list when the block was there.
+
 A change to any of the areas above should be re-checked by hand before it
 ships; the automated gates cannot see these. (The user-facing limits that
 remain by design — not by lack of verification — are summarized in the
@@ -590,6 +599,38 @@ feed in its own title, next to 015's hardest-legal-shape details, so `npm run ep
 without the fix (verified both ways by hand: FATAL RSC-016 "An invalid XML character (Unicode:
 0xc)" with the rule removed, PASS with it in place). `sanitizeHeadingId` already restricted
 heading ids to XML name characters, which is why a nav fragment link could never carry one.
+
+## Dataview blocks (019)
+
+A Dataview block never reaches Obsidian's renderer during an export.
+`protectDataview` (`src/core/content/dataview.ts`) scans each note's source before
+rendering and replaces every ` ```dataview ` / ` ```dataviewjs ` block with a
+`<span data-inkbound-dataview="N">` placeholder, numbered chapter-wide through the
+`DataviewSink` in `render-adapter.ts`, the same way math placeholders are. After every
+embed is populated, `resolveDataviewPlaceholders` turns each placeholder into a
+`<p class="omitted">` marker and one report line naming the note the block is written
+in. This is "protect, render, resolve", and it is protect-first on purpose: before
+019, a regex removed only some forms, so Dataview ran the rest live inside the export.
+A tilde-fenced `dataviewjs` block would *run its code* for a reader who had enabled
+DataviewJS, and a `TABLE` caught mid-render left `Loading...` in the book.
+
+**What counts as a Dataview block** was measured on Obsidian 1.15.1 with Dataview
+0.5.68 (2026-11-21), and `specs/019-dataview-snapshots/contracts/fence-recognition.md`
+lists every case. In short: CommonMark fences (backtick or tilde, three or more), at
+most three spaces of indentation relative to the enclosing list item, inside quotes
+and callouts. The language is the first word of the info string, matched
+case-sensitively. The scanner tracks *every* fence, so a query shown inside another
+code block is never touched.
+
+**Re-checking after an Obsidian or Dataview upgrade:** create a scratch folder of
+invented notes in a vault with Dataview enabled, render each fence form through
+`app.plugins.plugins.dataview.api.renderValue` via `obsidian eval` (the
+`capture-real-render` route), see which ones produce `div.block-language-dataview`,
+then delete the folder. Never point a query at real notes: this repository is public.
+
+**Inline queries are not touched.** `` `= this.file.name` `` is already evaluated by
+Obsidian's renderer during today's export when Dataview is enabled (measured
+2026-11-21). 019 leaves that as it is.
 
 ## Bundled fonts (.ttf loader trio)
 

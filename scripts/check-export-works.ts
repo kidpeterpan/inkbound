@@ -62,6 +62,14 @@ const BUNDLE = path.join(REPO_ROOT, "main.js");
 const VAULT_ROOT = path.join(REPO_ROOT, "tests", "fixtures", "smoke-vault");
 const BOOK_FOLDER = "Book";
 const FOOTNOTE_FOLDER = "Footnotes";
+const DATAVIEW_FOLDER = "Dataview";
+const EXPECTED_QUERY_MARKERS = 14;
+const EXPECTED_JS_MARKERS = 1;
+const EXPECTED_DATAVIEW_WARNINGS_BY_NOTE: Record<string, number> = {
+  "Dataview/01 Queries.md": 12,
+  "Dataview/Inner.md": 3,
+};
+const VERBATIM_SURVIVORS = ["SAMPLE-QUERY-MUST-SURVIVE", "CAPITAL-D-MUST-SURVIVE", "INDENTED-MUST-SURVIVE"];
 // The footnote warnings the Footnotes fixture is built to provoke, one per problem:
 //   03 Scoped.md  — a reference with no definition anywhere (1), an unused definition (2),
 //                   an embedded slice whose reference lost its definition (3), and an
@@ -221,10 +229,21 @@ async function main(): Promise<void> {
       fail("the shipped bundle's footnote book is not right.", footnoteProblems);
     }
 
+    const dataviewProblems = await checkDataviewBook({
+      createVaultStub,
+      PluginClass,
+      notices: NOTICES,
+      outDir,
+    });
+    if (dataviewProblems.length > 0) {
+      fail("the shipped bundle's Dataview book is not right.", dataviewProblems);
+    }
+
     console.log(
       "check-export-works: PASS — the shipped main.js exported the fixture book end to end " +
         "(3 chapters incl. a nested Part, image, Thai fonts, typeset math, rewritten wikilink), " +
         "and a second, footnote-heavy book with valid, reproducible footnotes; " +
+        "a third book whose Dataview blocks are all reported and whose code samples survive; " +
         "Export all books finds exactly the one book of the smoke vault."
     );
   } finally {
@@ -558,6 +577,63 @@ async function checkFootnoteBook(deps: ExportDeps): Promise<string[]> {
   if (!css.includes(".footnotes"))
     problems.push("epub.css has no footnote rules although the book has footnotes");
   return problems;
+}
+
+async function checkDataviewBook(deps: ExportDeps): Promise<string[]> {
+  const problems: string[] = [];
+  const exported = await exportFolderBook(deps, DATAVIEW_FOLDER);
+  const bytes = readFileSync(exported.epubPath);
+
+  const keepAt = process.env.INKBOUND_KEEP_DATAVIEW_EPUB;
+  if (keepAt) {
+    mkdirSync(path.dirname(path.resolve(keepAt)), { recursive: true });
+    copyFileSync(exported.epubPath, keepAt);
+    console.log(`  [kept] Dataview book copied to ${keepAt}`);
+  }
+
+  const chapters = await chapterDocuments(bytes);
+  const allChapters = chapters.join("\n");
+  const countOf = (needle: string) => allChapters.split(needle).length - 1;
+
+  const queryMarkers = countOf('<p class="omitted">[Dataview query omitted]</p>');
+  if (queryMarkers !== EXPECTED_QUERY_MARKERS) {
+    problems.push(`expected ${EXPECTED_QUERY_MARKERS} Dataview query markers, found ${queryMarkers}`);
+  }
+  const jsMarkers = countOf('<p class="omitted">[DataviewJS omitted]</p>');
+  if (jsMarkers !== EXPECTED_JS_MARKERS) {
+    problems.push(`expected ${EXPECTED_JS_MARKERS} DataviewJS markers, found ${jsMarkers}`);
+  }
+
+  for (const [notePath, expected] of Object.entries(EXPECTED_DATAVIEW_WARNINGS_BY_NOTE)) {
+    const lines = exported.warnings.filter(
+      (w) => /Dataview(JS| query) omitted: /.test(w) && w.includes(`(referenced by ${notePath})`)
+    );
+    if (lines.length !== expected) {
+      problems.push(
+        `expected ${expected} Dataview warnings for ${notePath}, got ${lines.length}: ${JSON.stringify(lines)}`
+      );
+    }
+  }
+
+  for (const survivor of VERBATIM_SURVIVORS) {
+    const insideCode = new RegExp(
+      `<pre[^>]*>(?:(?!</pre>)[\\s\\S])*${survivor}(?:(?!</pre>)[\\s\\S])*</pre>`
+    );
+    if (!insideCode.test(allChapters)) problems.push(`${survivor} is not inside a code block in the book`);
+  }
+
+  for (const forbidden of ["dynamic content omitted", "Loading...", "<code>[Dataview", "`[Dataview"]) {
+    if (allChapters.includes(forbidden)) problems.push(`the book contains "${forbidden}"`);
+  }
+  return problems;
+}
+
+async function chapterDocuments(epubBytes: Buffer): Promise<string[]> {
+  const zip = await JSZip.loadAsync(epubBytes);
+  const names = Object.keys(zip.files)
+    .filter((name) => /^OEBPS\/text\/chapter_\d+\.xhtml$/.test(name))
+    .sort();
+  return Promise.all(names.map((name) => zip.file(name)!.async("string")));
 }
 
 main().catch((e) => {

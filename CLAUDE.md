@@ -37,6 +37,9 @@ npm run check-export-works   # CI gate; requires a build first. Loads the SHIPPE
                              # INKBOUND_KEEP_EPUB=<path> to copy the exported
                              # book out before its temp dir is deleted — that
                              # is how CI feeds it to the epubcheck gate.
+                             # INKBOUND_KEEP_FOOTNOTE_EPUB and
+                             # INKBOUND_KEEP_DATAVIEW_EPUB do the same for
+                             # the Footnotes and Dataview fixture books.
 npm run capture-real-render  # maintainer task, NOT a CI step: re-captures
                              # tests/fixtures/real-render/*.json from a live
                              # Obsidian (needs the `obsidian` CLI, an open
@@ -83,8 +86,9 @@ Default vault is `~/Documents/pan_vault`; override with `VAULT=/path/to/vault`.
 
 CI (`.github/workflows/ci.yml`) runs, in order: lint, format:check,
 `tsc --noEmit`, test:coverage, build, check-mobile-safe, check-review-safe,
-check-export-works (with `INKBOUND_KEEP_EPUB` set), epubcheck over both that
-kept book and `sample.epub`, version:check, release:check.
+check-export-works (with the `INKBOUND_KEEP_*_EPUB` variables set), epubcheck
+over the kept Book, Footnotes and Dataview books and `sample.epub`,
+version:check, release:check.
 `.github/workflows/release.yml`
 runs the same gate on any pushed tag, then publishes a GitHub release: the tag
 must be bare-numeric (e.g. `1.0.0`, no `v` prefix — that's what Obsidian's
@@ -115,7 +119,9 @@ src/
     facade (import it as `core/render`); behind it are `md`, `svg`, `embeds`,
     `dom`, `links`, `raster`, `toc`.
   - `content/` — embedded-content handling: `math`, `footnotes`,
-    `footnote-refs`, `bases`.
+    `footnote-refs`, `bases`, `dataview` (Dataview blocks: recognised in the
+    source and protected before rendering, then reported; see
+    docs/DEVELOPMENT.md "Dataview blocks (019)").
   - `book/` — what goes in the book and in what order: `book-plan`,
     `book-tree`, `collect`, `naming`, `metadata`, `backlinks`,
     `book-details` (description, publisher, date, series, subjects and the

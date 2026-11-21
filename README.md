@@ -202,6 +202,7 @@ go fix:
 - an embed that could not be resolved, or a Bases view that has no book
   equivalent,
 - an expression that would not typeset,
+- a Dataview query or DataviewJS block, which a book cannot run,
 - a chapter that failed to render at all,
 - and anything that applies to the whole book rather than one note, such as
   the Thai font not loading, listed separately at the end.
@@ -541,6 +542,14 @@ plugin against exactly this list, so it cannot drift from the code.
   running, so this needs the Bases core plugin enabled. A Base too big to
   render in full is exported as far as it goes, and the report says how many
   rows are missing.
+- **Dataview queries are not exported.** A ` ```dataview ` or ` ```dataviewjs ` block
+  becomes `[Dataview query omitted]` or `[DataviewJS omitted]` in the book, and the
+  export report names the note it is in. Inkbound never runs DataviewJS. Every way
+  of writing the block is recognised: backtick or tilde fences of any length, and
+  blocks inside a callout, a quotation or a list. A code block that only _shows_ a
+  query, such as a ` ````markdown ` example, stays in the book as code. So does
+  ` ```Dataview ` with a capital D, which Obsidian itself treats as an ordinary code
+  block. Inline queries (`` `= this.status` ``) are left as Obsidian renders them.
 - **A link to a heading or block opens the chapter, not the spot.** A link like
   `[[Note#Heading]]` or `[[Note#^block]]` becomes a working link to that note's
   chapter, but it opens the chapter at its start: the book does not link to the

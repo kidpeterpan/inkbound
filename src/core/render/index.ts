@@ -41,7 +41,6 @@
 
 export {
   stripFrontmatter,
-  stripDynamicBlocks,
   splitEmbedTarget,
   isImageEmbedSrc,
   findHeadingSection,

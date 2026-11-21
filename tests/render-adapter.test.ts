@@ -226,7 +226,7 @@ describe("renderUnitToChapter", () => {
     );
     expect(r.xhtmlBody).toContain("Hi");
     expect(r.xhtmlBody).not.toContain("tags:");
-    expect(r.xhtmlBody).toContain("dynamic content omitted");
+    expect(r.xhtmlBody).toContain("[Dataview query omitted]");
     expect(r.xhtmlBody).not.toContain("xmlns");
   });
 
@@ -1607,5 +1607,82 @@ describe("renderUnitToChapter: an embedded Base", () => {
       "application/xml"
     );
     expect(doc.querySelector("parsererror")?.textContent ?? "").toBe("");
+  });
+});
+
+describe("Dataview blocks (019)", () => {
+  const QUERY_MARKER = '<p class="omitted">[Dataview query omitted]</p>';
+  const JS_MARKER = '<p class="omitted">[DataviewJS omitted]</p>';
+  const queryWarning = (notePath: string) =>
+    `Dataview query omitted: Dataview results are not exported (referenced by ${notePath})`;
+  const jsWarning = (notePath: string) =>
+    `DataviewJS omitted: Inkbound never runs DataviewJS (referenced by ${notePath})`;
+
+  function render(app: never, markdown: string, sourcePath = "Host.md") {
+    return renderUnitToChapter(app, newComponent(), markdown, sourcePath, new Map(), "/vault", 0);
+  }
+
+  function appWithInner(innerMarkdown: string) {
+    const inner = new TFile("/vault", "Inner.md");
+    return appWithNotes({ "Inner.md": innerMarkdown }, (linkpath) => (linkpath === "Inner" ? inner : null));
+  }
+
+  it("turns a chapter's dataview block into a marker and one warning naming the chapter", async () => {
+    const r = await render(appWith(null), "# Hi\n\n```dataview\nLIST\n```\n", "Book/Ch.md");
+    expect(r.xhtmlBody).toContain(QUERY_MARKER);
+    expect(r.xhtmlBody).not.toContain("dynamic content omitted");
+    expect(r.warnings).toEqual([queryWarning("Book/Ch.md")]);
+  });
+
+  it("turns a dataviewjs block into its own marker and warning", async () => {
+    const r = await render(appWith(null), '```dataviewjs\ndv.paragraph("x")\n```\n');
+    expect(r.xhtmlBody).toContain(JS_MARKER);
+    expect(r.xhtmlBody).not.toContain("dv.paragraph");
+    expect(r.warnings).toEqual([jsWarning("Host.md")]);
+  });
+
+  it("attributes a block inside a whole-note embed to the embedded note", async () => {
+    const app = appWithInner("Inner text.\n\n```dataview\nLIST\n```\n");
+    const r = await render(app, "![[Inner]]\n");
+    expect(r.xhtmlBody).toContain("Inner text.");
+    expect(r.xhtmlBody).toContain(QUERY_MARKER);
+    expect(r.warnings).toEqual([queryWarning("Inner.md")]);
+  });
+
+  it("reports only the blocks inside a heading-scoped embed's slice", async () => {
+    const app = appWithInner(
+      "# Inner\n\n```dataview\nOUTSIDE\n```\n\n## Section\n\nSection text.\n\n```dataview\nINSIDE\n```\n"
+    );
+    const r = await render(app, "![[Inner#Section]]\n");
+    expect(r.xhtmlBody).toContain("Section text.");
+    expect(r.xhtmlBody.match(/\[Dataview query omitted\]/g)).toHaveLength(1);
+    expect(r.warnings).toEqual([queryWarning("Inner.md")]);
+  });
+
+  it("lists the chapter's own blocks first, then each embed's, one warning per block", async () => {
+    const app = appWithInner("```dataview\nC\n```\n");
+    const r = await render(app, "```dataview\nA\n```\n\n![[Inner]]\n\n```dataviewjs\nB\n```\n");
+    expect(r.warnings).toEqual([queryWarning("Host.md"), jsWarning("Host.md"), queryWarning("Inner.md")]);
+    expect(r.xhtmlBody.match(/\[Dataview query omitted\]/g)).toHaveLength(2);
+    expect(r.xhtmlBody.match(/\[DataviewJS omitted\]/g)).toHaveLength(1);
+  });
+
+  it("never reads math or footnotes out of a query", async () => {
+    const r = await render(appWith(null), '```dataview\nTABLE "$x$" AS cost [^1]\n```\n');
+    expect(r.images).toHaveLength(0);
+    expect(r.warnings).toEqual([queryWarning("Host.md")]);
+  });
+
+  it("drops a failed embed's blocks with it, keeping the chapter's own", async () => {
+    const inner = new TFile("/vault", "Inner.md");
+    const app = appWithNotes({ "Inner.md": "```dataview\nINNER\n```\n\n[[Boom]]\n" }, (linkpath) => {
+      if (linkpath === "Boom") throw new Error("boom");
+      return linkpath === "Inner" ? inner : null;
+    });
+    const r = await render(app, "```dataview\nHOST\n```\n\n![[Inner]]\n");
+    expect(r.xhtmlBody.match(/\[Dataview query omitted\]/g)).toHaveLength(1);
+    expect(r.warnings).toContain(queryWarning("Host.md"));
+    expect(r.warnings).toContain("embed could not be rendered: Inner — boom (referenced by Host.md)");
+    expect(r.warnings).not.toContain(queryWarning("Inner.md"));
   });
 });

@@ -31,6 +31,7 @@ const REAL_RENDER_FIXTURE = path.join(REPO_ROOT, "tests", "fixtures", "real-rend
 // The keys name the fixture folder each book was exported from.
 const BOOK_KEY = "smoke-vault/Book";
 const FOOTNOTE_KEY = "smoke-vault/Footnotes";
+const DATAVIEW_KEY = "smoke-vault/Dataview";
 
 interface Baseline {
   books: Record<string, Fingerprints>;
@@ -57,13 +58,15 @@ function exportAndFingerprint(): Promise<Record<string, Fingerprints>> {
   const outDir = mkdtempSync(path.join(os.tmpdir(), "inkbound-review-pack-"));
   const bookPath = path.join(outDir, "book.epub");
   const footnotePath = path.join(outDir, "footnotes.epub");
+  const dataviewPath = path.join(outDir, "dataview.epub");
   try {
     console.log("review-pack: exporting the fixture books with the shipped bundle...");
     run("node", ["node_modules/.bin/tsx", "scripts/check-export-works.ts"], {
       INKBOUND_KEEP_EPUB: bookPath,
       INKBOUND_KEEP_FOOTNOTE_EPUB: footnotePath,
+      INKBOUND_KEEP_DATAVIEW_EPUB: dataviewPath,
     });
-    for (const p of [bookPath, footnotePath]) {
+    for (const p of [bookPath, footnotePath, dataviewPath]) {
       if (!existsSync(p)) {
         console.error(`review-pack: FAIL — the export gate did not produce ${p}.`);
         process.exit(1);
@@ -72,7 +75,12 @@ function exportAndFingerprint(): Promise<Record<string, Fingerprints>> {
     return Promise.all([
       epubEntryFingerprints(readFileSync(bookPath)),
       epubEntryFingerprints(readFileSync(footnotePath)),
-    ]).then(([book, footnotes]) => ({ [BOOK_KEY]: book, [FOOTNOTE_KEY]: footnotes }));
+      epubEntryFingerprints(readFileSync(dataviewPath)),
+    ]).then(([book, footnotes, dataview]) => ({
+      [BOOK_KEY]: book,
+      [FOOTNOTE_KEY]: footnotes,
+      [DATAVIEW_KEY]: dataview,
+    }));
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }

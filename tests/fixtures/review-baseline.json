@@ -31,6 +31,16 @@
       "OEBPS/text/chapter_007.xhtml": "56a4a8edc28fec32a90ddec3c3d6fab31ddb4bf34eab61ffaf56d9eac7d29074",
       "OEBPS/text/chapter_008.xhtml": "31f700ec3a0c5fed992ae5712090f65012cc3b1844f625c447185c7a6caa0d66",
       "mimetype": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b"
+    },
+    "smoke-vault/Dataview": {
+      "META-INF/container.xml": "bcc0d597a725325618e4552c38a2673a515a3c204f8834ad836930c35c1b6a06",
+      "OEBPS/nav.xhtml": "fc07f9daf3c2128bdc1eeecb6c3b31b01b8cdf1f3c23206e3ec5e633f603a04f",
+      "OEBPS/package.opf": "e3ebdf66b643ee5322e7b18bb288678c732dab7304a1d8dc5bf992b25cca7462",
+      "OEBPS/style/epub.css": "6ecd053c0cecc73446b537a3a1ea041b78d7ba73147e3be641b99cad2335289d",
+      "OEBPS/text/chapter_001.xhtml": "6e49f4cf106583c280e340a20844d6cd9dd79bc6fad28a8c036000826d7694ac",
+      "OEBPS/text/chapter_002.xhtml": "f804d6edc7d87739b0496f9c22f76c05befa70d0a67ddc4e37cfac93a376f86a",
+      "OEBPS/text/chapter_003.xhtml": "cdd5af002db7e9330f27fc7ebbb3ef85edeefb5443407285c81cce897fda8055",
+      "mimetype": "e468e350d1143eb648f60c7b0bd6031101ec0544a361ca74ecef256ac901f48b"
     }
   }
 }
