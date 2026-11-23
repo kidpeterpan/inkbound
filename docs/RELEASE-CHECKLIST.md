@@ -24,7 +24,7 @@ what each one can and cannot see):
 
 - [ ] `npm run lint && npm run format:check && npx tsc --noEmit`
 - [ ] `npm run test:coverage`
-- [ ] `npm run build && npm run check-mobile-safe && npm run check-review-safe`
+- [ ] `npm run build && npm run check-mobile-safe && npm run check-review-safe && npm run check-mathjax-global`
 - [ ] `npm run check-export-works` — the shipped bundle exports a real book
 - [ ] `npm run epubcheck` — that book is valid EPUB 3
 

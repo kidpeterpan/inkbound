@@ -28,6 +28,15 @@ npm run check-mobile-safe    # CI gate; requires a build first. Fails if main.js
                              # require, or a Node global like Buffer at module
                              # scope). See docs/DEVELOPMENT.md "The mobile load
                              # gate" — this is not a lint, it loads the bundle.
+npm run check-mathjax-global # CI gate; requires a build first. Loads the SHIPPED
+                             # main.js with a foreign MathJax global already on
+                             # the page (the state a plugin like Numerals leaves
+                             # behind) — fails if the plugin would die at load
+                             # because of it (issue #14's
+                             # "MathJax.loader.preLoad is not a function"; the
+                             # fix is a build-time strip in esbuild.config.mjs's
+                             # mathjaxReviewHygiene). See docs/DEVELOPMENT.md
+                             # "The MathJax-coexistence load gate".
 npm run check-export-works   # CI gate; requires a build first. Loads the SHIPPED
                              # main.js and runs a full export against
                              # tests/fixtures/smoke-vault; fails if the book is
@@ -86,7 +95,8 @@ Default vault is `~/Documents/pan_vault`; override with `VAULT=/path/to/vault`.
 
 CI (`.github/workflows/ci.yml`) runs, in order: lint, format:check,
 `tsc --noEmit`, test:coverage, build, check-mobile-safe, check-review-safe,
-check-export-works (with the `INKBOUND_KEEP_*_EPUB` variables set), epubcheck
+check-mathjax-global, check-export-works (with the `INKBOUND_KEEP_*_EPUB`
+variables set), epubcheck
 over the kept Book, Footnotes and Dataview books and `sample.epub`,
 version:check, release:check.
 `.github/workflows/release.yml`

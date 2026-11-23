@@ -24,6 +24,13 @@ const MATHJAX_VERSION = JSON.parse(
   readFileSync(createRequire(import.meta.url).resolve("mathjax-full/package.json"), "utf8")
 ).version;
 
+// The load-time hint mathjax-full's input/tex/AllPackages.js gives to a MathJax
+// loader-component on the page (`MathJax.loader.preLoad('[tex]/action', ...)`).
+// Stripped from the bundle — see rewrite 3 in the plugin below (issue #14).
+// Matched through the closing brace on its own line: the strings inside the
+// call contain no braces, so the first `\n}` after the guard is the block's.
+const MATHJAX_GLOBAL_HINT = /if \(typeof MathJax !== ['"]undefined['"] && MathJax\.loader\) \{[\s\S]*?\n\}/;
+
 // Obsidian's plugin review greps the SHIPPED BUNDLE TEXT for dynamic code
 // execution (`eval(`, `new Function`), which flagged two things neither of
 // which is real dynamic execution:
@@ -55,6 +62,38 @@ const MATHJAX_VERSION = JSON.parse(
 // invariant about keeping both configs in sync is about shims that CHANGE
 // behavior, which this does not.
 //
+// 3. (Not a review-scanner item — a correctness fix — but it must live in this
+//    same plugin, because esbuild lets only the FIRST onLoad that returns
+//    contents win for a path, so one plugin must own every rewrite to
+//    mathjax-full's files.) AllPackages.js — the module math.ts imports for
+//    `packages: AllPackages` — ends with a hint for MathJax's separate
+//    loader-component workflow, which Inkbound never uses:
+//
+//      if (typeof MathJax !== 'undefined' && MathJax.loader) {
+//          MathJax.loader.preLoad('[tex]/action', ... 30 more ...);
+//      }
+//
+//    Inside Obsidian the page may already have a `MathJax` global that
+//    another plugin left there (Numerals calls Obsidian's loadMathJax() in
+//    its onload). The guard passes on ANY MathJax with a truthy `.loader`,
+//    and that global has no `preLoad` function — so enabling Inkbound after
+//    such a plugin throws `MathJax.loader.preLoad is not a function` at
+//    plugin load, and the whole plugin fails to exist (issue #14: the
+//    module evaluates when Obsidian requires main.js, so the plugin is
+//    dead, not just its math). Even against a real v3 loader the call would
+//    be wrong for Inkbound: it would mark thirty-odd TeX packages as
+//    already loaded inside ANOTHER plugin's MathJax, breaking that plugin
+//    instead. The bundled MathJax must never consult the page's global, so
+//    the whole block is stripped; the requires above it (which register the
+//    TeX packages) and the AllPackages list below it are untouched. Like the
+//    version.js stub above, vitest.config.ts needs no mirror: with no
+//    MathJax global under Node the original block is inert there, so the
+//    environments agree everywhere except the real-browser condition that
+//    scripts/check-mathjax-global.mjs simulates against the built bundle.
+//    And a mathjax-full update cannot silently reintroduce this: the
+//    rewrite below ERRORS the build if the block moves or changes shape,
+//    rather than quietly not stripping it.
+//
 // The rename has a second stage that can ONLY happen on the final bundle:
 // esbuild derives consumer-side identifiers (e.g. `FunctionList_js_1`) from
 // the module's FILE NAME, and `./util/FunctionList.js` must keep its real
@@ -74,9 +113,29 @@ const mathjaxReviewHygiene = {
           `exports.VERSION = ${JSON.stringify(MATHJAX_VERSION)};\n`;
         return { contents, loader: "js" };
       }
-      const contents = readFileSync(args.path, "utf8");
+      let contents = readFileSync(args.path, "utf8");
+      let rewritten = false;
+      if (/[\/\\]input[\/\\]tex[\/\\]AllPackages\.js$/.test(args.path)) {
+        const stripped = contents.replace(MATHJAX_GLOBAL_HINT, "");
+        if (stripped === contents) {
+          return {
+            errors: [
+              {
+                text:
+                  "mathjax-full's input/tex/AllPackages.js no longer contains the " +
+                  "MathJax.loader.preLoad block this build strips (issue #14). If an " +
+                  "upstream update removed it, delete this rewrite; if it moved or " +
+                  "changed shape, update MATHJAX_GLOBAL_HINT.",
+              },
+            ],
+          };
+        }
+        contents = stripped;
+        rewritten = true;
+      }
       const renamed = contents.replace(/\bFunctionList\b(?!\.js)/g, "MathJaxFnList");
-      return renamed === contents ? undefined : { contents: renamed, loader: "js" };
+      if (renamed === contents && !rewritten) return undefined;
+      return { contents: renamed, loader: "js" };
     });
     build.onEnd(async (result) => {
       const { writeFile } = await import("node:fs/promises");

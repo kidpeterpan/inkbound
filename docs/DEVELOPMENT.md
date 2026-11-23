@@ -42,6 +42,7 @@ Then, in Obsidian: **Settings → Community plugins** and enable **Inkbound**.
 | `npm run epubcheck`                | Builds the sample EPUB (`scripts/build-sample.ts`) and validates it against the EPUB 3 spec; takes extra `.epub` paths (`-- book.epub`). Skips with a hint when `epubcheck` is not installed locally, but is a hard failure in CI — see "The EPUB 3 spec gate" below.                          |
 | `npm run local-export`             | Runs the real export orchestrator against a real vault on disk, outside Obsidian — see "The CLI harness" below.                                                                                                                                                                                |
 | `npm run check-mobile-safe`        | Fails if the built `main.js` would not load on Obsidian mobile — see "The mobile load gate" below. Requires a build first; runs after `build` in CI.                                                                                                                                           |
+| `npm run check-mathjax-global`     | Fails if the built `main.js` would not load because another plugin (e.g. Numerals) already put a MathJax global on the page (issue #14) — see "The MathJax-coexistence load gate" below. Requires a build first; runs after `build` in CI.                                                       |
 | `npm run check-export-works`       | Runs a full export through the built `main.js` against a fixture vault; fails if the book is broken — see "The shipped-bundle export gate" below.                                                                                                                                              |
 | `npm run release:check`            | Fails if tagging now would not publish a release: the two version files disagree, or `CHANGELOG.md` has no non-empty `## <version>` section (the workflow reads that section as the release description, and only finds out after the tag is public). Runs in CI — see `RELEASE-CHECKLIST.md`. |
 | `npm run review-pack`              | Exports the fixture books through the shipped bundle and reports what changed since the recorded baseline in `tests/fixtures/review-baseline.json`; `-- --update` records a new baseline once the manual device pass is done — see `RELEASE-CHECKLIST.md`.                                     |
@@ -85,11 +86,16 @@ The gates that actually touch real artifacts, in increasing order of realism:
    mobile at all: no node-builtin `require()` executes at load, and the bundle
    evaluates without throwing in a runtime that has a DOM but no `Buffer`, no
    `process`, and no `require`. See "The mobile load gate" below.
-4. **`npm run epubcheck`** — validates finished books against the EPUB 3 spec
+4. **`npm run check-mathjax-global`** — loads the shipped bundle again, this
+   time with a foreign `MathJax` global already on the page (the state
+   another plugin such as Numerals leaves behind), and fails if the plugin
+   would die at load because of it. See "The MathJax-coexistence load gate"
+   below.
+5. **`npm run epubcheck`** — validates finished books against the EPUB 3 spec
    with the W3C's validator: both the hand-built sample and, in CI, the book
    the shipped bundle just exported in rung 2. The only gate whose pass/fail
    criteria come from outside this repo. See "The EPUB 3 spec gate" below.
-5. **Manual testing inside Obsidian, on the actual Boox device — and, since
+6. **Manual testing inside Obsidian, on the actual Boox device — and, since
    008-mobile-support, on a real iPhone/iPad and a real Android device** — the only
    gate that exercises the real `MarkdownRenderer`, the real DOM Obsidian
    produces, and the real BooxDrop HTTP API.
@@ -809,6 +815,40 @@ found this way, with no `require()` anywhere in it for a scan to notice.
 
 It is not a substitute for a real device. It proves the bundle _evaluates_; it
 says nothing about whether Obsidian mobile then behaves as expected.
+
+## The MathJax-coexistence load gate (`scripts/check-mathjax-global.mjs`)
+
+Issue #14: enabling Inkbound while another plugin had already loaded MathJax
+(Numerals, for one, calls Obsidian's `loadMathJax()` in its own onload) killed
+the whole plugin — `MathJax.loader.preLoad is not a function`. The cause was
+in the bundle, not in `src/`: mathjax-full's `AllPackages.js` ends with a
+top-level hint for MathJax's separate loader-component workflow, guarded only
+by `typeof MathJax !== 'undefined' && MathJax.loader`. That guard passes on
+ANY MathJax global with a truthy `.loader` — including the one another plugin
+left on the page, which has no `preLoad` function — so the call threw while
+Obsidian was still requiring `main.js`, before a single line of plugin code
+could run. This is the same failure class as the mobile load gate above: dead
+at load, with nothing wrong visible in `src/`, and order-dependent (enable
+Inkbound first and no MathJax global exists yet, so the guard short-circuits).
+
+The fix lives in `esbuild.config.mjs`'s `mathjaxReviewHygiene` plugin, which
+strips that block from the bundled `AllPackages.js`. Inkbound bundles its own
+MathJax and never uses the loader-component workflow, so the hint is pure dead
+weight — and calling `preLoad` on a foreign MathJax that _does_ have one would
+mark thirty-odd TeX packages as already loaded inside that other plugin's
+MathJax, breaking the other plugin. The bundled MathJax must not consult the
+page's global in either direction. The rewrite ERRORS the build if a
+mathjax-full update moves or reshapes the block, so the bug cannot silently
+return with a version bump.
+
+The gate proves the shipped artifact, in both directions: it loads
+`main.js` in the same jsdom harness as the mobile gate, with a foreign
+MathJax global pre-installed — once shaped like the reported crash (truthy
+`.loader`, no `preLoad`), once behind a recording Proxy that counts every
+access to the global and must record zero — and then scans the bundle text
+for the call as a fast second
+layer. It, too, proves only that the bundle evaluates; math rendering itself
+is covered by the vitest suite and `check-export-works`.
 
 ## The shipped-bundle export gate (`scripts/check-export-works.ts`)
 

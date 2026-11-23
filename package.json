@@ -12,6 +12,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs production",
     "check-mobile-safe": "node scripts/check-mobile-safe.mjs",
+    "check-mathjax-global": "node scripts/check-mathjax-global.mjs",
     "check-review-safe": "tsx scripts/check-review-safe.ts",
     "check-export-works": "tsx scripts/check-export-works.ts",
     "capture-real-render": "tsx scripts/capture-real-render.ts",

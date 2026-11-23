@@ -60,6 +60,10 @@ jobs:
       # the shipped bundle, so a release containing flagged text would be
       # re-flagged the moment it shipped.
       - run: npm run check-review-safe
+      # Must follow build — same reason as in ci.yml: a release must not ship
+      # a bundle that dies at load when another plugin's MathJax is already
+      # on the page (issue #14).
+      - run: npm run check-mathjax-global
       # Must also follow `build` — loads the SHIPPED main.js and runs a full
       # export through it against tests/fixtures/smoke-vault. The only gate that
       # executes the artifact's export pipeline rather than src/ or a rebuild.

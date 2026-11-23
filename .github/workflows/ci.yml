@@ -35,6 +35,11 @@ jobs:
       # (eval/new Function), including false positives that ship inside
       # bundled vendor code. See scripts/check-review-safe.mjs.
       - run: npm run check-review-safe
+      # Must also follow `build` — loads the SHIPPED main.js with a foreign
+      # MathJax global already on the page, the state another plugin (e.g.
+      # Numerals, via Obsidian's loadMathJax) leaves behind. Guards the
+      # issue #14 load-time crash; see scripts/check-mathjax-global.mjs.
+      - run: npm run check-mathjax-global
       # Must also follow `build` — loads the SHIPPED main.js and runs a full
       # export through it against tests/fixtures/smoke-vault. The only gate that
       # executes the artifact's export pipeline rather than src/ or a rebuild.
