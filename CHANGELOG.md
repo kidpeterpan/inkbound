@@ -3,6 +3,22 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.16.2
+
+Inkbound now loads no matter which other plugins got there first.
+
+- **Enabling Inkbound after a MathJax-using plugin no longer fails.** If
+  another plugin had already loaded MathJax (Numerals does this, through
+  Obsidian's own math loading), enabling Inkbound died at startup with
+  `MathJax.loader.preLoad is not a function`, before the plugin could load
+  at all. Inkbound bundles its own MathJax for turning math into book
+  images, but one leftover piece of it still looked at the page's MathJax —
+  an object that only exists when another plugin put it there. That piece
+  is gone, and with it the old workaround of enabling Inkbound before
+  other plugins.
+- **No change to any book.** Chapters, math images and everything else you
+  read are untouched — this was a load-time fix only.
+
 ## 1.16.1
 
 A fix to how the book file is put together, with no change to what any book contains.
