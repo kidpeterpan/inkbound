@@ -19,7 +19,35 @@ export function slugify(title: string): string {
     .replace(/[/\\:*?"<>|#^[\]]/g, "")
     .trim()
     .replace(/\s+/g, "_");
-  return cleaned.length > 0 ? cleaned : "export";
+  const fitted = truncateToBytes(cleaned, MAX_SLUG_BYTES).replace(/_+$/, "");
+  if (fitted.length === 0) return "export";
+  return WINDOWS_DEVICE_NAME.test(fitted) ? `_${fitted}` : fitted;
+}
+
+// The slug plus ".epub" must fit the 255-BYTE name limit of ext4/f2fs (Linux and
+// Android; macOS and NTFS count characters, which is looser). Thai is three
+// bytes a character, so a title of ~85 Thai characters used to be enough to make
+// the write fail. 200 leaves room for ".epub" and for a suffix a caller adds to
+// keep two books apart.
+const MAX_SLUG_BYTES = 200;
+
+// Windows reserves these device names with ANY extension ("con.epub", and also
+// "con.txt.epub"), so a book titled "Con" could not be written there at all.
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/;
+
+// Cuts between code points, never inside a surrogate pair, so the result is always
+// valid text. (It can separate a Thai base letter from its combining mark; the
+// name stays legal, and a title that long is already being shortened.)
+function truncateToBytes(text: string, maxBytes: number): string {
+  const encoder = new TextEncoder();
+  let used = 0;
+  let kept = "";
+  for (const character of text) {
+    used += encoder.encode(character).length;
+    if (used > maxBytes) break;
+    kept += character;
+  }
+  return kept;
 }
 
 // Chapter-title precedence (007-chapter-titles, resolved from the original

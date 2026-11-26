@@ -13,6 +13,16 @@ describe("normalizeLanguage", () => {
     expect(normalizeLanguage("EN-GB", "th")).toBe("en-gb");
     expect(normalizeLanguage("tha", "en")).toBe("tha");
   });
+  it("reads the POSIX spelling en_US as the tag en-US instead of dropping it for the default", () => {
+    expect(normalizeLanguage("en_US", "th")).toBe("en-us");
+    expect(normalizeLanguage("pt_BR", "th")).toBe("pt-br");
+    expect(normalizeLanguage("zh_Hans_CN", "th")).toBe("zh-hans-cn");
+  });
+  it("still falls back when underscores do not make a tag", () => {
+    expect(normalizeLanguage("_en", "th")).toBe("th");
+    expect(normalizeLanguage("en__", "th")).toBe("th");
+    expect(normalizeLanguage("english_us", "th")).toBe("th");
+  });
   it("maps known language names case-insensitively", () => {
     expect(normalizeLanguage("thai", "en")).toBe("th");
     expect(normalizeLanguage("ENGLISH", "th")).toBe("en");

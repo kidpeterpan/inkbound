@@ -393,8 +393,8 @@ note for folder exports). Recognised fields:
   strings is joined with `", "`; anything else falls back to the
   **Fallback author** setting, or `"Unknown"`.
 - **`language`** — sets `dc:language`. A BCP-47 tag (e.g. `en`, `en-GB`,
-  `th`) is used as-is (lowercased). Otherwise, one of these names is
-  matched, case-insensitively:
+  `th`) is used as-is (lowercased); the POSIX spelling `en_US` is read as `en-us`.
+  Otherwise, one of these names is matched, case-insensitively:
 
   | Frontmatter value | `dc:language` |
   | ----------------- | ------------- |

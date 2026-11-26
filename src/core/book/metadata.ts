@@ -45,7 +45,10 @@ export function firstNonEmptyString(raw: unknown): string | null {
 export function normalizeLanguage(raw: unknown, fallback: string): string {
   const value = typeof raw === "string" ? raw.trim() : "";
   if (value === "") return fallback;
-  if (BCP47_SHAPE.test(value)) return value.toLowerCase();
+  // `en_US` is the POSIX spelling of the tag `en-US`, and the one people reach for
+  // by habit; the separator is the only difference, so it is read, not guessed at.
+  const tag = value.replace(/_/g, "-");
+  if (BCP47_SHAPE.test(tag)) return tag.toLowerCase();
   return LANGUAGE_NAMES[value.toLowerCase()] ?? fallback;
 }
 

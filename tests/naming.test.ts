@@ -14,6 +14,47 @@ describe("slugify", () => {
   it("falls back to 'export' when empty", () => {
     expect(slugify("???")).toBe("export");
   });
+
+  describe("file name length", () => {
+    const bytesWithExtension = (slug: string) => new TextEncoder().encode(`${slug}.epub`).length;
+
+    it("keeps a long ASCII title under the 255-byte file name limit", () => {
+      expect(bytesWithExtension(slugify("a".repeat(300)))).toBeLessThanOrEqual(255);
+    });
+    it("counts bytes, not characters: Thai is three bytes a character", () => {
+      const slug = slugify("ก".repeat(100));
+      expect(bytesWithExtension(slug)).toBeLessThanOrEqual(255);
+      expect(slug.length).toBeGreaterThan(50); // truncated, not collapsed
+    });
+    it("leaves a title that already fits untouched", () => {
+      expect(slugify("ก".repeat(60))).toBe("ก".repeat(60));
+    });
+    it("never cuts a surrogate pair in half", () => {
+      const slug = slugify("😀".repeat(80)); // 4 bytes each
+      expect(slug).toBe("😀".repeat(50));
+      expect(() => encodeURIComponent(slug)).not.toThrow(); // throws on a lone surrogate
+    });
+    it("does not leave a dangling underscore where the cut fell on a word break", () => {
+      const slug = slugify(`${"a".repeat(199)} tail`);
+      expect(slug).toBe("a".repeat(199));
+    });
+    it("is stable: slugifying a slug returns it", () => {
+      const once = slugify("ก".repeat(100));
+      expect(slugify(once)).toBe(once);
+    });
+  });
+
+  describe("Windows device names", () => {
+    it.each(["CON", "Aux", "nul", "PRN", "COM1", "lpt9", "con.txt"])(
+      "prefixes %s so the file can be created",
+      (title) => {
+        expect(slugify(title)).toBe(`_${title.toLowerCase()}`);
+      }
+    );
+    it.each(["console", "auxiliary", "com10", "com0", "my con", "nulled"])("leaves %s alone", (title) => {
+      expect(slugify(title)).toBe(title.toLowerCase().replace(/ /g, "_"));
+    });
+  });
 });
 
 describe("deriveChapterTitle (default rule: basename)", () => {

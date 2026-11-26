@@ -127,3 +127,43 @@ describe("readImageHeader: things that are not a PNG or JPEG", () => {
     expect(readImageHeader(Uint8Array.of(0xff))).toBeNull();
   });
 });
+
+describe("readImageHeader: a damaged file is null, never an exception", () => {
+  // The module's contract ("Malformed input returns null and never throws") is
+  // what lets the optimizer turn a damaged file into a warning. These walk the
+  // whole input space the hand-written cases above only sample: every prefix of
+  // a valid file, and seeded random corruption of one.
+  const valid = {
+    png: pngBytes({ width: 640, height: 480, animation: "before-data", padBytes: 40 }),
+    jpeg: jpegBytes({ width: 640, height: 480, withApp1: true, withHuffmanTable: true }),
+  };
+
+  it.each(Object.entries(valid))("survives every truncation of a %s", (_name, bytes) => {
+    for (let length = 0; length <= bytes.length; length++) {
+      expect(() => readImageHeader(bytes.subarray(0, length))).not.toThrow();
+    }
+  });
+
+  it.each(Object.entries(valid))("survives seeded random byte corruption of a %s", (_name, bytes) => {
+    let seed = 0x2f6e2b1;
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+    for (let round = 0; round < 2000; round++) {
+      const damaged = bytes.slice();
+      for (let hits = 1 + (next() % 4); hits > 0; hits--) damaged[next() % damaged.length] = next() & 0xff;
+      expect(() => readImageHeader(damaged)).not.toThrow();
+    }
+  });
+
+  it("reads a view into a larger buffer by the view's own offsets", () => {
+    const png = valid.png;
+    const padded = new Uint8Array(png.length + 10);
+    padded.set(png, 7);
+    expect(readImageHeader(padded.subarray(7, 7 + png.length))).toEqual(readImageHeader(png));
+  });
+
+  it("returns null for a frame header whose segment is too short to hold a size", () => {
+    // FFD8, SOF0, length 4 (no precision/height/width), padding so the segment fits.
+    const bytes = Uint8Array.of(0xff, 0xd8, 0xff, 0xc0, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00);
+    expect(readImageHeader(bytes)).toBeNull();
+  });
+});
