@@ -3,6 +3,21 @@
 The release workflow reads the section matching the pushed tag and uses it as
 the GitHub release description, so keep the heading format `## <version>`.
 
+## 1.16.3
+
+Three small fixes to how a book is named and labelled, found by testing. No change to what any chapter contains.
+
+- **A book with a very long title can now be saved.** The file name is cut to fit the 255-byte limit
+  that Linux and Android put on a name, so a long title no longer makes the export fail. Thai takes
+  three bytes a letter, so about 85 Thai characters was enough to hit it. A title that already fits
+  is named exactly as before.
+- **A book titled after a reserved Windows name can now be saved there.** `Con`, `Aux`, `Nul`, `Prn`,
+  `COM1`–`COM9` and `LPT1`–`LPT9` cannot be file names on Windows, with any extension. Such a book is
+  now saved with an underscore in front (`_con.epub`). Other names, `Console` for one, are unchanged.
+- **`language: en_US` is now understood.** The underscore spelling (`en_US`, `pt_BR`) used to be
+  ignored without a word, which gave the book the language from Settings instead, `th` by default.
+  It is now read as the tag it spells (`en-us`, `pt-br`).
+
 ## 1.16.2
 
 Inkbound now loads no matter which other plugins got there first.
